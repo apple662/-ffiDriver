@@ -10,6 +10,10 @@ python.org). Die Fahrplandaten liegen offline in ``data/berlin_lines.json``.
 
 import json
 import math
+import os
+import shutil
+import signal
+import subprocess
 import sys
 import time
 import tkinter as tk
@@ -18,6 +22,7 @@ from pathlib import Path
 
 BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 DATA_FILE = BASE / "data" / "berlin_lines.json"
+SOUND_DIR = BASE / "sounds"
 
 BG = "#FFF8E7"
 CARD = "#FFFFFF"
@@ -180,6 +185,54 @@ def wrap_text(font, text, width, max_lines=3):
     if len(lines) > max_lines:
         lines = lines[:max_lines - 1] + [fit_text(font, " ".join(lines[max_lines - 1:]), width)]
     return [fit_text(font, line, width) for line in lines]
+
+
+# --------------------------------------------------------------------------
+# Töne
+# --------------------------------------------------------------------------
+
+class SoundPlayer:
+    """Spielt WAV-Dateien ohne Zusatzpakete ab (afplay / winsound / paplay / aplay)."""
+
+    def __init__(self):
+        self.proc = None
+        self.command = None
+        if sys.platform == "darwin":
+            self.command = ["afplay"]
+        elif sys.platform != "win32":
+            for cmd in (["paplay"], ["aplay", "-q"], ["pw-play"]):
+                if shutil.which(cmd[0]):
+                    self.command = cmd
+                    break
+
+    def play(self, path, speech=None):
+        """Spielt ``path``; auf dem Mac wird ``speech`` vorher gesprochen (falls deutsche Stimme vorhanden)."""
+        self.stop()
+        if not path.exists():
+            return
+        if sys.platform == "win32":
+            import winsound
+            winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_ASYNC)
+            return
+        if not self.command:
+            return
+        args = self.command + [str(path)]
+        if speech and sys.platform == "darwin" and shutil.which("say"):
+            # erst die Ansage, dann der Warnton – als eigene Prozessgruppe, damit "stop" beides beendet
+            args = ["/bin/sh", "-c", 'say -v Anna "$1" 2>/dev/null; exec afplay "$0"', str(path), speech]
+        try:
+            self.proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                         start_new_session=True)
+        except OSError:
+            self.proc = None
+
+    def stop(self):
+        if self.proc and self.proc.poll() is None:
+            try:
+                os.killpg(self.proc.pid, signal.SIGTERM)
+            except OSError:
+                pass
+        self.proc = None
 
 
 # --------------------------------------------------------------------------
@@ -589,15 +642,21 @@ class RideScreen(Screen):
         by2 = h - 50 * s
         btn_y = by2 - bsize - 76 * s
         cx = (px1 + px2) / 2
-        for dx, sym, cb, enabled in ((-bsize * 0.65, "▲", self.prev, self.index > 0),
-                                     (bsize * 0.65, "▼", self.next, not last or self.ring)):
-            bx1, by1 = cx + dx - bsize / 2, btn_y
+        buttons = [("▲", self.prev, self.index > 0), ("▼", self.next, not last or self.ring)]
+        if self.kind != "bus":
+            buttons.append(("Türen", self.doors, True))
+        bgap = 18 * s
+        bx1 = cx - (len(buttons) * bsize + (len(buttons) - 1) * bgap) / 2
+        for sym, cb, enabled in buttons:
+            by1 = btn_y
             round_rect(c, bx1, by1, bx1 + bsize, by1 + bsize, 24 * s,
-                       fill="#F7D117" if enabled else "#3A4A5C", outline="")
-            c.create_text(bx1 + bsize / 2, by1 + bsize / 2, text=sym, font=app.font(36, "bold"),
-                          fill=PANEL if enabled else "#5A6A7C")
+                       fill=("#F7D117" if sym != "Türen" else "#E8483B") if enabled else "#3A4A5C", outline="")
+            font = app.font(36, "bold") if sym != "Türen" else app.font(19, "bold")
+            c.create_text(bx1 + bsize / 2, by1 + bsize / 2, text=sym, font=font,
+                          fill=(PANEL if sym != "Türen" else "white") if enabled else "#5A6A7C")
             if enabled:
                 app.hit(bx1, by1, bx1 + bsize, by1 + bsize, cb)
+            bx1 += bsize + bgap
         rbw, rbh = px2 - px1 - 48 * s, 56 * s
         rby = by2 - rbh
         round_rect(c, ix, rby, ix + rbw, rby + rbh, 28 * s, fill="white", outline="")
@@ -613,7 +672,8 @@ class RideScreen(Screen):
         if box_y2 - box_y1 >= 60 * s:
             round_rect(c, ix, box_y1, ix + pw, box_y2, 14 * s, fill="#11181F", outline="#3A4A5C", width=2 * s)
             mf = app.font(24, "bold")
-            lines = wrap_text(mf, text, pw - 24 * s, 2) if text else ["Fahre mit ↑ und ↓"]
+            hint = "Fahre mit ↑ und ↓" if self.kind == "bus" else "Fahre mit ↑ und ↓ · T = Türen"
+            lines = wrap_text(mf, text, pw - 24 * s, 2) if text else [hint]
             lh = mf.metrics("linespace")
             ty = (box_y1 + box_y2) / 2 - lh * (len(lines) - 1) / 2
             for ln in lines:
@@ -689,6 +749,15 @@ class RideScreen(Screen):
             self.say("")
             self.app.animate()
 
+    def doors(self):
+        if self.kind == "bus":
+            self.say("Beim Bus piept es nicht.")
+        else:
+            speech = "Zurückbleiben, bitte!" if self.kind in ("sbahn", "ubahn") else None
+            self.app.sound.play(SOUND_DIR / f"{self.kind}.wav", speech)
+            self.say("Türen schließen!", 2.5)
+        self.app.animate()
+
     def switch(self):
         here = self.stops[self.index]
         self.direction = 1 - self.direction
@@ -703,6 +772,7 @@ class RideScreen(Screen):
         self.app.animate()
 
     def back(self):
+        self.app.sound.stop()
         self.app.show(self.lines_screen)
 
     def key(self, k, char):
@@ -718,6 +788,8 @@ class RideScreen(Screen):
             self.go_to(len(self.stops) - 1)
         elif char in ("r", "R"):
             self.switch()
+        elif char in ("t", "T"):
+            self.doors()
 
     def wheel(self, delta):
         # Trackpads senden viele Ereignisse – höchstens eine Station je 0,25 s
@@ -747,6 +819,8 @@ class App:
         self.family = self.pick_family()
         self.animating = False
         self.transfers = self.build_transfers()
+        self.sound = SoundPlayer()
+        root.bind("<Destroy>", lambda e: self.sound.stop() if e.widget is root else None)
 
         root.bind("<Key>", self.on_key)
         root.bind("<F11>", lambda e: root.attributes("-fullscreen", not root.attributes("-fullscreen")))

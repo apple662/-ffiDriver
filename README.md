@@ -13,11 +13,22 @@ Programm läuft komplett **offline**.
 |---|---|
 | **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn oder Bus | Pfeiltasten + Enter, oder anklicken (Tasten 1–4 gehen auch) |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
-| **3. Fahren** – Stationsliste mit Umsteigemöglichkeiten zu S- und U-Bahn | ↓/→ nächste Station, ↑/← zurück, `R` oder Knopf: andere Richtung |
+| **3. Fahren** – Stationsliste mit Umsteigemöglichkeiten zu S- und U-Bahn | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türwarnton, `R` oder Knopf: andere Richtung |
 
 `Esc` oder der Knopf „Zurück“ führt immer einen Schritt zurück. `F11`
 schaltet auf Vollbild. Auf der Ringbahn (S41/S42) kann man endlos im Kreis
 fahren.
+
+## Türwarntöne
+
+Mit `T` ertönt beim Fahren das Türsignal des jeweiligen Verkehrsmittels.
+Beim Bus gibt es keins. Auf dem Mac sagt eine deutsche Systemstimme bei S-
+und U-Bahn vorher noch „Zurückbleiben, bitte!“.
+
+Die Töne in `sounds/` sind **nachgebaut**, es sind keine Originalaufnahmen.
+Die Aufnahmen von BVG und S-Bahn sind nicht frei verfügbar.
+`tools/make_sounds.py` erzeugt sie neu. Eigene Aufnahmen kannst du einfach
+als `sounds/sbahn.wav`, `sounds/ubahn.wav` oder `sounds/tram.wav` ablegen.
 
 ## Starten auf macOS
 
@@ -40,7 +51,7 @@ Unter Windows und Linux geht es genauso mit `python bahnfahren.py`.
 
 ```sh
 pip3 install pyinstaller
-pyinstaller --windowed --name "Berlin fährt" --add-data "data:data" bahnfahren.py
+pyinstaller --windowed --name "Berlin fährt" --add-data "data:data" --add-data "sounds:sounds" bahnfahren.py
 ```
 
 Danach liegt die App in `dist/`.
