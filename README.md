@@ -22,13 +22,14 @@ fahren.
 ## Türwarntöne
 
 Mit `T` ertönt beim Fahren das Türsignal des jeweiligen Verkehrsmittels.
-Beim Bus gibt es keins. Auf dem Mac sagt eine deutsche Systemstimme bei S-
+Beim Bus zischt stattdessen die Druckluft, wenn die Türen aufgehen. Auf dem Mac sagt eine deutsche Systemstimme bei S-
 und U-Bahn vorher noch „Zurückbleiben, bitte!“.
 
 Die Töne in `sounds/` sind **nachgebaut**, es sind keine Originalaufnahmen.
 Die Aufnahmen von BVG und S-Bahn sind nicht frei verfügbar.
 `tools/make_sounds.py` erzeugt sie neu. Eigene Aufnahmen kannst du einfach
-als `sounds/sbahn.wav`, `sounds/ubahn.wav` oder `sounds/tram.wav` ablegen.
+als `sounds/sbahn.wav`, `sounds/ubahn.wav`, `sounds/tram.wav` oder
+`sounds/bus.wav` ablegen.
 
 ## Starten auf macOS
 

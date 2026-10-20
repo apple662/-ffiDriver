@@ -643,8 +643,7 @@ class RideScreen(Screen):
         btn_y = by2 - bsize - 76 * s
         cx = (px1 + px2) / 2
         buttons = [("▲", self.prev, self.index > 0), ("▼", self.next, not last or self.ring)]
-        if self.kind != "bus":
-            buttons.append(("Türen", self.doors, True))
+        buttons.append(("Türen", self.doors, True))
         bgap = 18 * s
         bx1 = cx - (len(buttons) * bsize + (len(buttons) - 1) * bgap) / 2
         for sym, cb, enabled in buttons:
@@ -672,7 +671,7 @@ class RideScreen(Screen):
         if box_y2 - box_y1 >= 60 * s:
             round_rect(c, ix, box_y1, ix + pw, box_y2, 14 * s, fill="#11181F", outline="#3A4A5C", width=2 * s)
             mf = app.font(24, "bold")
-            hint = "Fahre mit ↑ und ↓" if self.kind == "bus" else "Fahre mit ↑ und ↓ · T = Türen"
+            hint = "Fahre mit ↑ und ↓ · T = Türen"
             lines = wrap_text(mf, text, pw - 24 * s, 2) if text else [hint]
             lh = mf.metrics("linespace")
             ty = (box_y1 + box_y2) / 2 - lh * (len(lines) - 1) / 2
@@ -750,12 +749,10 @@ class RideScreen(Screen):
             self.app.animate()
 
     def doors(self):
-        if self.kind == "bus":
-            self.say("Beim Bus piept es nicht.")
-        else:
-            speech = "Zurückbleiben, bitte!" if self.kind in ("sbahn", "ubahn") else None
-            self.app.sound.play(SOUND_DIR / f"{self.kind}.wav", speech)
-            self.say("Türen schließen!", 2.5)
+        speech = "Zurückbleiben, bitte!" if self.kind in ("sbahn", "ubahn") else None
+        self.app.sound.play(SOUND_DIR / f"{self.kind}.wav", speech)
+        # Beim Bus zischt die Druckluft, wenn die Türen aufgehen
+        self.say("Pssscht – Türen auf!" if self.kind == "bus" else "Türen schließen!", 2.5)
         self.app.animate()
 
     def switch(self):

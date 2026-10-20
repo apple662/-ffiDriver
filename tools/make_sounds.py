@@ -6,11 +6,13 @@ Die Töne sind den Berliner Fahrzeugen nachempfunden, keine Originalaufnahmen:
 - S-Bahn:  schnelle, helle Piepfolge
 - U-Bahn:  zweistimmiges „Dü-dü“, mehrfach wiederholt
 - Tram:    Bimmel-Glocke („Ding-Ding“) und danach Pieptöne
+- Bus:     Zischen der Druckluft, wenn die Türen aufgehen, mit leisem „Klonk“
 
     python3 tools/make_sounds.py
 """
 
 import math
+import random
 import struct
 import wave
 from pathlib import Path
@@ -43,6 +45,31 @@ def bell(freq, dur, volume=0.7):
         attack = min(1.0, i / (RATE * 0.002))
         out.append(v * attack * volume / 1.87)
     return out
+
+
+def hiss(dur, volume=0.8, seed=7):
+    """Druckluft-Zischen: hochpassgefiltertes Rauschen, das schnell einsetzt und ausklingt."""
+    rnd = random.Random(seed)  # fester Startwert, damit die Datei immer gleich ist
+    n = int(RATE * dur)
+    out, prev, low = [], 0.0, 0.0
+    for i in range(n):
+        t = i / RATE
+        white = rnd.uniform(-1, 1)
+        high = white - prev          # Hochpass: nur das helle „Sss“ bleibt
+        prev = white
+        low += (high - low) * 0.55   # sanfter Tiefpass gegen zu scharfes Kratzen
+        attack = min(1.0, t / 0.03)
+        decay = math.exp(-2.2 * max(0.0, t - 0.15))
+        flutter = 1 + 0.12 * math.sin(2 * math.pi * 9 * t)  # leichtes Flattern des Ventils
+        out.append(low * attack * decay * flutter * volume)
+    return out
+
+
+def thud(dur=0.18, volume=0.6):
+    """Dumpfer Anschlag, wenn die Tür offen einrastet."""
+    n = int(RATE * dur)
+    return [volume * math.exp(-28 * i / RATE) * math.sin(2 * math.pi * (95 - 120 * i / RATE) * i / RATE)
+            for i in range(n)]
 
 
 def silence(dur):
@@ -91,10 +118,19 @@ def tram():
     return s
 
 
+def bus():
+    s = []
+    mix_in(s, hiss(0.25, 0.45, seed=3), 0.0)    # kurzes „Pff“ beim Entriegeln
+    mix_in(s, hiss(1.6, 0.9), 0.22)             # langes „Pssscht“ beim Öffnen
+    mix_in(s, thud(), 1.05)
+    return s
+
+
 def main():
     save("sbahn.wav", sbahn())
     save("ubahn.wav", ubahn())
     save("tram.wav", tram())
+    save("bus.wav", bus())
 
 
 if __name__ == "__main__":
