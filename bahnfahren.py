@@ -11,6 +11,7 @@ python.org). Die Fahrplandaten liegen offline in ``data/berlin_lines.json``.
 import json
 import math
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -188,8 +189,27 @@ def wrap_text(font, text, width, max_lines=3):
 
 
 # --------------------------------------------------------------------------
-# Töne
+# Töne und Ansagen
 # --------------------------------------------------------------------------
+
+ABBREVIATIONS = [
+    (r"str\.", "straße"), (r"Str\.", "Straße"), (r"\bPl\.", "Platz"), (r"\bBhf\.?", "Bahnhof"),
+    (r"\bHbf\.?", "Hauptbahnhof"), (r"\bAlt-", "Alt "), (r"\bS\+U\s+", ""), (r"^[SU]\s+", ""),
+    (r"/", ", "),
+]
+
+
+def spoken_name(name):
+    """Macht aus "S+U Hermannstr." etwas, das die Sprachausgabe gut vorlesen kann: "Hermannstraße"."""
+    for pattern, repl in ABBREVIATIONS:
+        name = re.sub(pattern, repl, name)
+    return name.strip()
+
+
+def spoken_line(name):
+    """ "S85" -> "S 85", damit die Nummer als Zahl gesprochen wird."""
+    return re.sub(r"^([A-Z]+)(\d)", r"\1 \2", name)
+
 
 class SoundPlayer:
     """Spielt WAV-Dateien ohne Zusatzpakete ab (afplay / winsound / paplay / aplay)."""
@@ -226,7 +246,38 @@ class SoundPlayer:
         except OSError:
             self.proc = None
 
+    def speak(self, text):
+        """Liest ``text`` mit der deutschen Systemstimme vor (macOS, Windows, Linux mit espeak)."""
+        self.stop()
+        env = None
+        if sys.platform == "darwin":
+            # Stimme "Anna" ist Deutsch; fehlt sie, nimmt "say" die Standardstimme
+            args = ["/bin/sh", "-c", 'say -v Anna "$0" 2>/dev/null || say "$0"', text]
+        elif sys.platform == "win32":
+            env = dict(os.environ, ANSAGE=text)
+            args = ["powershell", "-NoProfile", "-Command",
+                    "Add-Type -AssemblyName System.Speech; "
+                    "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                    "$v = $s.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Culture.Name -like 'de*' } "
+                    "| Select-Object -First 1; if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }; "
+                    "$s.Speak($env:ANSAGE)"]
+        else:
+            for cmd in (["espeak-ng", "-v", "de"], ["espeak", "-v", "de"], ["spd-say", "-w", "-l", "de"]):
+                if shutil.which(cmd[0]):
+                    args = cmd + [text]
+                    break
+            else:
+                return
+        try:
+            self.proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
+                                         start_new_session=sys.platform != "win32")
+        except OSError:
+            self.proc = None
+
     def stop(self):
+        if sys.platform == "win32" and self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+            self.proc = None
         if self.proc and self.proc.poll() is None:
             try:
                 os.killpg(self.proc.pid, signal.SIGTERM)
@@ -638,21 +689,22 @@ class RideScreen(Screen):
             round_rect(c, ix, y, ix + max(14 * s, bar_w * frac), y + 14 * s, 7 * s, fill=color, outline="")
 
         # Knöpfe
-        bsize = 84 * s
+        # (Beschriftung, Aktion, aktiv, Farbe, Schriftfarbe, Schriftgröße)
+        buttons = [("▲", self.prev, self.index > 0, "#F7D117", PANEL, 36),
+                   ("▼", self.next, not last or self.ring, "#F7D117", PANEL, 36),
+                   ("Türen", self.doors, True, "#E8483B", "white", 18),
+                   ("Ansage", self.announce, True, "#3D8BD4", "white", 17)]
+        bgap = 14 * s
+        bsize = min(84 * s, (pw - (len(buttons) - 1) * bgap) / len(buttons))
         by2 = h - 50 * s
         btn_y = by2 - bsize - 76 * s
         cx = (px1 + px2) / 2
-        buttons = [("▲", self.prev, self.index > 0), ("▼", self.next, not last or self.ring)]
-        buttons.append(("Türen", self.doors, True))
-        bgap = 18 * s
         bx1 = cx - (len(buttons) * bsize + (len(buttons) - 1) * bgap) / 2
-        for sym, cb, enabled in buttons:
+        for sym, cb, enabled, bg, fg, size in buttons:
             by1 = btn_y
-            round_rect(c, bx1, by1, bx1 + bsize, by1 + bsize, 24 * s,
-                       fill=("#F7D117" if sym != "Türen" else "#E8483B") if enabled else "#3A4A5C", outline="")
-            font = app.font(36, "bold") if sym != "Türen" else app.font(19, "bold")
-            c.create_text(bx1 + bsize / 2, by1 + bsize / 2, text=sym, font=font,
-                          fill=(PANEL if sym != "Türen" else "white") if enabled else "#5A6A7C")
+            round_rect(c, bx1, by1, bx1 + bsize, by1 + bsize, 24 * s, fill=bg if enabled else "#3A4A5C", outline="")
+            c.create_text(bx1 + bsize / 2, by1 + bsize / 2, text=sym, font=app.font(size, "bold"),
+                          fill=fg if enabled else "#5A6A7C")
             if enabled:
                 app.hit(bx1, by1, bx1 + bsize, by1 + bsize, cb)
             bx1 += bsize + bgap
@@ -671,7 +723,7 @@ class RideScreen(Screen):
         if box_y2 - box_y1 >= 60 * s:
             round_rect(c, ix, box_y1, ix + pw, box_y2, 14 * s, fill="#11181F", outline="#3A4A5C", width=2 * s)
             mf = app.font(24, "bold")
-            hint = "Fahre mit ↑ und ↓ · T = Türen"
+            hint = "↑ ↓ fahren · T Türen · V Ansage"
             lines = wrap_text(mf, text, pw - 24 * s, 2) if text else [hint]
             lh = mf.metrics("linespace")
             ty = (box_y1 + box_y2) / 2 - lh * (len(lines) - 1) / 2
@@ -755,6 +807,21 @@ class RideScreen(Screen):
         self.say("Pssscht – Türen auf!" if self.kind == "bus" else "Türen schließen!", 2.5)
         self.app.animate()
 
+    def announce(self):
+        """Sagt die aktuelle Station an, wie im Fahrzeug."""
+        stops = self.stops
+        key = stops[self.index]
+        name = self.app.data["stations"][key]
+        text = spoken_name(name) + "."
+        others = [n for _, n, _ in self.transfers.get(key, []) if n != self.line["name"]]
+        if others:
+            text += " Umsteigen zu " + ", ".join(spoken_line(n) for n in others[:6]) + "."
+        if self.index == len(stops) - 1 and not self.ring:
+            text += " Endstation. Bitte alle aussteigen."
+        self.app.sound.speak(text)
+        self.say("Hier ist: " + name, 3)
+        self.app.animate()
+
     def switch(self):
         here = self.stops[self.index]
         self.direction = 1 - self.direction
@@ -787,6 +854,8 @@ class RideScreen(Screen):
             self.switch()
         elif char in ("t", "T"):
             self.doors()
+        elif char in ("v", "V"):
+            self.announce()
 
     def wheel(self, delta):
         # Trackpads senden viele Ereignisse – höchstens eine Station je 0,25 s
