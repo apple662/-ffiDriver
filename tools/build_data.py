@@ -76,19 +76,23 @@ def fetch(url):
         return r.read()
 
 
-def npm_file(package, member):
+def npm_files(package, *members):
+    """Lädt die neueste Version eines npm-Pakets und liefert die gewünschten Dateien."""
     meta = json.loads(fetch(NPM.format(name=package)))
     version = meta["dist-tags"]["latest"]
     tarball = meta["versions"][version]["dist"]["tarball"]
     with tarfile.open(fileobj=io.BytesIO(fetch(tarball))) as tar:
-        return tar.extractfile("package/" + member).read(), f"{package}@{version}"
+        files = [tar.extractfile("package/" + m).read() for m in members]
+    return files, f"{package}@{version}"
 
 
 def load_npm():
-    """Liefert (Linien, Haltestellennamen, Quellenangabe)."""
-    raw_lines, v_lines = npm_file("vbb-lines", "data.ndjson")
-    raw_names, v_names = npm_file("vbb-stations", "names.json")
+    """Liefert (Linien, Haltestellennamen, Koordinaten, Quellenangabe)."""
+    (raw_lines,), v_lines = npm_files("vbb-lines", "data.ndjson")
+    (raw_names, raw_data), v_names = npm_files("vbb-stations", "names.json", "data.json")
     names = json.loads(raw_names)
+    # data.json: [id, Name, Gewicht, Breite, Länge]
+    coords = {row[0]: (row[3], row[4]) for row in json.loads(raw_data)}
 
     lines = []
     for row in raw_lines.decode("utf-8").splitlines():
@@ -103,11 +107,11 @@ def load_npm():
             "product": product,
             "variants": [(v["stops"], v["trips"]) for v in line["variants"]],
         })
-    return lines, names, f"VBB-GTFS über {v_lines} und {v_names}"
+    return lines, names, coords, f"VBB-GTFS über {v_lines} und {v_names}"
 
 
 def load_gtfs(path):
-    """Liefert (Linien, Haltestellennamen, Quellenangabe) aus einem GTFS-ZIP."""
+    """Liefert (Linien, Haltestellennamen, Koordinaten, Quellenangabe) aus einem GTFS-ZIP."""
     with zipfile.ZipFile(path) as z:
         def table(name):
             with z.open(name) as f:
@@ -119,9 +123,11 @@ def load_gtfs(path):
             if r.get("agency_id") in OPERATORS and product:
                 routes[r["route_id"]] = (r["route_short_name"], product)
 
-        names = {}
+        names, coords = {}, {}
         for s in table("stops.txt"):
             names[s["stop_id"]] = s["stop_name"]
+            if s.get("stop_lat") and s.get("stop_lon"):
+                coords[s["stop_id"]] = (float(s["stop_lat"]), float(s["stop_lon"]))
 
         trip_route = {}
         for t in table("trips.txt"):
@@ -146,7 +152,7 @@ def load_gtfs(path):
             "product": product,
             "variants": [(list(stops), n) for stops, n in counter.items()],
         })
-    return lines, names, f"VBB-GTFS ({Path(path).name})"
+    return lines, names, coords, f"VBB-GTFS ({Path(path).name})"
 
 
 def clean_name(name):
@@ -188,7 +194,7 @@ def sort_key(line):
     return (order, prefix, int(num) if num else 0, rest)
 
 
-def build(lines, raw_names, source):
+def build(lines, raw_names, raw_coords, source):
     # Namen je Station (900er-Nummer); Stationseinträge haben Vorrang vor Bahnsteigen
     by_station = {}
     for key, name in raw_names.items():
@@ -198,6 +204,13 @@ def build(lines, raw_names, source):
 
     def name_of(stop_id):
         return by_station.get(station_key(stop_id)) or raw_names.get(stop_id)
+
+    # Koordinaten je Station (für das Umsteigen zu Haltestellen in der Nähe)
+    coords = {}
+    for key, pos in raw_coords.items():
+        k = station_key(key)
+        if "::" not in key or k not in coords:
+            coords[k] = [round(pos[0], 5), round(pos[1], 5)]
 
     # Linien gleichen Namens (z. B. mehrere S1-Einträge) zusammenführen
     grouped = collections.defaultdict(list)
@@ -253,6 +266,7 @@ def build(lines, raw_names, source):
         "license": "Fahrplandaten: VBB Verkehrsverbund Berlin-Brandenburg GmbH, CC BY 4.0",
         "created": date.today().isoformat(),
         "stations": {k: v for k, v in sorted(stations.items()) if k in used},
+        "coords": {k: v for k, v in sorted(coords.items()) if k in used},
         "lines": result,
     }
 
@@ -264,8 +278,8 @@ def main():
     args = ap.parse_args()
 
     print("Lese Fahrplandaten ...", file=sys.stderr)
-    lines, names, source = load_gtfs(args.gtfs) if args.gtfs else load_npm()
-    data = build(lines, names, source)
+    lines, names, coords, source = load_gtfs(args.gtfs) if args.gtfs else load_npm()
+    data = build(lines, names, coords, source)
 
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)

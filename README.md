@@ -13,11 +13,24 @@ Programm läuft komplett **offline**.
 |---|---|
 | **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn oder Bus | Pfeiltasten + Enter, oder anklicken (Tasten 1–4 gehen auch) |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
-| **3. Fahren** – Stationsliste mit Umsteigemöglichkeiten zu S- und U-Bahn | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `R` oder Knopf: andere Richtung |
+| **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung |
 
 `Esc` oder der Knopf „Zurück“ führt immer einen Schritt zurück. `F11`
 schaltet auf Vollbild. Auf der Ringbahn (S41/S42) kann man endlos im Kreis
 fahren.
+
+## Umsteigen
+
+Neben jeder Station stehen die Linien, in die man dort umsteigen kann: S-Bahn,
+U-Bahn, Tram und Bus. Mit `U` steigt man um und landet in der neuen Linie
+an der passenden Haltestelle. Gibt es mehrere Möglichkeiten, erscheint eine
+Auswahl mit den Linienschildern (Pfeiltasten + Enter, `Esc` = doch nicht).
+Man kann auch auf die Linienschilder der aktuellen Station klicken.
+
+Bus- und Tramhaltestellen haben oft eigene Namen, z. B. „S+U
+Alexanderplatz/Gontardstr.“. Deshalb zählen alle Haltestellen im Umkreis von
+200 m dazu, gleichnamige Bahnhöfe auch bis 400 m. Nach dem Umsteigen fährt
+man in die Richtung, in der noch die meisten Stationen vor einem liegen.
 
 ## Türwarntöne
 
@@ -34,8 +47,7 @@ als `sounds/sbahn.wav`, `sounds/ubahn.wav`, `sounds/tram.wav` oder
 ## Stationsansage
 
 Mit `V` sagt eine Computerstimme die aktuelle Station an, mit den
-Umsteigemöglichkeiten zur S- und U-Bahn, z. B. „Gesundbrunnen. Umsteigen zu
-S 1, S 2, …“. An der Endstation kommt noch „Bitte alle aussteigen.“
+Umsteigemöglichkeiten, z. B. „Gesundbrunnen. Umsteigen zu S 1, S 2, …“. An der Endstation kommt noch „Bitte alle aussteigen.“
 
 Dafür wird die Sprachausgabe des Betriebssystems genutzt:
 - **macOS:** `say` mit der deutschen Stimme „Anna“. Fehlt sie, kann man sie

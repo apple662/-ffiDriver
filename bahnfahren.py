@@ -287,6 +287,83 @@ class SoundPlayer:
 
 
 # --------------------------------------------------------------------------
+# Umsteigen
+# --------------------------------------------------------------------------
+
+MODE_ORDER = [m[0] for m in MODES]
+NEAR_M = 200          # Haltestellen in diesem Umkreis gehören zusammen
+SAME_NAME_M = 400     # gleichnamige Stationen (z. B. "S+U" und "U Alexanderplatz") auch etwas weiter
+
+
+def base_name(name):
+    """ "S+U Alexanderplatz/Memhardstr." -> "Alexanderplatz" """
+    return re.sub(r"^(S\+U|S|U)\s+", "", name).split("/")[0].strip().lower()
+
+
+def distance_m(a, b):
+    lat = math.radians((a[0] + b[0]) / 2)
+    return math.hypot((a[1] - b[1]) * math.cos(lat) * 111320, (a[0] - b[0]) * 110540)
+
+
+class Transfers:
+    """Findet alle Linien, in die man an einer Haltestelle umsteigen kann.
+
+    Bus- und Tramhaltestellen haben oft eigene Nummern („S+U Alexanderplatz/Dircksenstr.“),
+    deshalb zählen auch Haltestellen in der Nähe und gleichnamige Bahnhöfe dazu.
+    """
+
+    def __init__(self, data):
+        self.data = data
+        self.coords = data.get("coords", {})
+        self.cache = {}
+        # Station -> [(Verkehrsmittel, Linien-Nr., Richtung, Position)]
+        self.served = {}
+        for kind in MODE_ORDER:
+            for li, line in enumerate(data["lines"][kind]):
+                for d, stops in enumerate(line["directions"]):
+                    for i, key in enumerate(stops):
+                        self.served.setdefault(key, []).append((kind, li, d, i))
+
+    def nearby(self, key):
+        """Haltestellen, die zur selben Umsteigestelle gehören, mit Entfernung."""
+        here = self.coords.get(key)
+        if not here:
+            return [(0.0, key)]
+        name = base_name(self.data["stations"][key])
+        result = []
+        for other, pos in self.coords.items():
+            d = distance_m(here, pos)
+            if d <= NEAR_M or (d <= SAME_NAME_M and base_name(self.data["stations"][other]) == name):
+                result.append((d, other))
+        return result
+
+    def options(self, key, exclude=None):
+        """Umsteigemöglichkeiten an ``key`` (ohne die Linie ``exclude`` = (Verkehrsmittel, Nr.)).
+
+        Pro Linie wird die nächste Haltestelle genommen und die Richtung, in der man von dort noch
+        am längsten weiterfahren kann.
+        """
+        if key not in self.cache:
+            best = {}
+            for dist, other in self.nearby(key):
+                for kind, li, d, i in self.served.get(other, []):
+                    stops = self.data["lines"][kind][li]["directions"][d]
+                    ahead = len(stops) - 1 - i
+                    # nächste Haltestelle zuerst, dann die Richtung mit der längeren Fahrt
+                    rank = (round(dist / 100), ahead == 0, -ahead, dist)
+                    if (kind, li) not in best or rank < best[(kind, li)][0]:
+                        best[(kind, li)] = (rank, d, i, other)
+            opts = []
+            for (kind, li), (_, d, i, other) in best.items():
+                line = self.data["lines"][kind][li]
+                opts.append({"kind": kind, "index": li, "name": line["name"], "color": line["color"],
+                             "direction": d, "stop": i, "key": other})
+            opts.sort(key=lambda o: (MODE_ORDER.index(o["kind"]), o["index"]))
+            self.cache[key] = opts
+        return [o for o in self.cache[key] if (o["kind"], o["index"]) != exclude]
+
+
+# --------------------------------------------------------------------------
 # Bildschirme
 # --------------------------------------------------------------------------
 
@@ -566,12 +643,19 @@ class RideScreen(Screen):
         self.scroll = None
         self.backwards = False  # Fahrzeug schaut nach links, wenn man zurückfährt
         self.message = ("Einsteigen, bitte!", time.monotonic() + 2.0)
-        self.transfers = app.transfers
+        self.line_index = line_index
         self.last_wheel = 0.0
+        self.picker = None      # Auswahl beim Umsteigen: Liste der Möglichkeiten
+        self.pick = 0
+        self.pick_tiles = []
 
     @property
     def stops(self):
         return self.line["directions"][self.direction]
+
+    def transfer_options(self, i=None):
+        key = self.stops[self.index if i is None else i]
+        return self.app.transfers.options(key, exclude=(self.kind, self.line_index))
 
     def draw(self, c, w, h):
         app, s = self.app, self.app.s
@@ -623,15 +707,25 @@ class RideScreen(Screen):
             current = i == self.index
             font = cur_font if current else name_font
             fill = TEXT if i >= self.index else MUTED
-            others = [t for t in self.transfers.get(key, []) if t[1] != line["name"]]
-            badges_w = sum(max(30 * 1.6 * s, mini_font.measure(t[1]) + 30 * 0.6 * s) + 6 * s for t in others[:6])
-            avail = list_x2 - name_x - 20 * s - (badges_w + 14 * s if others else 0)
-            name = fit_text(font, st[key], max(80 * s, avail))
+            # Der Name hat Vorrang; Linienschilder bekommen höchstens 45 % der Breite
+            others = self.transfer_options(i)
+            widths = [max(30 * 1.6 * s, mini_font.measure(o["name"]) + 30 * 0.6 * s) + 6 * s for o in others]
+            row_w = list_x2 - name_x - 16 * s
+            badge_space = min(sum(widths) + 14 * s, row_w * 0.45) if others else 0
+            name = fit_text(font, st[key], max(80 * s, row_w - badge_space))
             c.create_text(name_x, y, text=name, anchor="w", font=font, fill=fill)
             x = name_x + font.measure(name) + 14 * s
-            for k2, n2, col2 in others[:6]:
-                x += draw_badge(c, x, y, n2, col2, k2, 30 * s, mini_font) + 6 * s
+            plus_w = mini_font.measure("+99") + 6 * s
+            for n_shown, (o, bw_) in enumerate(zip(others, widths)):
+                rest = len(others) - n_shown
+                if x + bw_ + (plus_w if rest > 1 else 0) > list_x2 - 10 * s:
+                    c.create_text(x, y, text=f"+{rest}", anchor="w", font=mini_font, fill=MUTED)
+                    break
+                x += draw_badge(c, x, y, o["name"], o["color"], o["kind"], 30 * s, mini_font) + 6 * s
             app.hit(24 * s, y - row_h / 2, list_x2, y + row_h / 2, lambda i=i: self.go_to(i))
+            if current and others:
+                # Klick auf die Linienschilder der aktuellen Station = umsteigen
+                app.hit(name_x + font.measure(name), y - row_h / 2, list_x2, y + row_h / 2, self.change)
 
         # Fahrzeug
         draw_vehicle(c, kind, veh_x, row_y(self.pos) + 4 * s, veh_len, flip=self.backwards)
@@ -723,12 +817,20 @@ class RideScreen(Screen):
         if box_y2 - box_y1 >= 60 * s:
             round_rect(c, ix, box_y1, ix + pw, box_y2, 14 * s, fill="#11181F", outline="#3A4A5C", width=2 * s)
             mf = app.font(24, "bold")
-            hint = "↑ ↓ fahren · T Türen · V Ansage"
-            lines = wrap_text(mf, text, pw - 24 * s, 2) if text else [hint]
-            lh = mf.metrics("linespace")
+            can_change = bool(self.transfer_options())
+            if text:
+                lines, font, fill = wrap_text(mf, text, pw - 24 * s, 2), mf, "#FFB000"
+            elif can_change:
+                # Auffordern, wenn man hier umsteigen kann
+                lines, font, fill = wrap_text(mf, "Umsteigen? Drücke U", pw - 24 * s, 2), mf, "#7FD4FF"
+                app.hit(ix, box_y1, ix + pw, box_y2, self.change)
+            else:
+                font, fill = app.font(18), "#5A6A7C"
+                lines = wrap_text(font, "↑ ↓ fahren · T Türen · V Ansage", pw - 24 * s, 2)
+            lh = font.metrics("linespace")
             ty = (box_y1 + box_y2) / 2 - lh * (len(lines) - 1) / 2
             for ln in lines:
-                c.create_text(cx, ty, text=ln, font=mf if text else app.font(18), fill="#FFB000" if text else "#5A6A7C")
+                c.create_text(cx, ty, text=ln, font=font, fill=fill)
                 ty += lh
         elif text:
             # Sehr kleines Fenster: Durchsage über die Liste legen
@@ -737,6 +839,79 @@ class RideScreen(Screen):
             mx, my = (list_x2 + 20 * s) / 2, h - 60 * s
             round_rect(c, mx - mw / 2, my - 30 * s, mx + mw / 2, my + 30 * s, 30 * s, fill=PANEL, outline="")
             c.create_text(mx, my, text=text, font=mf, fill="#FFB000")
+
+        if self.picker is not None:
+            self.draw_picker(c, w, h)
+
+    def draw_picker(self, c, w, h):
+        """Auswahlfenster: in welche Linie möchtest du umsteigen?"""
+        app, s = self.app, self.app.s
+        st = app.data["stations"]
+        self.pick_tiles = []
+        # Alles andere abdecken (Tk kennt keine Transparenz)
+        c.create_rectangle(0, 0, w, h, fill="#2B3440", outline="")
+        app.hits = []
+        app.hit(0, 0, w, h, self.close_picker)
+
+        mx = 40 * s
+        x1, x2 = mx, w - mx
+        y1, y2 = 40 * s, h - 40 * s
+        round_rect(c, x1, y1, x2, y2, 30 * s, fill=BG, outline="")
+        app.hit(x1, y1, x2, y2, lambda: None)   # Klick auf die Karte schließt nicht
+        title_font = app.font(34, "bold")
+        title = fit_text(title_font, "Umsteigen an " + st[self.stops[self.index]], x2 - x1 - 60 * s)
+        c.create_text(w / 2, y1 + 50 * s, text=title, font=title_font, fill=TEXT)
+        c.create_text(w / 2, y1 + 92 * s, text="Wähle mit den Pfeiltasten und drücke Enter",
+                      font=app.font(18), fill=MUTED)
+
+        # Abbrechen-Knopf unten
+        bw, bh = 260 * s, 56 * s
+        bx, by = w / 2 - bw / 2, y2 - bh - 24 * s
+        round_rect(c, bx, by, bx + bw, by + bh, 28 * s, fill="white", outline="#D8CFB8", width=2 * s)
+        c.create_text(w / 2, by + bh / 2, text="✕  Doch nicht", font=app.font(20, "bold"), fill=TEXT)
+        app.hit(bx, by, bx + bw, by + bh, self.close_picker)
+
+        # Kacheln mit Linienschild und Ziel
+        tile_w, tile_h, gap = 230 * s, 150 * s, 18 * s
+        area_x1, area_x2 = x1 + 30 * s, x2 - 30 * s
+        area_y1, area_y2 = y1 + 140 * s, by - 20 * s
+        cols = max(1, int((area_x2 - area_x1 + gap) // (tile_w + gap)))
+        rows_visible = max(1, int((area_y2 - area_y1 + gap) // (tile_h + gap)))
+        self.pick_cols = cols
+        sel_row = self.pick // cols
+        first_row = max(0, sel_row - rows_visible + 1)
+        total_rows = math.ceil(len(self.picker) / cols)
+        used_cols = min(cols, len(self.picker))
+        left = (x1 + x2) / 2 - (used_cols * tile_w + (used_cols - 1) * gap) / 2
+
+        badge_font = app.font(30, "bold")
+        dest_font = app.font(16, "bold")
+        small_font = app.font(14)
+        for n, opt in enumerate(self.picker):
+            row, col = divmod(n, cols)
+            if not first_row <= row < first_row + rows_visible:
+                continue
+            tx = left + col * (tile_w + gap)
+            ty = area_y1 + (row - first_row) * (tile_h + gap)
+            sel = n == self.pick
+            round_rect(c, tx + 4 * s, ty + 6 * s, tx + tile_w + 4 * s, ty + tile_h + 6 * s, 20 * s, fill=SHADOW,
+                       outline="")
+            round_rect(c, tx, ty, tx + tile_w, ty + tile_h, 20 * s, fill=HIGHLIGHT if sel else CARD,
+                       outline=MODE[opt["kind"]][2] if sel else "#EEE6D2", width=7 * s if sel else 2 * s)
+            draw_mode_sign(c, app, opt["kind"], tx + 30 * s, ty + 30 * s, 32 * s)
+            bwid = max(56 * 1.6 * s, badge_font.measure(opt["name"]) + 56 * 0.6 * s)
+            draw_badge(c, tx + tile_w / 2 - bwid / 2, ty + 66 * s, opt["name"], opt["color"], opt["kind"],
+                       56 * s, badge_font)
+            stops = app.data["lines"][opt["kind"]][opt["index"]]["directions"][opt["direction"]]
+            dest = "Ringfahrt ↻" if stops[0] == stops[-1] else "nach " + st[stops[-1]]
+            c.create_text(tx + tile_w / 2, ty + 118 * s, text=fit_text(dest_font, dest, tile_w - 20 * s),
+                          font=dest_font, fill=TEXT)
+            self.pick_tiles.append((n, tx, ty, tx + tile_w, ty + tile_h))
+            app.hit(tx, ty, tx + tile_w, ty + tile_h, lambda n=n: self.choose(n))
+        if first_row > 0:
+            c.create_text(w / 2, area_y1 - 12 * s, text="▲ mehr", font=small_font, fill=MUTED)
+        if first_row + rows_visible < total_rows:
+            c.create_text(w / 2, area_y2 + 4 * s, text="▼ mehr", font=small_font, fill=MUTED)
 
     def tick(self):
         moving = False
@@ -813,14 +988,67 @@ class RideScreen(Screen):
         key = stops[self.index]
         name = self.app.data["stations"][key]
         text = spoken_name(name) + "."
-        others = [n for _, n, _ in self.transfers.get(key, []) if n != self.line["name"]]
+        others = self.transfer_options()
         if others:
-            text += " Umsteigen zu " + ", ".join(spoken_line(n) for n in others[:6]) + "."
+            prefix = {"tram": "Tram ", "bus": "Bus "}
+            names = [prefix.get(o["kind"], "") + spoken_line(o["name"]) for o in others[:8]]
+            text += " Umsteigen zu " + ", ".join(names) + (" und weiteren Linien." if len(others) > 8 else ".")
         if self.index == len(stops) - 1 and not self.ring:
             text += " Endstation. Bitte alle aussteigen."
         self.app.sound.speak(text)
         self.say("Hier ist: " + name, 3)
         self.app.animate()
+
+    def change(self):
+        """Taste U: umsteigen. Bei mehreren Möglichkeiten erscheint eine Auswahl."""
+        options = self.transfer_options()
+        if not options:
+            self.say("Hier kann man nicht umsteigen.", 2)
+        elif len(options) == 1:
+            self.board(options[0])
+            return
+        else:
+            self.picker, self.pick = options, 0
+            self.app.redraw()
+        self.app.animate()
+
+    def close_picker(self):
+        self.picker = None
+        self.app.redraw()
+
+    def choose(self, n):
+        self.board(self.picker[n])
+
+    def board(self, opt):
+        """In die gewählte Linie einsteigen, an der passenden Haltestelle."""
+        app = self.app
+        lines_screen = LinesScreen(app, opt["kind"], opt["index"])
+        ride = RideScreen(app, opt["kind"], opt["index"], lines_screen)
+        ride.direction = opt["direction"]
+        ride.index = opt["stop"]
+        ride.pos = float(opt["stop"])
+        ride.say(f"Umgestiegen in {opt['name']}!", 2.5)
+        app.sound.stop()
+        app.show(ride)
+        app.animate()
+
+    def picker_key(self, k, char):
+        n, cols = len(self.picker), self.pick_cols
+        if k == "Right":
+            self.pick = min(n - 1, self.pick + 1)
+        elif k == "Left":
+            self.pick = max(0, self.pick - 1)
+        elif k == "Down":
+            self.pick = min(n - 1, self.pick + cols)
+        elif k == "Up":
+            self.pick = max(0, self.pick - cols)
+        elif k in KEYS_OK:
+            self.choose(self.pick)
+            return
+        elif k in KEYS_BACK or char in ("u", "U"):
+            self.close_picker()
+            return
+        self.app.redraw()
 
     def switch(self):
         here = self.stops[self.index]
@@ -840,7 +1068,9 @@ class RideScreen(Screen):
         self.app.show(self.lines_screen)
 
     def key(self, k, char):
-        if k in KEYS_NEXT:
+        if self.picker is not None:
+            self.picker_key(k, char)
+        elif k in KEYS_NEXT:
             self.next()
         elif k in KEYS_PREV:
             self.prev()
@@ -856,8 +1086,20 @@ class RideScreen(Screen):
             self.doors()
         elif char in ("v", "V"):
             self.announce()
+        elif char in ("u", "U"):
+            self.change()
+
+    def motion(self, x, y):
+        if self.picker is None:
+            return
+        for n, x1, y1, x2, y2 in self.pick_tiles:
+            if x1 <= x <= x2 and y1 <= y <= y2 and n != self.pick:
+                self.pick = n
+                self.app.redraw()
 
     def wheel(self, delta):
+        if self.picker is not None:
+            return
         # Trackpads senden viele Ereignisse – höchstens eine Station je 0,25 s
         now = time.monotonic()
         if now - self.last_wheel < 0.25:
@@ -884,7 +1126,7 @@ class App:
         self.fonts = {}
         self.family = self.pick_family()
         self.animating = False
-        self.transfers = self.build_transfers()
+        self.transfers = Transfers(data)
         self.sound = SoundPlayer()
         root.bind("<Destroy>", lambda e: self.sound.stop() if e.widget is root else None)
 
@@ -897,19 +1139,6 @@ class App:
         self.canvas.bind("<Button-4>", lambda e: self.screen.wheel(80 * self.s))
         self.canvas.bind("<Button-5>", lambda e: self.screen.wheel(-80 * self.s))
         self.screen = HomeScreen(self)
-
-    def build_transfers(self):
-        """Station -> S- und U-Bahn-Linien, in die man dort umsteigen kann."""
-        result = {}
-        for kind in ("sbahn", "ubahn"):
-            for line in self.data["lines"][kind]:
-                for d in line["directions"]:
-                    for key in d:
-                        lst = result.setdefault(key, [])
-                        entry = (kind, line["name"], line["color"])
-                        if entry not in lst:
-                            lst.append(entry)
-        return result
 
     def pick_family(self):
         available = set(tkfont.families(self.root))
