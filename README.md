@@ -62,6 +62,14 @@ an der passenden Haltestelle. Gibt es mehrere Möglichkeiten, erscheint eine
 Auswahl mit den Linienschildern (Pfeiltasten + Enter, `Esc` = doch nicht).
 Man kann auch auf die Linienschilder der aktuellen Station klicken.
 
+**Ankreuzfeld „Umsteigen getrennt: S+U-Bahn / Tram+Bus“** (unten links im
+Hauptmenü, standardmäßig angehakt): Beim S- oder U-Bahn-Fahren werden nur
+Umstiege in S- und U-Bahn gezeigt, angeboten und angesagt. Beim Tram- oder
+Busfahren gilt das Gleiche für Tram und Bus. Das macht die Liste deutlich
+übersichtlicher. Ohne Haken sieht man wieder alle Umstiege. Die Einstellung
+wird gespeichert. Der Start-Knopf im Hauptmenü zeigt immer alle Linien am
+Startbahnhof, weil man dort ja erst das Verkehrsmittel wählt.
+
 Bus- und Tramhaltestellen haben oft eigene Namen, z. B. „S+U
 Alexanderplatz/Gontardstr.“. Deshalb zählen alle Haltestellen im Umkreis von
 200 m dazu, gleichnamige Bahnhöfe auch bis 400 m. Nach dem Umsteigen fährt

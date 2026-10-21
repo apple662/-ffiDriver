@@ -310,6 +310,8 @@ class SoundPlayer:
 # --------------------------------------------------------------------------
 
 MODE_ORDER = [m[0] for m in MODES]
+# Bei „Bahn und Bus getrennt“ sieht man nur Umstiege innerhalb der eigenen Gruppe
+MODE_GROUPS = [("sbahn", "ubahn"), ("tram", "bus")]
 NEAR_M = 200          # Haltestellen in diesem Umkreis gehören zusammen
 SAME_NAME_M = 400     # gleichnamige Stationen (z. B. "S+U" und "U Alexanderplatz") auch etwas weiter
 
@@ -356,8 +358,10 @@ class Transfers:
                 result.append((d, other))
         return result
 
-    def options(self, key, exclude=None):
+    def options(self, key, exclude=None, kinds=None):
         """Umsteigemöglichkeiten an ``key`` (ohne die Linie ``exclude`` = (Verkehrsmittel, Nr.)).
+
+        ``kinds``: nur diese Verkehrsmittel (None = alle).
 
         Pro Linie wird die nächste Haltestelle genommen und die Richtung, in der man von dort noch
         am längsten weiterfahren kann.
@@ -379,7 +383,8 @@ class Transfers:
                              "direction": d, "stop": i, "key": other})
             opts.sort(key=lambda o: (MODE_ORDER.index(o["kind"]), o["index"]))
             self.cache[key] = opts
-        return [o for o in self.cache[key] if (o["kind"], o["index"]) != exclude]
+        return [o for o in self.cache[key]
+                if (o["kind"], o["index"]) != exclude and (kinds is None or o["kind"] in kinds)]
 
 
 # --------------------------------------------------------------------------
@@ -639,8 +644,28 @@ class HomeScreen(Screen):
         self.start_box = (bx1, by1, bx2, by2)
         app.hit(bx1, by1, bx2, by2, self.start)
 
-        c.create_text(w / 2, h - 16 * s, text="Fahrplandaten: VBB Verkehrsverbund Berlin-Brandenburg (CC BY 4.0)",
+        # Ankreuzfeld für Eltern: Umstiege nur innerhalb von Bahn bzw. Bus+Tram zeigen
+        on = app.separate_modes()
+        box = 22 * s
+        cx1, cy = 24 * s, h - 22 * s
+        round_rect(c, cx1, cy - box / 2, cx1 + box, cy + box / 2, 5 * s, fill="#2F855A" if on else "white",
+                   outline="#2F855A" if on else MUTED, width=2 * s)
+        if on:
+            c.create_line(cx1 + box * 0.22, cy, cx1 + box * 0.43, cy + box * 0.22, cx1 + box * 0.8, cy - box * 0.25,
+                          fill="white", width=3 * s, capstyle="round", joinstyle="round")
+        label_font = app.font(15)
+        label = "Umsteigen getrennt: S+U-Bahn / Tram+Bus"
+        c.create_text(cx1 + box + 10 * s, cy, text=label, anchor="w", font=label_font, fill=TEXT)
+        app.hit(cx1 - 6 * s, cy - box, cx1 + box + 16 * s + label_font.measure(label), cy + box, self.toggle_separate)
+
+        c.create_text(w - 24 * s, h - 22 * s, text="Fahrplandaten: VBB (CC BY 4.0)", anchor="e",
                       font=app.font(11), fill=MUTED)
+
+    def toggle_separate(self):
+        app = self.app
+        app.settings["separate_modes"] = not app.separate_modes()
+        app.save_settings()
+        app.redraw()
 
     def open(self, i):
         self.selected = i
@@ -909,7 +934,7 @@ class RideScreen(Screen):
 
     def transfer_options(self, i=None):
         key = self.stops[self.index if i is None else i]
-        return self.app.transfers.options(key, exclude=(self.kind, self.line_index))
+        return self.app.transfers.options(key, exclude=(self.kind, self.line_index), kinds=self.app.transfer_kinds(self.kind))
 
     def draw(self, c, w, h):
         app, s = self.app, self.app.s
@@ -1482,6 +1507,16 @@ class App:
             path.write_text(json.dumps(self.settings, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError as e:
             print("Einstellungen konnten nicht gespeichert werden:", e, file=sys.stderr)
+
+    def separate_modes(self):
+        """Ankreuzfeld im Hauptmenü, standardmäßig an."""
+        return self.settings.get("separate_modes", True)
+
+    def transfer_kinds(self, kind):
+        """Verkehrsmittel, in die man von ``kind`` aus umsteigen kann (None = alle)."""
+        if not self.separate_modes():
+            return None
+        return next(g for g in MODE_GROUPS if kind in g)
 
     def home_station(self):
         """Gespeicherter Startbahnhof, sonst Lichterfelde Ost."""
