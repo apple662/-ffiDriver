@@ -364,6 +364,156 @@ class Transfers:
 
 
 # --------------------------------------------------------------------------
+# Netzplan (Minikarte)
+# --------------------------------------------------------------------------
+
+def clip_polyline(pts, x1, y1, x2, y2):
+    """Schneidet eine Linie (Liste von (x, y)) auf ein Rechteck zu. Liefert sichtbare Teilstücke."""
+    pieces, cur = [], []
+    for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+        # Liang-Barsky
+        t0, t1, dx, dy = 0.0, 1.0, bx - ax, by - ay
+        ok = True
+        for p, q in ((-dx, ax - x1), (dx, x2 - ax), (-dy, ay - y1), (dy, y2 - ay)):
+            if p == 0:
+                if q < 0:
+                    ok = False
+                    break
+            else:
+                t = q / p
+                if p < 0:
+                    t0 = max(t0, t)
+                else:
+                    t1 = min(t1, t)
+        if not ok or t0 > t1:
+            if len(cur) >= 4:
+                pieces.append(cur)
+            cur = []
+            continue
+        sx, sy, ex, ey = ax + t0 * dx, ay + t0 * dy, ax + t1 * dx, ay + t1 * dy
+        if cur and t0 == 0.0:
+            cur += [ex, ey]
+        else:
+            if len(cur) >= 4:
+                pieces.append(cur)
+            cur = [sx, sy, ex, ey]
+        if t1 < 1.0:
+            pieces.append(cur)
+            cur = []
+    if len(cur) >= 4:
+        pieces.append(cur)
+    return pieces
+
+
+def tint(color, f):
+    """Mischt ``color`` mit Weiß (f = 0 → Farbe, f = 1 → weiß)."""
+    r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
+    return "#%02X%02X%02X" % tuple(int(v + (255 - v) * f) for v in (r, g, b))
+
+
+class NetworkMap:
+    """Netzplan eines Verkehrsmittels, gezeichnet aus den Koordinaten der Haltestellen."""
+
+    def __init__(self, data, kind):
+        self.data = data
+        self.kind = kind
+        coords = data.get("coords", {})
+        self.lines = []
+        for line in data["lines"][kind]:
+            pts = [coords[k] for k in line["directions"][0] if k in coords]
+            if len(pts) >= 2:
+                self.lines.append((line["name"], line["color"], pts))
+        # Ringbahn als Orientierung („innerhalb/außerhalb des Rings“)
+        self.ring = []
+        if kind != "sbahn":
+            for line in data["lines"]["sbahn"]:
+                if line["name"] == "S41":
+                    self.ring = [coords[k] for k in line["directions"][0] if k in coords]
+        all_pts = [p for _, _, pts in self.lines for p in pts] or [[52.52, 13.40]]
+        self.lat0 = sum(p[0] for p in all_pts) / len(all_pts)
+        xs = [self._x(p) for p in all_pts]
+        ys = [self._y(p) for p in all_pts]
+        self.bounds = (min(xs), min(ys), max(xs), max(ys))
+        self.cache = (None, None)   # (Schlüssel, fertig zugeschnittene Linien)
+
+    def _x(self, p):
+        return p[1] * math.cos(math.radians(self.lat0))
+
+    def _y(self, p):
+        return -p[0]
+
+    def zoom_bounds(self, path):
+        """Ausschnitt um die gefahrene Linie (für das riesige Busnetz), mindestens ca. 8 km breit."""
+        xs = [self._x(p) for p in path]
+        ys = [self._y(p) for p in path]
+        cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+        half_w = max((max(xs) - min(xs)) * 0.7, 0.055)
+        half_h = max((max(ys) - min(ys)) * 0.7, 0.035)
+        return (cx - half_w, cy - half_h, cx + half_w, cy + half_h)
+
+    def fit(self, x1, y1, x2, y2, bounds=None):
+        """Rechnet Koordinaten in den Kasten um (seitenrichtig, mittig)."""
+        bx1, by1, bx2, by2 = bounds or self.bounds
+        scale = min((x2 - x1) / max(1e-9, bx2 - bx1), (y2 - y1) / max(1e-9, by2 - by1))
+        ox = x1 + ((x2 - x1) - (bx2 - bx1) * scale) / 2
+        oy = y1 + ((y2 - y1) - (by2 - by1) * scale) / 2
+        return lambda p: (ox + (self._x(p) - bx1) * scale, oy + (self._y(p) - by1) * scale)
+
+    def draw(self, c, x1, y1, x2, y2, s, line_name, path, pos, kind_label, font):
+        """Zeichnet die Karte; ``path`` = Koordinaten der gefahrenen Richtung, ``pos`` = Position darauf."""
+        round_rect(c, x1, y1, x2, y2, 16 * s, fill="#F6F1E4", outline="")
+        pad = 14 * s
+        many = len(self.lines) > 30
+        # Beim Bus wäre die Linie im ganzen Netz winzig, deshalb dort heranzoomen
+        bounds = self.zoom_bounds(path) if many and len(path) >= 2 else None
+        P = self.fit(x1 + pad, y1 + pad + 16 * s, x2 - pad, y2 - pad, bounds)
+        cx1, cy1, cx2, cy2 = x1 + 4 * s, y1 + 4 * s, x2 - 4 * s, y2 - 4 * s
+
+        # Das Netz ändert sich beim Fahren nicht – nur einmal umrechnen und zuschneiden
+        key = (x1, y1, x2, y2, s, line_name, len(path), path[0] if path else None)
+        if self.cache[0] != key:
+            items = []
+
+            def polyline(pts, **kw):
+                for piece in clip_polyline([P(p) for p in pts], cx1, cy1, cx2, cy2):
+                    items.append((piece, kw))
+
+            if len(self.ring) >= 2:
+                polyline(self.ring, fill="#DDD5C2", width=max(2, 5 * s))
+            for name, color, pts in self.lines:
+                if name != line_name:
+                    polyline(pts, fill=tint(color, 0.7 if many else 0.55), width=max(1, (1.5 if many else 2.5) * s))
+            if len(path) >= 2:
+                col = next((col for name, col, _ in self.lines if name == line_name), "#333333")
+                polyline(path, fill=col, width=max(3, 5 * s), capstyle="round", joinstyle="round")
+            self.cache = (key, items)
+        for piece, kw in self.cache[1]:
+            c.create_line(piece, **kw)
+        col = next((col for name, col, _ in self.lines if name == line_name), "#333333")
+        if len(path) >= 2:
+            for end in (path[0], path[-1]):
+                ex, ey = P(end)
+                if not (cx1 <= ex <= cx2 and cy1 <= ey <= cy2):
+                    continue
+                r = 4 * s
+                c.create_oval(ex - r, ey - r, ex + r, ey + r, fill="white", outline=col, width=max(1, 2 * s))
+        # aktuelle Position, zwischen zwei Stationen weich verschoben
+        if path:
+            i = max(0, min(len(path) - 1, int(math.floor(pos))))
+            j = min(len(path) - 1, i + 1)
+            f = pos - i
+            ax, ay = P(path[i])
+            bx, by = P(path[j])
+            px, py = ax + (bx - ax) * f, ay + (by - ay) * f
+            r = 11 * s
+            c.create_oval(px - r, py - r, px + r, py + r, fill="", outline="#E8483B", width=max(1, 2 * s))
+            r = 6 * s
+            c.create_oval(px - r, py - r, px + r, py + r, fill="#E8483B", outline="white", width=max(1, 2 * s))
+        c.create_text(x1 + 12 * s, y1 + 14 * s, text="NETZPLAN " + kind_label.upper(), anchor="w", font=font,
+                      fill="#8A8170")
+
+
+# --------------------------------------------------------------------------
 # Bildschirme
 # --------------------------------------------------------------------------
 
@@ -747,35 +897,42 @@ class RideScreen(Screen):
         round_rect(c, px1 + 5 * s, py + 7 * s, px2 + 5 * s, h - 24 * s + 7 * s, 26 * s, fill=SHADOW, outline="")
         round_rect(c, px1, py, px2, h - 24 * s, 26 * s, fill=PANEL, outline="")
         ix = px1 + 24 * s
-        y = py + 34 * s
-        label_font = app.font(16, "bold")
-        big_font = app.font(30, "bold")
-        mid_font = app.font(24, "bold")
+        label_font = app.font(14, "bold")
+        big_font = app.font(26, "bold")
+        mid_font = app.font(20, "bold")
+
+        # Netzplan oben in der Tafel, mit dem aktuellen Standort
+        map_h = min(pw * 0.68, (h - top) * 0.3)
+        coords = app.data.get("coords", {})
+        path = [coords[k] for k in stops if k in coords]
+        app.network_map(kind).draw(c, ix - 8 * s, py + 16 * s, ix + pw + 8 * s, py + 16 * s + map_h, s,
+                                   line["name"], path, self.pos, MODE[kind][1], app.font(11, "bold"))
+        y = py + 16 * s + map_h + 24 * s
+
         c.create_text(ix, y, text="DU BIST HIER", anchor="w", font=label_font, fill="#F7D117")
-        y += 30 * s
-        for ln in wrap_text(big_font, st[stops[self.index]], pw):
+        c.create_text(ix + pw, y, text=f"Station {self.index + 1} von {len(stops)}", anchor="e",
+                      font=app.font(14), fill="#B8C4D0")
+        y += 22 * s
+        for ln in wrap_text(big_font, st[stops[self.index]], pw, 2):
             c.create_text(ix, y, text=ln, anchor="nw", font=big_font, fill="white")
             y += big_font.metrics("linespace")
-        y += 22 * s
+        y += 14 * s
         last = self.index == len(stops) - 1
         if last:
             title, info = ("RUNDE GESCHAFFT", "Einmal rund um die Stadt!") if self.ring \
                 else ("ENDSTATION", "Bitte alle aussteigen!")
             c.create_text(ix, y, text=title, anchor="w", font=label_font, fill="#F7D117")
-            y += 28 * s
-            for ln in wrap_text(mid_font, info, pw):
+            y += 22 * s
+            for ln in wrap_text(mid_font, info, pw, 2):
                 c.create_text(ix, y, text=ln, anchor="nw", font=mid_font, fill="#9FE3B0")
                 y += mid_font.metrics("linespace")
         else:
             c.create_text(ix, y, text="NÄCHSTER HALT", anchor="w", font=label_font, fill="#F7D117")
-            y += 28 * s
-            for ln in wrap_text(mid_font, st[stops[self.index + 1]], pw):
+            y += 22 * s
+            for ln in wrap_text(mid_font, st[stops[self.index + 1]], pw, 2):
                 c.create_text(ix, y, text=ln, anchor="nw", font=mid_font, fill="#CFE8FF")
                 y += mid_font.metrics("linespace")
-        y += 20 * s
-        c.create_text(ix, y, text=f"Station {self.index + 1} von {len(stops)}", anchor="w", font=app.font(17),
-                      fill="#B8C4D0")
-        y += 22 * s
+        y += 12 * s
         bar_w = px2 - px1 - 48 * s
         round_rect(c, ix, y, ix + bar_w, y + 14 * s, 7 * s, fill="#3A4A5C", outline="")
         frac = self.pos / max(1, len(stops) - 1)
@@ -813,10 +970,10 @@ class RideScreen(Screen):
         text, until = self.message
         if not (text and time.monotonic() < until):
             text = ""
-        box_y1, box_y2 = y + 40 * s, btn_y - 26 * s
-        if box_y2 - box_y1 >= 60 * s:
+        box_y1, box_y2 = y + 14 * s + 16 * s, btn_y - 14 * s
+        if box_y2 - box_y1 >= 40 * s:
             round_rect(c, ix, box_y1, ix + pw, box_y2, 14 * s, fill="#11181F", outline="#3A4A5C", width=2 * s)
-            mf = app.font(24, "bold")
+            mf = app.font(22 if box_y2 - box_y1 > 70 * s else 19, "bold")
             can_change = bool(self.transfer_options())
             if text:
                 lines, font, fill = wrap_text(mf, text, pw - 24 * s, 2), mf, "#FFB000"
@@ -1127,6 +1284,7 @@ class App:
         self.family = self.pick_family()
         self.animating = False
         self.transfers = Transfers(data)
+        self.maps = {}
         self.sound = SoundPlayer()
         root.bind("<Destroy>", lambda e: self.sound.stop() if e.widget is root else None)
 
@@ -1139,6 +1297,11 @@ class App:
         self.canvas.bind("<Button-4>", lambda e: self.screen.wheel(80 * self.s))
         self.canvas.bind("<Button-5>", lambda e: self.screen.wheel(-80 * self.s))
         self.screen = HomeScreen(self)
+
+    def network_map(self, kind):
+        if kind not in self.maps:
+            self.maps[kind] = NetworkMap(self.data, kind)
+        return self.maps[kind]
 
     def pick_family(self):
         available = set(tkfont.families(self.root))

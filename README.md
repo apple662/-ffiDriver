@@ -13,11 +13,23 @@ Programm läuft komplett **offline**.
 |---|---|
 | **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn oder Bus | Pfeiltasten + Enter, oder anklicken (Tasten 1–4 gehen auch) |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
-| **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung |
+| **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung |
 
 `Esc` oder der Knopf „Zurück“ führt immer einen Schritt zurück. `F11`
 schaltet auf Vollbild. Auf der Ringbahn (S41/S42) kann man endlos im Kreis
 fahren.
+
+## Netzplan
+
+Beim Fahren zeigt oben rechts ein kleiner Netzplan, wo man gerade ist: Der
+rote Punkt wandert mit. Die eigene Linie ist kräftig hervorgehoben, die
+anderen Linien desselben Verkehrsmittels sind blass gezeichnet. Als
+Orientierung ist die Ringbahn grau eingezeichnet. Beim Bus zoomt die Karte
+auf die gefahrene Linie, weil das ganze Busnetz zu groß wäre.
+
+Die Pläne sind **aus den Fahrplandaten gezeichnet**, mit den echten
+Koordinaten der Haltestellen. Es sind nicht die offiziellen Netzpläne von
+BVG und S-Bahn, denn die sind urheberrechtlich geschützt.
 
 ## Umsteigen
 
