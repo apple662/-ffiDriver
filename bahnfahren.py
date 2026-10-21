@@ -55,6 +55,7 @@ MODES = [
     ("ubahn", "U-Bahn", "#115D91", ("#F7D117", "#3A3A3A")),
     ("tram", "Straßenbahn", "#CC0A22", ("#F7D117", "#FFFFFF")),
     ("bus", "Bus", "#A5027D", ("#F7D117", "#3A3A3A")),
+    ("regio", "Regionalbahn", "#4B5563", ("#D7001D", "#FFFFFF")),
 ]
 MODE = {m[0]: m for m in MODES}
 
@@ -118,7 +119,7 @@ def draw_vehicle(c, kind, cx, cy, length, flip=False):
 
     outline = darker(body, 0.55)
     lw = max(1, length / 90)
-    h = 0.30 if kind != "bus" else 0.34
+    h = {"bus": 0.34, "regio": 0.40}.get(kind, 0.30)
     top, bottom = -h / 2, h / 2 - 0.04
     wheel_r = 0.045 if kind != "bus" else 0.06
 
@@ -139,12 +140,17 @@ def draw_vehicle(c, kind, cx, cy, length, flip=False):
     else:
         poly([(-0.49, bottom - 0.05), (0.49, bottom - 0.05), (0.48, bottom - 0.02), (-0.48, bottom - 0.02)],
              fill=accent, outline="")
-    # Fenster
+    # Fenster (der Regionalzug ist ein Doppelstockwagen: zwei Fensterreihen)
     win = "#CFE8FF"
     wy1, wy2 = top + 0.07, top + 0.07 + (0.10 if kind != "bus" else 0.12)
     xs = [-0.42, -0.27, -0.12, 0.03, 0.18] if kind != "bus" else [-0.44, -0.29, -0.14, 0.01, 0.16]
-    for wx in xs:
-        poly(round_rect_points(wx, wy1, wx + 0.11, wy2, 0.015), fill=win, outline=outline, width=lw / 2)
+    rows = [(wy1, wy2)]
+    if kind == "regio":
+        wy1, wy2 = top + 0.05, top + 0.13
+        rows = [(wy1, wy2), (top + 0.18, top + 0.26)]
+    for ry1, ry2 in rows:
+        for wx in xs:
+            poly(round_rect_points(wx, ry1, wx + 0.11, ry2, 0.015), fill=win, outline=outline, width=lw / 2)
     # Frontscheibe
     poly(round_rect_points(0.33, wy1, 0.47, wy2 + 0.03, 0.03), fill=win, outline=outline, width=lw / 2)
     # Tür
@@ -165,6 +171,11 @@ def draw_mode_sign(c, app, kind, cx, cy, size):
     elif kind == "ubahn":
         round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.08, fill=color, outline="")
         c.create_text(cx, cy, text="U", fill="white", font=app.font(size / app.s * 0.62, "bold"))
+    elif kind == "regio":
+        # wie die roten Zugschilder der Bahn: „RE“ in Rot auf Weiß
+        round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
+        round_rect(c, cx - r * 0.8, cy - r * 0.55, cx + r * 0.8, cy + r * 0.55, size * 0.1, fill="white", outline="")
+        c.create_text(cx, cy, text="RE", fill="#D7001D", font=app.font(size / app.s * 0.42, "bold"))
     else:
         round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
         text = "Tram" if kind == "tram" else "Bus"
@@ -178,6 +189,11 @@ def draw_badge(c, x, y, name, color, kind, h, font, border=0):
     if border:
         round_rect(c, x - border, y - h / 2 - border, x + w + border, y + h / 2 + border, r + border,
                    fill="white", outline="")
+    if kind == "regio":
+        # Regionalzüge: rote Schrift auf Weiß mit rotem Rand, wie an den Bahnhöfen
+        round_rect(c, x, y - h / 2, x + w, y + h / 2, r, fill="white", outline=color, width=max(1, h * 0.08))
+        c.create_text(x + w / 2, y, text=name, fill=color, font=font)
+        return w
     round_rect(c, x, y - h / 2, x + w, y + h / 2, r, fill=color, outline="")
     c.create_text(x + w / 2, y, text=name, fill=text_color_for(color), font=font)
     return w
@@ -309,9 +325,9 @@ class SoundPlayer:
 # Umsteigen
 # --------------------------------------------------------------------------
 
-MODE_ORDER = [m[0] for m in MODES]
-# Bei „Bahn und Bus getrennt“ sieht man nur Umstiege innerhalb der eigenen Gruppe
-MODE_GROUPS = [("sbahn", "ubahn"), ("tram", "bus")]
+MODE_ORDER = ["sbahn", "ubahn", "regio", "tram", "bus"]     # Reihenfolge beim Umsteigen
+# Bei „Umsteigen getrennt“ sieht man nur Umstiege innerhalb der eigenen Gruppe
+MODE_GROUPS = [("sbahn", "ubahn", "regio"), ("tram", "bus")]
 NEAR_M = 200          # Haltestellen in diesem Umkreis gehören zusammen
 SAME_NAME_M = 400     # gleichnamige Stationen (z. B. "S+U" und "U Alexanderplatz") auch etwas weiter
 
@@ -488,8 +504,9 @@ class NetworkMap:
         round_rect(c, x1, y1, x2, y2, 16 * s, fill="#F6F1E4", outline="")
         pad = 14 * s
         many = len(self.lines) > 30
-        # Beim Bus wäre die Linie im ganzen Netz winzig, deshalb dort heranzoomen
-        bounds = self.zoom_bounds(path) if many and len(path) >= 2 else None
+        # Beim Bus (riesiges Netz) und Regionalzug (bis an die Ostsee) wäre Berlin winzig: heranzoomen
+        zoom = many or self.kind == "regio"
+        bounds = self.zoom_bounds(path) if zoom and len(path) >= 2 else None
         P = self.fit(x1 + pad, y1 + pad + 16 * s, x2 - pad, y2 - pad, bounds)
         cx1, cy1, cx2, cy2 = x1 + 4 * s, y1 + 4 * s, x2 - 4 * s, y2 - 4 * s
 
@@ -587,22 +604,22 @@ class HomeScreen(Screen):
         c.create_text(w / 2, 125 * s, text="Wähle mit den Pfeiltasten und drücke Enter – oder klicke einfach!",
                       font=app.font(20), fill=MUTED)
 
-        cols = 4 if w > h * 1.25 else 2
-        rows = 4 // cols
+        n = len(MODES)
+        cols = n if w > h * 1.25 else math.ceil(n / 2)
+        rows = math.ceil(n / cols)
         gap = 30 * s
         area_top = 165 * s
         area_bottom = h - 150 * s       # darunter: Start-Knopf
         tile_w = min((w - gap * (cols + 1)) / cols, (area_bottom - area_top - gap * (rows - 1)) / rows * 0.95)
         tile_h = tile_w * 1.05
-        total_w = cols * tile_w + (cols - 1) * gap
         total_h = rows * tile_h + (rows - 1) * gap
-        x0 = (w - total_w) / 2
         y0 = area_top + max(0, (area_bottom - area_top - total_h) / 2)
 
         self.tiles = []
         for i, (kind, label, color, _) in enumerate(MODES):
             col, row = i % cols, i // cols
-            x1 = x0 + col * (tile_w + gap)
+            in_row = min(cols, n - row * cols)          # letzte Reihe mittig
+            x1 = (w - (in_row * tile_w + (in_row - 1) * gap)) / 2 + col * (tile_w + gap)
             y1 = y0 + row * (tile_h + gap)
             x2, y2 = x1 + tile_w, y1 + tile_h
             sel = i == self.selected
@@ -615,8 +632,10 @@ class HomeScreen(Screen):
             sign = tw * 0.42
             draw_mode_sign(c, app, kind, (x1 + x2) / 2, y1 + tw * 0.29, sign)
             draw_vehicle(c, kind, (x1 + x2) / 2, y1 + tw * 0.70, tw * 0.75)
-            c.create_text((x1 + x2) / 2, y2 - tw * 0.13, text=label, fill=color,
-                          font=app.font(int(tw / s * 0.12), "bold"))
+            label_font = app.font(int(tw / s * 0.12), "bold")
+            if label_font.measure(label) > tw * 0.9:
+                label_font = app.font(int(tw / s * 0.12 * tw * 0.9 / label_font.measure(label)), "bold")
+            c.create_text((x1 + x2) / 2, y2 - tw * 0.13, text=label, fill=color, font=label_font)
             self.tiles.append((x1, y1, x2, y2))
             app.hit(x1, y1, x2, y2, lambda i=i: self.open(i))
         self.cols = cols
@@ -654,7 +673,7 @@ class HomeScreen(Screen):
             c.create_line(cx1 + box * 0.22, cy, cx1 + box * 0.43, cy + box * 0.22, cx1 + box * 0.8, cy - box * 0.25,
                           fill="white", width=3 * s, capstyle="round", joinstyle="round")
         label_font = app.font(15)
-        label = "Umsteigen getrennt: S+U-Bahn / Tram+Bus"
+        label = "Umsteigen getrennt: S-Bahn, U-Bahn, Regio / Tram, Bus"
         c.create_text(cx1 + box + 10 * s, cy, text=label, anchor="w", font=label_font, fill=TEXT)
         app.hit(cx1 - 6 * s, cy - box, cx1 + box + 16 * s + label_font.measure(label), cy + box, self.toggle_separate)
 
@@ -730,7 +749,7 @@ class HomeScreen(Screen):
         elif k == PARENT_KEY:
             self.reset_home()
             return
-        elif char in "1234" and char:
+        elif char and char in "12345"[:len(MODES)]:
             self.open(int(char) - 1)
             return
         if self.selected < self.START:
@@ -1189,7 +1208,8 @@ class RideScreen(Screen):
             self.app.animate()
 
     def doors(self):
-        speech = "Zurückbleiben, bitte!" if self.kind in ("sbahn", "ubahn") else None
+        speech = {"sbahn": "Zurückbleiben, bitte!", "ubahn": "Zurückbleiben, bitte!",
+                  "regio": "Bitte einsteigen. Vorsicht bei der Abfahrt!"}.get(self.kind)
         self.app.sound.play(SOUND_DIR / f"{self.kind}.wav", speech)
         # Beim Bus zischt die Druckluft, wenn die Türen aufgehen
         self.say("Pssscht – Türen auf!" if self.kind == "bus" else "Türen schließen!", 2.5)

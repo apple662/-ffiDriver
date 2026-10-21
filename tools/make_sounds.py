@@ -7,6 +7,7 @@ Die Töne sind den Berliner Fahrzeugen nachempfunden, keine Originalaufnahmen:
 - U-Bahn:  zweistimmiges „Dü-dü“, mehrfach wiederholt
 - Tram:    Bimmel-Glocke („Ding-Ding“) und danach Pieptöne
 - Bus:     Zischen der Druckluft, wenn die Türen aufgehen, mit leisem „Klonk“
+- Regio:   langsamere, hohe Doppelpieptöne wie bei Doppelstockzügen, dann Druckluft
 
     python3 tools/make_sounds.py
 """
@@ -126,11 +127,22 @@ def bus():
     return s
 
 
+def regio():
+    s = []
+    for i in range(5):
+        at = i * 0.42
+        mix_in(s, tone(2900, 0.11, 0.5, (1.0, 0.2)), at)
+        mix_in(s, tone(2900, 0.11, 0.5, (1.0, 0.2)), at + 0.16)
+    mix_in(s, hiss(0.7, 0.35, seed=11), 2.1)     # Türen schließen mit Druckluft
+    return s
+
+
 def main():
     save("sbahn.wav", sbahn())
     save("ubahn.wav", ubahn())
     save("tram.wav", tram())
     save("bus.wav", bus())
+    save("regio.wav", regio())
 
 
 if __name__ == "__main__":

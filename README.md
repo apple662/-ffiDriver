@@ -4,20 +4,29 @@ Ein einfaches Spiel für Kinder: Verkehrsmittel aussuchen, Linie wählen und
 dann Station für Station mit den Pfeiltasten durch Berlin fahren.
 
 Enthalten sind alle S-Bahn-, U-Bahn-, Straßenbahn- und Buslinien von BVG und
-S-Bahn Berlin (15 S-Bahn-, 9 U-Bahn-, 22 Tram- und 204 Buslinien). Das
+S-Bahn Berlin sowie alle Regionalzüge, die durch Berlin fahren (15 S-Bahn-,
+9 U-Bahn-, 22 Tram-, 204 Bus- und 22 Regionallinien). Das
 Programm läuft komplett **offline**.
 
 ## So wird gespielt
 
 | Bildschirm | Bedienung |
 |---|---|
-| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn oder Bus, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–4 gehen auch) |
+| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus oder Regionalbahn, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–5 gehen auch) |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
 | **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung |
 
 `Esc` oder der Knopf „Zurück“ führt immer einen Schritt zurück. `F11`
 schaltet auf Vollbild. Auf der Ringbahn (S41/S42) kann man endlos im Kreis
 fahren.
+
+## Regionalbahn
+
+Alle Regionalzüge (RE, RB, FEX), deren Strecke durch Berlin führt, z. B. der
+RE1 von Frankfurt (Oder) über Alexanderplatz und Hauptbahnhof bis Magdeburg.
+Sie haben alle Funktionen der anderen Verkehrsmittel: Netzplan (auf die
+Strecke gezoomt), Umsteigen, Türsignal und Ansage. Die Linienschilder sind
+rot auf weiß wie an den Bahnhöfen, der Zug ist ein roter Doppelstockwagen.
 
 ## Startbahnhof
 
@@ -62,9 +71,9 @@ an der passenden Haltestelle. Gibt es mehrere Möglichkeiten, erscheint eine
 Auswahl mit den Linienschildern (Pfeiltasten + Enter, `Esc` = doch nicht).
 Man kann auch auf die Linienschilder der aktuellen Station klicken.
 
-**Ankreuzfeld „Umsteigen getrennt: S+U-Bahn / Tram+Bus“** (unten links im
-Hauptmenü, standardmäßig angehakt): Beim S- oder U-Bahn-Fahren werden nur
-Umstiege in S- und U-Bahn gezeigt, angeboten und angesagt. Beim Tram- oder
+**Ankreuzfeld „Umsteigen getrennt“** (unten links im Hauptmenü,
+standardmäßig angehakt): Beim Fahren mit S-Bahn, U-Bahn oder Regionalbahn
+werden nur Umstiege in diese drei gezeigt, angeboten und angesagt. Beim Tram- oder
 Busfahren gilt das Gleiche für Tram und Bus. Das macht die Liste deutlich
 übersichtlicher. Ohne Haken sieht man wieder alle Umstiege. Die Einstellung
 wird gespeichert. Der Start-Knopf im Hauptmenü zeigt immer alle Linien am
@@ -84,8 +93,8 @@ und U-Bahn vorher noch „Zurückbleiben, bitte!“.
 Die Töne in `sounds/` sind **nachgebaut**, es sind keine Originalaufnahmen.
 Die Aufnahmen von BVG und S-Bahn sind nicht frei verfügbar.
 `tools/make_sounds.py` erzeugt sie neu. Eigene Aufnahmen kannst du einfach
-als `sounds/sbahn.wav`, `sounds/ubahn.wav`, `sounds/tram.wav` oder
-`sounds/bus.wav` ablegen.
+als `sounds/sbahn.wav`, `sounds/ubahn.wav`, `sounds/tram.wav`,
+`sounds/bus.wav` oder `sounds/regio.wav` ablegen.
 
 ## Stationsansage
 

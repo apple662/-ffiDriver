@@ -44,16 +44,20 @@ OPERATORS = {"1", "796"}
 # Die U4 fehlt seit Februar 2026 im VBB-Datensatz.
 KEEP_LINES = ["U4"]
 MAX_LOOKBACK = 12   # so viele ältere Versionen werden höchstens durchsucht
-PRODUCTS = ("sbahn", "ubahn", "tram", "bus")
+PRODUCTS = ("sbahn", "ubahn", "tram", "bus", "regio")
+# Regionalzüge kommen von vielen Betreibern (DB Regio, ODEG, NEB …); genommen werden alle,
+# die mindestens einmal in Berlin halten (Haltestellen-IDs „de:11000:…“).
+BERLIN_PREFIX = "de:11000:"
 
 # GTFS route_type (VBB nutzt die erweiterten Typen) -> Verkehrsmittel
 ROUTE_TYPES = {
-    "109": "sbahn", "2": "sbahn",
+    "109": "sbahn",
+    "100": "regio", "106": "regio", "2": "regio",
     "400": "ubahn", "1": "ubahn",
     "900": "tram", "0": "tram",
     "700": "bus", "3": "bus",
 }
-NPM_PRODUCTS = {"suburban": "sbahn", "subway": "ubahn", "tram": "tram", "bus": "bus"}
+NPM_PRODUCTS = {"suburban": "sbahn", "subway": "ubahn", "tram": "tram", "bus": "bus", "regional": "regio"}
 
 # Offizielle Linienfarben (BVG / S-Bahn Berlin)
 LINE_COLORS = {
@@ -65,7 +69,8 @@ LINE_COLORS = {
     "S46": "#CD9C53", "S47": "#CD9C53", "S5": "#EB7405", "S7": "#816DA6",
     "S75": "#816DA6", "S8": "#66AA22", "S85": "#66AA22", "S9": "#992746",
 }
-DEFAULT_COLORS = {"sbahn": "#008D4F", "ubahn": "#115D91", "tram": "#CC0A22", "bus": "#A5027D"}
+DEFAULT_COLORS = {"sbahn": "#008D4F", "ubahn": "#115D91", "tram": "#CC0A22", "bus": "#A5027D",
+                  "regio": "#E2001A"}
 
 STATION_ID = re.compile(r"900\d{6}")
 
@@ -106,7 +111,7 @@ def parse_npm_lines(raw):
             continue
         line = json.loads(row)
         product = NPM_PRODUCTS.get(line["product"])
-        if line["operator"] not in OPERATORS or not product:
+        if not product or (line["operator"] not in OPERATORS and product != "regio"):
             continue
         lines.append({
             "name": line["name"],
@@ -164,7 +169,7 @@ def load_gtfs(path):
         routes = {}
         for r in table("routes.txt"):
             product = ROUTE_TYPES.get(r["route_type"])
-            if r.get("agency_id") in OPERATORS and product:
+            if product and (r.get("agency_id") in OPERATORS or product == "regio"):
                 routes[r["route_id"]] = (r["route_short_name"], product)
 
         names, coords = {}, {}
@@ -202,6 +207,8 @@ def load_gtfs(path):
 def clean_name(name):
     name = re.sub(r"\s*\(Berlin\)$", "", name)
     name = re.sub(r"\s*\[[^\]]*\]", "", name)
+    name = re.sub(r", Hbf$", " Hauptbahnhof", name)
+    name = re.sub(r", Bhf$", " Bahnhof", name)
     return name.replace(" (Bln)", "").strip()
 
 
@@ -266,6 +273,7 @@ def build(lines, raw_names, raw_coords, source):
     rail_names = {name for (product, name) in grouped if product != "bus"}
 
     stations = {}
+    berlin = set()      # Stationen in Berlin
     result = {p: [] for p in PRODUCTS}
     for (product, name), variants in grouped.items():
         # Ersatzverkehr (Bus "S41", Bus "M10" ...) überspringen
@@ -287,6 +295,8 @@ def build(lines, raw_names, raw_coords, source):
                 if not stop_name:
                     continue
                 stations.setdefault(key, clean_name(stop_name))
+                if stop.startswith(BERLIN_PREFIX):
+                    berlin.add(key)
                 if not seq or seq[-1] != key:
                     seq.append(key)
             if seq and not any("Betriebshof" in stations[s] for s in (seq[0], seq[-1])):
@@ -294,6 +304,9 @@ def build(lines, raw_names, raw_coords, source):
 
         directions = pick_directions(cleaned)
         if not directions:
+            continue
+        # Regionalzüge nur, wenn ihre Hauptstrecke durch Berlin führt
+        if product == "regio" and not any(k in berlin for d in directions for k in d):
             continue
         result[product].append({
             "name": name,
