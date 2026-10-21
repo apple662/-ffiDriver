@@ -11,13 +11,36 @@ Programm läuft komplett **offline**.
 
 | Bildschirm | Bedienung |
 |---|---|
-| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn oder Bus | Pfeiltasten + Enter, oder anklicken (Tasten 1–4 gehen auch) |
+| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn oder Bus, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–4 gehen auch) |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
 | **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung |
 
 `Esc` oder der Knopf „Zurück“ führt immer einen Schritt zurück. `F11`
 schaltet auf Vollbild. Auf der Ringbahn (S41/S42) kann man endlos im Kreis
 fahren.
+
+## Startbahnhof
+
+Unter den vier Verkehrsmitteln steht im Hauptmenü der grüne Knopf **„Starte
+in S Lichterfelde Ost“**. Damit fährt man direkt an diesem Bahnhof los: Es
+erscheint dieselbe Auswahl wie beim Umsteigen, also alle Linien, die dort
+abfahren.
+
+**Elterntaste `F10`** (auf Mac-Tastaturen meist `fn` + `F10`):
+- **Beim Fahren:** Die aktuelle Haltestelle wird nach Rückfrage zum neuen
+  Startbahnhof.
+- **Im Hauptmenü**, wenn der Start-Knopf ausgewählt ist: Der Startbahnhof
+  wird nach Rückfrage wieder auf Lichterfelde Ost gesetzt.
+
+In der Rückfrage ist „Abbrechen“ vorausgewählt. Speichern geht nur mit
+Pfeiltaste und Enter oder per Klick auf „Ja, speichern“, ein Kind kann also
+nicht aus Versehen mit Enter bestätigen.
+
+Gespeichert wird pro Benutzer, die Einstellung bleibt also auch bei einer
+neuen Programmversion erhalten:
+- macOS: `~/Library/Application Support/Berlin faehrt/settings.json`
+- Windows: `%APPDATA%\Berlin faehrt\settings.json`
+- Linux: `~/.config/Berlin faehrt/settings.json`
 
 ## Netzplan
 

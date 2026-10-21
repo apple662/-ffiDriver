@@ -25,6 +25,20 @@ BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 DATA_FILE = BASE / "data" / "berlin_lines.json"
 SOUND_DIR = BASE / "sounds"
 
+PARENT_KEY = "F10"                      # Elterntaste: Startbahnhof festlegen
+DEFAULT_HOME = "S Lichterfelde Ost"     # Startbahnhof, solange nichts anderes gespeichert ist
+
+
+def settings_file():
+    """Einstellungen pro Benutzer, damit sie auch eine neue Programmversion überstehen."""
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    elif sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA", Path.home()))
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return base / "Berlin faehrt" / "settings.json"
+
 BG = "#FFF8E7"
 CARD = "#FFFFFF"
 SHADOW = "#E9DFC7"
@@ -538,11 +552,24 @@ class Screen:
         return False
 
 
+def draw_house(c, cx, cy, size, color):
+    """Kleines Haus-Symbol für den Startbahnhof."""
+    h = size / 2
+    c.create_polygon(cx - h, cy - h * 0.1, cx, cy - h, cx + h, cy - h * 0.1, fill=color, outline="")
+    c.create_rectangle(cx - h * 0.7, cy - h * 0.15, cx + h * 0.7, cy + h * 0.8, fill=color, outline="")
+    c.create_rectangle(cx - h * 0.18, cy + h * 0.25, cx + h * 0.18, cy + h * 0.8, fill="white", outline="")
+
+
 class HomeScreen(Screen):
+    START = len(MODES)      # Auswahl-Nummer des Start-Knopfs unter den Kacheln
+
     def __init__(self, app, selected=0):
         super().__init__(app)
         self.selected = selected
+        self.last_tile = selected if selected < self.START else 0
         self.tiles = []
+        self.start_box = None
+        self.cols = 4
 
     def draw(self, c, w, h):
         app, s = self.app, self.app.s
@@ -553,13 +580,14 @@ class HomeScreen(Screen):
         cols = 4 if w > h * 1.25 else 2
         rows = 4 // cols
         gap = 30 * s
-        area_top = 170 * s
-        tile_w = min((w - gap * (cols + 1)) / cols, (h - area_top - 40 * s - gap * (rows - 1)) / rows * 0.95)
+        area_top = 165 * s
+        area_bottom = h - 150 * s       # darunter: Start-Knopf
+        tile_w = min((w - gap * (cols + 1)) / cols, (area_bottom - area_top - gap * (rows - 1)) / rows * 0.95)
         tile_h = tile_w * 1.05
         total_w = cols * tile_w + (cols - 1) * gap
         total_h = rows * tile_h + (rows - 1) * gap
         x0 = (w - total_w) / 2
-        y0 = area_top + max(0, (h - area_top - 30 * s - total_h) / 2)
+        y0 = area_top + max(0, (area_bottom - area_top - total_h) / 2)
 
         self.tiles = []
         for i, (kind, label, color, _) in enumerate(MODES):
@@ -583,35 +611,109 @@ class HomeScreen(Screen):
             app.hit(x1, y1, x2, y2, lambda i=i: self.open(i))
         self.cols = cols
 
-        c.create_text(w / 2, h - 18 * s, text="Fahrplandaten: VBB Verkehrsverbund Berlin-Brandenburg (CC BY 4.0)",
+        # Start-Knopf: direkt am Startbahnhof losfahren
+        home = app.home_station()
+        sel = self.selected == self.START
+        bw, bh = min(w - 80 * s, 720 * s), 86 * s
+        bx1, by1 = (w - bw) / 2, h - 135 * s
+        if sel:
+            bx1 -= 6 * s; by1 -= 6 * s; bw += 12 * s; bh += 12 * s
+        bx2, by2 = bx1 + bw, by1 + bh
+        green = "#2F855A"
+        round_rect(c, bx1 + 5 * s, by1 + 7 * s, bx2 + 5 * s, by2 + 7 * s, 43 * s, fill=SHADOW, outline="")
+        round_rect(c, bx1, by1, bx2, by2, 43 * s, fill=green if sel else CARD, outline=green,
+                   width=(8 if sel else 3) * s)
+        fg = "white" if sel else green
+        draw_house(c, bx1 + 50 * s, (by1 + by2) / 2, 40 * s, fg)
+        tx = bx1 + 90 * s
+        c.create_text(tx, (by1 + by2) / 2 - 16 * s, text="Starte in", anchor="w", font=app.font(16, "bold"),
+                      fill=fg)
+        name_font = app.font(26, "bold")
+        c.create_text(tx, (by1 + by2) / 2 + 12 * s, text=fit_text(name_font, app.data["stations"][home], bx2 - tx - 30 * s),
+                      anchor="w", font=name_font, fill=TEXT if not sel else "white")
+        self.start_box = (bx1, by1, bx2, by2)
+        app.hit(bx1, by1, bx2, by2, self.start)
+
+        c.create_text(w / 2, h - 16 * s, text="Fahrplandaten: VBB Verkehrsverbund Berlin-Brandenburg (CC BY 4.0)",
                       font=app.font(11), fill=MUTED)
 
     def open(self, i):
         self.selected = i
         self.app.show(LinesScreen(self.app, MODES[i][0]))
 
+    def start(self):
+        """Am Startbahnhof losfahren – dieselbe Auswahl wie beim Umsteigen."""
+        app = self.app
+        home = app.home_station()
+        options = app.transfers.options(home)
+        back = lambda: app.show(HomeScreen(app, self.START))
+        if len(options) == 1:
+            board(app, options[0], f"Los geht's mit {options[0]['name']}!")
+        elif options:
+            app.show(ChangeScreen(app, f"Start in {app.data['stations'][home]}: Womit fährst du los?",
+                                  options, back, "Los geht's mit {}!"))
+
+    def reset_home(self):
+        """Elterntaste im Hauptmenü: Startbahnhof auf Lichterfelde Ost zurücksetzen (mit Rückfrage)."""
+        app = self.app
+        if "home_station" not in app.settings:
+            return
+
+        def reset():
+            app.settings.pop("home_station", None)
+            app.save_settings()
+            app.show(HomeScreen(app, self.START))
+
+        app.show(ConfirmScreen(app, "Elternbereich: Startbahnhof zurücksetzen",
+                               [f"Startbahnhof wieder auf „{DEFAULT_HOME}“ setzen?",
+                                f"Bisher: {app.data['stations'][app.home_station()]}"],
+                               "Ja, zurücksetzen", reset, lambda: app.show(self)))
+
     def key(self, k, char):
         n = len(MODES)
-        if k == "Right":
+        if self.selected == self.START:
+            if k == "Up":
+                self.selected = self.last_tile
+            elif k in KEYS_OK:
+                self.start()
+                return
+            elif k == PARENT_KEY:
+                self.reset_home()
+                return
+            else:
+                return
+        elif k == "Right":
             self.selected = (self.selected + 1) % n
         elif k == "Left":
             self.selected = (self.selected - 1) % n
         elif k == "Down":
-            self.selected = (self.selected + self.cols) % n if self.cols < n else (self.selected + 1) % n
+            # aus der unteren Kachelreihe geht es zum Start-Knopf
+            self.last_tile = self.selected
+            below = self.selected + self.cols
+            self.selected = below if below < n else self.START
         elif k == "Up":
-            self.selected = (self.selected - self.cols) % n if self.cols < n else (self.selected - 1) % n
+            if self.selected - self.cols >= 0:
+                self.selected -= self.cols
         elif k in KEYS_OK:
             self.open(self.selected)
+            return
+        elif k == PARENT_KEY:
+            self.reset_home()
             return
         elif char in "1234" and char:
             self.open(int(char) - 1)
             return
+        if self.selected < self.START:
+            self.last_tile = self.selected
         self.app.redraw()
 
     def motion(self, x, y):
-        for i, (x1, y1, x2, y2) in enumerate(self.tiles):
+        boxes = list(enumerate(self.tiles)) + ([(self.START, self.start_box)] if self.start_box else [])
+        for i, (x1, y1, x2, y2) in boxes:
             if x1 <= x <= x2 and y1 <= y <= y2 and i != self.selected:
                 self.selected = i
+                if i < self.START:
+                    self.last_tile = i
                 self.app.redraw()
 
 
@@ -795,9 +897,6 @@ class RideScreen(Screen):
         self.message = ("Einsteigen, bitte!", time.monotonic() + 2.0)
         self.line_index = line_index
         self.last_wheel = 0.0
-        self.picker = None      # Auswahl beim Umsteigen: Liste der Möglichkeiten
-        self.pick = 0
-        self.pick_tiles = []
 
     @property
     def stops(self):
@@ -997,79 +1096,6 @@ class RideScreen(Screen):
             round_rect(c, mx - mw / 2, my - 30 * s, mx + mw / 2, my + 30 * s, 30 * s, fill=PANEL, outline="")
             c.create_text(mx, my, text=text, font=mf, fill="#FFB000")
 
-        if self.picker is not None:
-            self.draw_picker(c, w, h)
-
-    def draw_picker(self, c, w, h):
-        """Auswahlfenster: in welche Linie möchtest du umsteigen?"""
-        app, s = self.app, self.app.s
-        st = app.data["stations"]
-        self.pick_tiles = []
-        # Alles andere abdecken (Tk kennt keine Transparenz)
-        c.create_rectangle(0, 0, w, h, fill="#2B3440", outline="")
-        app.hits = []
-        app.hit(0, 0, w, h, self.close_picker)
-
-        mx = 40 * s
-        x1, x2 = mx, w - mx
-        y1, y2 = 40 * s, h - 40 * s
-        round_rect(c, x1, y1, x2, y2, 30 * s, fill=BG, outline="")
-        app.hit(x1, y1, x2, y2, lambda: None)   # Klick auf die Karte schließt nicht
-        title_font = app.font(34, "bold")
-        title = fit_text(title_font, "Umsteigen an " + st[self.stops[self.index]], x2 - x1 - 60 * s)
-        c.create_text(w / 2, y1 + 50 * s, text=title, font=title_font, fill=TEXT)
-        c.create_text(w / 2, y1 + 92 * s, text="Wähle mit den Pfeiltasten und drücke Enter",
-                      font=app.font(18), fill=MUTED)
-
-        # Abbrechen-Knopf unten
-        bw, bh = 260 * s, 56 * s
-        bx, by = w / 2 - bw / 2, y2 - bh - 24 * s
-        round_rect(c, bx, by, bx + bw, by + bh, 28 * s, fill="white", outline="#D8CFB8", width=2 * s)
-        c.create_text(w / 2, by + bh / 2, text="✕  Doch nicht", font=app.font(20, "bold"), fill=TEXT)
-        app.hit(bx, by, bx + bw, by + bh, self.close_picker)
-
-        # Kacheln mit Linienschild und Ziel
-        tile_w, tile_h, gap = 230 * s, 150 * s, 18 * s
-        area_x1, area_x2 = x1 + 30 * s, x2 - 30 * s
-        area_y1, area_y2 = y1 + 140 * s, by - 20 * s
-        cols = max(1, int((area_x2 - area_x1 + gap) // (tile_w + gap)))
-        rows_visible = max(1, int((area_y2 - area_y1 + gap) // (tile_h + gap)))
-        self.pick_cols = cols
-        sel_row = self.pick // cols
-        first_row = max(0, sel_row - rows_visible + 1)
-        total_rows = math.ceil(len(self.picker) / cols)
-        used_cols = min(cols, len(self.picker))
-        left = (x1 + x2) / 2 - (used_cols * tile_w + (used_cols - 1) * gap) / 2
-
-        badge_font = app.font(30, "bold")
-        dest_font = app.font(16, "bold")
-        small_font = app.font(14)
-        for n, opt in enumerate(self.picker):
-            row, col = divmod(n, cols)
-            if not first_row <= row < first_row + rows_visible:
-                continue
-            tx = left + col * (tile_w + gap)
-            ty = area_y1 + (row - first_row) * (tile_h + gap)
-            sel = n == self.pick
-            round_rect(c, tx + 4 * s, ty + 6 * s, tx + tile_w + 4 * s, ty + tile_h + 6 * s, 20 * s, fill=SHADOW,
-                       outline="")
-            round_rect(c, tx, ty, tx + tile_w, ty + tile_h, 20 * s, fill=HIGHLIGHT if sel else CARD,
-                       outline=MODE[opt["kind"]][2] if sel else "#EEE6D2", width=7 * s if sel else 2 * s)
-            draw_mode_sign(c, app, opt["kind"], tx + 30 * s, ty + 30 * s, 32 * s)
-            bwid = max(56 * 1.6 * s, badge_font.measure(opt["name"]) + 56 * 0.6 * s)
-            draw_badge(c, tx + tile_w / 2 - bwid / 2, ty + 66 * s, opt["name"], opt["color"], opt["kind"],
-                       56 * s, badge_font)
-            stops = app.data["lines"][opt["kind"]][opt["index"]]["directions"][opt["direction"]]
-            dest = "Ringfahrt ↻" if stops[0] == stops[-1] else "nach " + st[stops[-1]]
-            c.create_text(tx + tile_w / 2, ty + 118 * s, text=fit_text(dest_font, dest, tile_w - 20 * s),
-                          font=dest_font, fill=TEXT)
-            self.pick_tiles.append((n, tx, ty, tx + tile_w, ty + tile_h))
-            app.hit(tx, ty, tx + tile_w, ty + tile_h, lambda n=n: self.choose(n))
-        if first_row > 0:
-            c.create_text(w / 2, area_y1 - 12 * s, text="▲ mehr", font=small_font, fill=MUTED)
-        if first_row + rows_visible < total_rows:
-            c.create_text(w / 2, area_y2 + 4 * s, text="▼ mehr", font=small_font, fill=MUTED)
-
     def tick(self):
         moving = False
         d = self.index - self.pos
@@ -1162,50 +1188,13 @@ class RideScreen(Screen):
         if not options:
             self.say("Hier kann man nicht umsteigen.", 2)
         elif len(options) == 1:
-            self.board(options[0])
+            board(self.app, options[0], f"Umgestiegen in {options[0]['name']}!")
             return
         else:
-            self.picker, self.pick = options, 0
-            self.app.redraw()
+            name = self.app.data["stations"][self.stops[self.index]]
+            self.app.show(ChangeScreen(self.app, "Umsteigen an " + name, options, lambda: self.app.show(self)))
+            return
         self.app.animate()
-
-    def close_picker(self):
-        self.picker = None
-        self.app.redraw()
-
-    def choose(self, n):
-        self.board(self.picker[n])
-
-    def board(self, opt):
-        """In die gewählte Linie einsteigen, an der passenden Haltestelle."""
-        app = self.app
-        lines_screen = LinesScreen(app, opt["kind"], opt["index"])
-        ride = RideScreen(app, opt["kind"], opt["index"], lines_screen)
-        ride.direction = opt["direction"]
-        ride.index = opt["stop"]
-        ride.pos = float(opt["stop"])
-        ride.say(f"Umgestiegen in {opt['name']}!", 2.5)
-        app.sound.stop()
-        app.show(ride)
-        app.animate()
-
-    def picker_key(self, k, char):
-        n, cols = len(self.picker), self.pick_cols
-        if k == "Right":
-            self.pick = min(n - 1, self.pick + 1)
-        elif k == "Left":
-            self.pick = max(0, self.pick - 1)
-        elif k == "Down":
-            self.pick = min(n - 1, self.pick + cols)
-        elif k == "Up":
-            self.pick = max(0, self.pick - cols)
-        elif k in KEYS_OK:
-            self.choose(self.pick)
-            return
-        elif k in KEYS_BACK or char in ("u", "U"):
-            self.close_picker()
-            return
-        self.app.redraw()
 
     def switch(self):
         here = self.stops[self.index]
@@ -1225,9 +1214,7 @@ class RideScreen(Screen):
         self.app.show(self.lines_screen)
 
     def key(self, k, char):
-        if self.picker is not None:
-            self.picker_key(k, char)
-        elif k in KEYS_NEXT:
+        if k in KEYS_NEXT:
             self.next()
         elif k in KEYS_PREV:
             self.prev()
@@ -1245,18 +1232,28 @@ class RideScreen(Screen):
             self.announce()
         elif char in ("u", "U"):
             self.change()
+        elif k == PARENT_KEY:
+            self.set_home()
 
-    def motion(self, x, y):
-        if self.picker is None:
-            return
-        for n, x1, y1, x2, y2 in self.pick_tiles:
-            if x1 <= x <= x2 and y1 <= y <= y2 and n != self.pick:
-                self.pick = n
-                self.app.redraw()
+    def set_home(self):
+        """Elterntaste: aktuelle Haltestelle als Startbahnhof fürs Hauptmenü speichern (mit Rückfrage)."""
+        app = self.app
+        key = self.stops[self.index]
+        name, old = app.data["stations"][key], app.data["stations"][app.home_station()]
+
+        def save():
+            app.settings["home_station"] = key
+            app.save_settings()
+            self.say("Neuer Startbahnhof: " + name, 3)
+            app.show(self)
+            app.animate()
+
+        app.show(ConfirmScreen(app, "Elternbereich: Startbahnhof ändern",
+                               [f"Soll „{name}“ der neue Startbahnhof im Hauptmenü werden?",
+                                f"Bisher: {old}"],
+                               "Ja, speichern", save, lambda: app.show(self)))
 
     def wheel(self, delta):
-        if self.picker is not None:
-            return
         # Trackpads senden viele Ereignisse – höchstens eine Station je 0,25 s
         now = time.monotonic()
         if now - self.last_wheel < 0.25:
@@ -1266,6 +1263,174 @@ class RideScreen(Screen):
             self.next()
         else:
             self.prev()
+
+
+def board(app, opt, message):
+    """In die Linie ``opt`` (aus Transfers.options) einsteigen, an der passenden Haltestelle."""
+    lines_screen = LinesScreen(app, opt["kind"], opt["index"])
+    ride = RideScreen(app, opt["kind"], opt["index"], lines_screen)
+    ride.direction = opt["direction"]
+    ride.index = opt["stop"]
+    ride.pos = float(opt["stop"])
+    ride.say(message, 2.5)
+    app.sound.stop()
+    app.show(ride)
+    app.animate()
+
+
+def dialog_card(app, c, w, h, cancel):
+    """Großer Kasten über dem ganzen Fenster; Klick daneben = abbrechen. Gibt die Ecken zurück."""
+    s = app.s
+    c.create_rectangle(0, 0, w, h, fill="#2B3440", outline="")   # Tk kennt keine Transparenz
+    app.hit(0, 0, w, h, cancel)
+    x1, y1, x2, y2 = 40 * s, 40 * s, w - 40 * s, h - 40 * s
+    round_rect(c, x1, y1, x2, y2, 30 * s, fill=BG, outline="")
+    app.hit(x1, y1, x2, y2, lambda: None)   # Klick auf den Kasten selbst schließt nicht
+    return x1, y1, x2, y2
+
+
+def big_button(app, c, cx, cy, text, selected, callback, color="#2B6CB0", width=260):
+    s = app.s
+    bw, bh = width * s, 60 * s
+    x1, y1 = cx - bw / 2, cy - bh / 2
+    round_rect(c, x1, y1, x1 + bw, y1 + bh, 30 * s, fill=color if selected else "white",
+               outline=color, width=(5 if selected else 2) * s)
+    c.create_text(cx, cy, text=text, font=app.font(20, "bold"), fill="white" if selected else TEXT)
+    app.hit(x1, y1, x1 + bw, y1 + bh, callback)
+    return x1, y1, x1 + bw, y1 + bh
+
+
+class ChangeScreen(Screen):
+    """Auswahl der Linie beim Umsteigen (und beim Start am Startbahnhof)."""
+
+    def __init__(self, app, title, options, back, message="Umgestiegen in {}!"):
+        super().__init__(app)
+        self.title = title
+        self.options = options
+        self.back = back
+        self.message = message
+        self.pick = 0
+        self.cols = 1
+        self.tiles = []
+
+    def draw(self, c, w, h):
+        app, s = self.app, self.app.s
+        st = app.data["stations"]
+        x1, y1, x2, y2 = dialog_card(app, c, w, h, self.back)
+        title_font = app.font(34, "bold")
+        c.create_text(w / 2, y1 + 50 * s, text=fit_text(title_font, self.title, x2 - x1 - 60 * s),
+                      font=title_font, fill=TEXT)
+        c.create_text(w / 2, y1 + 92 * s, text="Wähle mit den Pfeiltasten und drücke Enter",
+                      font=app.font(18), fill=MUTED)
+        _, by, _, _ = big_button(app, c, w / 2, y2 - 54 * s, "✕  Doch nicht", False, self.back)
+
+        # Kacheln mit Verkehrsmittel, Linienschild und Ziel
+        tile_w, tile_h, gap = 230 * s, 150 * s, 18 * s
+        area_x1, area_x2 = x1 + 30 * s, x2 - 30 * s
+        area_y1, area_y2 = y1 + 140 * s, by - 20 * s
+        cols = max(1, int((area_x2 - area_x1 + gap) // (tile_w + gap)))
+        rows_visible = max(1, int((area_y2 - area_y1 + gap) // (tile_h + gap)))
+        self.cols = cols
+        first_row = max(0, self.pick // cols - rows_visible + 1)
+        total_rows = math.ceil(len(self.options) / cols)
+        used_cols = min(cols, len(self.options))
+        left = (x1 + x2) / 2 - (used_cols * tile_w + (used_cols - 1) * gap) / 2
+
+        badge_font = app.font(30, "bold")
+        dest_font = app.font(16, "bold")
+        small_font = app.font(14)
+        self.tiles = []
+        for n, opt in enumerate(self.options):
+            row, col = divmod(n, cols)
+            if not first_row <= row < first_row + rows_visible:
+                continue
+            tx = left + col * (tile_w + gap)
+            ty = area_y1 + (row - first_row) * (tile_h + gap)
+            sel = n == self.pick
+            round_rect(c, tx + 4 * s, ty + 6 * s, tx + tile_w + 4 * s, ty + tile_h + 6 * s, 20 * s, fill=SHADOW,
+                       outline="")
+            round_rect(c, tx, ty, tx + tile_w, ty + tile_h, 20 * s, fill=HIGHLIGHT if sel else CARD,
+                       outline=MODE[opt["kind"]][2] if sel else "#EEE6D2", width=7 * s if sel else 2 * s)
+            draw_mode_sign(c, app, opt["kind"], tx + 30 * s, ty + 30 * s, 32 * s)
+            bwid = max(56 * 1.6 * s, badge_font.measure(opt["name"]) + 56 * 0.6 * s)
+            draw_badge(c, tx + tile_w / 2 - bwid / 2, ty + 66 * s, opt["name"], opt["color"], opt["kind"],
+                       56 * s, badge_font)
+            stops = app.data["lines"][opt["kind"]][opt["index"]]["directions"][opt["direction"]]
+            dest = "Ringfahrt ↻" if stops[0] == stops[-1] else "nach " + st[stops[-1]]
+            c.create_text(tx + tile_w / 2, ty + 118 * s, text=fit_text(dest_font, dest, tile_w - 20 * s),
+                          font=dest_font, fill=TEXT)
+            self.tiles.append((n, tx, ty, tx + tile_w, ty + tile_h))
+            app.hit(tx, ty, tx + tile_w, ty + tile_h, lambda n=n: self.choose(n))
+        if first_row > 0:
+            c.create_text(w / 2, area_y1 - 12 * s, text="▲ mehr", font=small_font, fill=MUTED)
+        if first_row + rows_visible < total_rows:
+            c.create_text(w / 2, area_y2 + 4 * s, text="▼ mehr", font=small_font, fill=MUTED)
+
+    def choose(self, n):
+        opt = self.options[n]
+        board(self.app, opt, self.message.format(opt["name"]))
+
+    def key(self, k, char):
+        n, cols = len(self.options), self.cols
+        if k == "Right":
+            self.pick = min(n - 1, self.pick + 1)
+        elif k == "Left":
+            self.pick = max(0, self.pick - 1)
+        elif k == "Down":
+            self.pick = min(n - 1, self.pick + cols)
+        elif k == "Up":
+            self.pick = max(0, self.pick - cols)
+        elif k in KEYS_OK:
+            self.choose(self.pick)
+            return
+        elif k in KEYS_BACK or char in ("u", "U"):
+            self.back()
+            return
+        self.app.redraw()
+
+    def motion(self, x, y):
+        for n, x1, y1, x2, y2 in self.tiles:
+            if x1 <= x <= x2 and y1 <= y <= y2 and n != self.pick:
+                self.pick = n
+                self.app.redraw()
+
+
+class ConfirmScreen(Screen):
+    """Rückfrage für Eltern. „Abbrechen“ ist vorausgewählt, damit Kinder nichts aus Versehen ändern."""
+
+    def __init__(self, app, title, lines, yes_text, on_yes, on_no):
+        super().__init__(app)
+        self.title, self.lines, self.yes_text = title, lines, yes_text
+        self.on_yes, self.on_no = on_yes, on_no
+        self.yes = False
+
+    def draw(self, c, w, h):
+        app, s = self.app, self.app.s
+        x1, y1, x2, y2 = dialog_card(app, c, w, h, self.on_no)
+        cx = w / 2
+        y = y1 + 70 * s
+        c.create_text(cx, y, text=self.title, font=app.font(32, "bold"), fill=TEXT)
+        y += 70 * s
+        font = app.font(22)
+        for text in self.lines:
+            for ln in wrap_text(font, text, x2 - x1 - 100 * s, 3):
+                c.create_text(cx, y, text=ln, font=font, fill=TEXT)
+                y += font.metrics("linespace")
+            y += 14 * s
+        by = min(y + 90 * s, y2 - 110 * s)
+        big_button(app, c, cx - 160 * s, by, "Abbrechen", not self.yes, self.on_no, color="#6B7280")
+        big_button(app, c, cx + 160 * s, by, self.yes_text, self.yes, self.on_yes, color="#2F855A")
+        c.create_text(cx, by + 60 * s, text="← → wählen, Enter bestätigen, Esc bricht ab",
+                      font=app.font(15), fill=MUTED)
+
+    def key(self, k, char):
+        if k in ("Left", "Right", "Tab"):
+            self.yes = not self.yes
+            self.app.redraw()
+        elif k in ("Return", "KP_Enter"):
+            (self.on_yes if self.yes else self.on_no)()
+        elif k in KEYS_BACK:
+            self.on_no()
 
 
 # --------------------------------------------------------------------------
@@ -1285,6 +1450,7 @@ class App:
         self.animating = False
         self.transfers = Transfers(data)
         self.maps = {}
+        self.settings = self.load_settings()
         self.sound = SoundPlayer()
         root.bind("<Destroy>", lambda e: self.sound.stop() if e.widget is root else None)
 
@@ -1297,6 +1463,31 @@ class App:
         self.canvas.bind("<Button-4>", lambda e: self.screen.wheel(80 * self.s))
         self.canvas.bind("<Button-5>", lambda e: self.screen.wheel(-80 * self.s))
         self.screen = HomeScreen(self)
+
+    def load_settings(self):
+        try:
+            return json.loads(settings_file().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def save_settings(self):
+        try:
+            path = settings_file()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(self.settings, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as e:
+            print("Einstellungen konnten nicht gespeichert werden:", e, file=sys.stderr)
+
+    def home_station(self):
+        """Gespeicherter Startbahnhof, sonst Lichterfelde Ost."""
+        stations = self.data["stations"]
+        key = self.settings.get("home_station")
+        if key in stations:
+            return key
+        for k, name in stations.items():
+            if name == DEFAULT_HOME:
+                return k
+        return next(iter(stations))
 
     def network_map(self, kind):
         if kind not in self.maps:
