@@ -92,6 +92,11 @@ def text_color_for(bg):
     return "#000000" if (0.299 * r + 0.587 * g + 0.114 * b) > 170 else "#FFFFFF"
 
 
+def readable(color):
+    """Helle Farben (z. B. das Gelb der U4) auf weißem Grund abdunkeln, damit man sie gut erkennt."""
+    return darker(color, 0.6) if text_color_for(color) == "#000000" else color
+
+
 def darker(color, f=0.7):
     r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
     return "#%02X%02X%02X" % (int(r * f), int(g * f), int(b * f))
@@ -499,11 +504,11 @@ class NetworkMap:
                     polyline(pts, fill=tint(color, 0.7 if many else 0.55), width=max(1, (1.5 if many else 2.5) * s))
             if len(path) >= 2:
                 col = next((col for name, col, _ in self.lines if name == line_name), "#333333")
-                polyline(path, fill=col, width=max(3, 5 * s), capstyle="round", joinstyle="round")
+                polyline(path, fill=readable(col), width=max(3, 5 * s), capstyle="round", joinstyle="round")
             self.cache = (key, items)
         for piece, kw in self.cache[1]:
             c.create_line(piece, **kw)
-        col = next((col for name, col, _ in self.lines if name == line_name), "#333333")
+        col = readable(next((col for name, col, _ in self.lines if name == line_name), "#333333"))
         if len(path) >= 2:
             for end in (path[0], path[-1]):
                 ex, ey = P(end)
@@ -725,7 +730,7 @@ def header(app, c, w, color, back):
     bw, bh = 170 * s, 58 * s
     bx, by = 20 * s, (hh - bh) / 2
     round_rect(c, bx, by, bx + bw, by + bh, 29 * s, fill="white", outline="")
-    c.create_text(bx + bw / 2, by + bh / 2, text="◀  Zurück", font=app.font(22, "bold"), fill=color)
+    c.create_text(bx + bw / 2, by + bh / 2, text="◀  Zurück", font=app.font(22, "bold"), fill=readable(color))
     app.hit(bx, by, bx + bw, by + bh, back)
     return hh, bx + bw
 

@@ -38,6 +38,12 @@ NPM = "https://registry.npmjs.org/{name}"
 
 # Betreiber im VBB-Datensatz: 1 = S-Bahn Berlin GmbH, 796 = BVG
 OPERATORS = {"1", "796"}
+
+# Linien, die im neuesten Fahrplan fehlen dürfen (z. B. wegen Bauarbeiten gesperrt), aber trotzdem ins
+# Spiel sollen. Sie werden dann aus der letzten älteren Version übernommen, in der sie noch vorkommen.
+# Die U4 fehlt seit Februar 2026 im VBB-Datensatz.
+KEEP_LINES = ["U4"]
+MAX_LOOKBACK = 12   # so viele ältere Versionen werden höchstens durchsucht
 PRODUCTS = ("sbahn", "ubahn", "tram", "bus")
 
 # GTFS route_type (VBB nutzt die erweiterten Typen) -> Verkehrsmittel
@@ -76,26 +82,26 @@ def fetch(url):
         return r.read()
 
 
-def npm_files(package, *members):
-    """Lädt die neueste Version eines npm-Pakets und liefert die gewünschten Dateien."""
+def npm_versions(package):
+    """Alle Versionen eines npm-Pakets, neueste zuerst."""
     meta = json.loads(fetch(NPM.format(name=package)))
-    version = meta["dist-tags"]["latest"]
+    times = meta["time"]
+    return sorted(meta["versions"], key=lambda v: times.get(v, ""), reverse=True), meta
+
+
+def npm_files(package, *members, version=None, meta=None):
+    """Lädt eine Version (Standard: die neueste) eines npm-Pakets und liefert die gewünschten Dateien."""
+    meta = meta or json.loads(fetch(NPM.format(name=package)))
+    version = version or meta["dist-tags"]["latest"]
     tarball = meta["versions"][version]["dist"]["tarball"]
     with tarfile.open(fileobj=io.BytesIO(fetch(tarball))) as tar:
         files = [tar.extractfile("package/" + m).read() for m in members]
     return files, f"{package}@{version}"
 
 
-def load_npm():
-    """Liefert (Linien, Haltestellennamen, Koordinaten, Quellenangabe)."""
-    (raw_lines,), v_lines = npm_files("vbb-lines", "data.ndjson")
-    (raw_names, raw_data), v_names = npm_files("vbb-stations", "names.json", "data.json")
-    names = json.loads(raw_names)
-    # data.json: [id, Name, Gewicht, Breite, Länge]
-    coords = {row[0]: (row[3], row[4]) for row in json.loads(raw_data)}
-
+def parse_npm_lines(raw):
     lines = []
-    for row in raw_lines.decode("utf-8").splitlines():
+    for row in raw.decode("utf-8").splitlines():
         if not row.strip():
             continue
         line = json.loads(row)
@@ -107,7 +113,45 @@ def load_npm():
             "product": product,
             "variants": [(v["stops"], v["trips"]) for v in line["variants"]],
         })
-    return lines, names, coords, f"VBB-GTFS über {v_lines} und {v_names}"
+    return lines
+
+
+def add_kept_lines(lines, versions, meta):
+    """Ergänzt Linien aus KEEP_LINES, die im neuesten Fahrplan fehlen, aus älteren Versionen."""
+    missing = [n for n in KEEP_LINES if not any(l["name"] == n for l in lines)]
+    notes = []
+    latest = meta["dist-tags"]["latest"]
+    older = [v for v in versions if v != latest][:MAX_LOOKBACK]
+    for version in older:
+        if not missing:
+            break
+        (raw,), label = npm_files("vbb-lines", "data.ndjson", version=version, meta=meta)
+        for line in parse_npm_lines(raw):
+            if line["name"] in missing:
+                lines.append(line)
+                missing.remove(line["name"])
+                notes.append(f"{line['name']} aus {label}")
+                print(f"  {line['name']} fehlt im neuesten Fahrplan, übernommen aus {label}", file=sys.stderr)
+    for name in missing:
+        print(f"  Warnung: {name} in keiner der letzten {MAX_LOOKBACK} Versionen gefunden", file=sys.stderr)
+    return notes
+
+
+def load_npm():
+    """Liefert (Linien, Haltestellennamen, Koordinaten, Quellenangabe)."""
+    versions, meta = npm_versions("vbb-lines")
+    (raw_lines,), v_lines = npm_files("vbb-lines", "data.ndjson", meta=meta)
+    (raw_names, raw_data), v_names = npm_files("vbb-stations", "names.json", "data.json")
+    names = json.loads(raw_names)
+    # data.json: [id, Name, Gewicht, Breite, Länge]
+    coords = {row[0]: (row[3], row[4]) for row in json.loads(raw_data)}
+
+    lines = parse_npm_lines(raw_lines)
+    notes = add_kept_lines(lines, versions, meta)
+    source = f"VBB-GTFS über {v_lines} und {v_names}"
+    if notes:
+        source += " (" + ", ".join(notes) + ")"
+    return lines, names, coords, source
 
 
 def load_gtfs(path):

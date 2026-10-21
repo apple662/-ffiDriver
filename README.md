@@ -4,7 +4,7 @@ Ein einfaches Spiel für Kinder: Verkehrsmittel aussuchen, Linie wählen und
 dann Station für Station mit den Pfeiltasten durch Berlin fahren.
 
 Enthalten sind alle S-Bahn-, U-Bahn-, Straßenbahn- und Buslinien von BVG und
-S-Bahn Berlin (15 S-Bahn-, 8 U-Bahn-, 22 Tram- und 204 Buslinien). Das
+S-Bahn Berlin (15 S-Bahn-, 9 U-Bahn-, 22 Tram- und 204 Buslinien). Das
 Programm läuft komplett **offline**.
 
 ## So wird gespielt
@@ -141,8 +141,11 @@ python3 tools/build_data.py --gtfs GTFS.zip
 Für jede Linie wählt das Skript die typische Hin- und Rückfahrt aus. Kurze
 Fahrten, Fahrten zum Betriebshof und Ersatzverkehr lässt es weg.
 
-Der aktuelle Datenstand stammt aus dem VBB-Fahrplan vom März 2026. Was in
-diesem Fahrplan nicht vorkommt, fehlt auch im Spiel (zurzeit z. B. die U4).
-Nach einem Neubau der Daten kann sich das ändern.
+Der aktuelle Datenstand stammt aus dem VBB-Fahrplan vom März 2026. Die
+**U4** fehlt darin seit Februar 2026, vermutlich wegen einer Sperrung. Damit
+sie trotzdem im Spiel ist, übernimmt das Skript Linien aus der Liste
+`KEEP_LINES` (in `tools/build_data.py`) aus der letzten älteren Version, in
+der sie noch vorkommen. Für die U4 ist das der Fahrplan vom Januar 2026.
+Weitere Linien lassen sich dort einfach eintragen.
 
 Fahrplandaten: © VBB Verkehrsverbund Berlin-Brandenburg GmbH, CC BY 4.0.
