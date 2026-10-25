@@ -20,8 +20,13 @@ Es braucht kein Python und keinen Server:
   (`app.js`, `data.js`, `sounds.js`), falls du am Code etwas ändern
   möchtest.
 
-Getestet mit Chromium; Safari, Firefox und Edge sollten genauso gehen. Am
-Tablet kann man auch tippen statt klicken.
+Getestet mit Chromium; Safari, Firefox und Edge sollten genauso gehen.
+
+Am Tablet oder Handy geht alles per Finger: **Antippen** wählt aus, **Wischen**
+scrollt durch die Linien (mit Schwung) und durch die Umsteige-Auswahl. Beim
+Fahren fährt man mit Wischen nach oben Station für Station weiter, mit Wischen
+nach unten zurück. Ausgewählt wird erst beim Loslassen und nur, wenn der Finger
+nicht gewischt hat.
 
 Unterschiede zur Python-Version:
 - Die Ansage nutzt die Sprachausgabe des Browsers. Ist keine deutsche

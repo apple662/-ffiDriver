@@ -597,6 +597,10 @@ class Screen {
   key(k, char) {}
   wheel(delta) {}
   motion(x, y) {}
+  /** Finger (oder Maus mit gedrückter Taste) wird senkrecht um dy verschoben. */
+  drag(dy) {}
+  /** Wischen beendet; v = Geschwindigkeit in Pixel pro Millisekunde (positiv = nach unten). */
+  dragEnd(v) {}
   /** Ein Animationsschritt; true, solange weiter animiert werden soll. */
   tick() { return false; }
 }
@@ -915,6 +919,17 @@ class LinesScreen extends Screen {
     this.app.animate();
   }
 
+  drag(dy) {
+    this.scrollTarget = null;
+    this.scroll -= dy;
+    this.app.redraw();
+  }
+
+  dragEnd(v) {
+    // mit Schwung weiterrollen, wie man es vom Handy kennt
+    if (Math.abs(v) > 0.2) this.scrollTo(this.scroll - v * 300);
+  }
+
   motion(x, y) {
     for (const [i, x1, y1, x2, y2] of this.cards) {
       if (x1 <= x && x <= x2 && y1 <= y && y <= y2 && i !== this.selected) {
@@ -939,6 +954,7 @@ class RideScreen extends Screen {
     this.backwards = false;  // Fahrzeug schaut nach links, wenn man zurückfährt
     this.message = ["Einsteigen, bitte!", now() + 2];
     this.lastWheel = 0;
+    this.dragAcc = 0;
   }
 
   get stops() { return this.line.directions[this.direction]; }
@@ -1287,6 +1303,18 @@ class RideScreen extends Screen {
       "Ja, speichern", save, () => app.show(this)));
   }
 
+  /** Wischen in der Stationsliste: je eine Zeile Weg = eine Station weiter (nach oben wischen = vorwärts). */
+  drag(dy) {
+    const step = ROW_H * this.app.s;
+    this.dragAcc += dy;
+    while (this.dragAcc <= -step) { this.dragAcc += step; this.next(); }
+    while (this.dragAcc >= step) { this.dragAcc -= step; this.prev(); }
+  }
+
+  dragEnd() {
+    this.dragAcc = 0;
+  }
+
   wheel(delta) {
     // Trackpads senden viele Ereignisse – höchstens eine Station je 0,25 s
     const t = now();
@@ -1340,6 +1368,10 @@ class ChangeScreen extends Screen {
     this.pick = 0;
     this.cols = 1;
     this.tiles = [];
+    this.firstRow = 0;        // oberste sichtbare Reihe
+    this.followPick = true;   // nach Tastendruck die Auswahl sichtbar halten
+    this.rowStep = 1;
+    this.dragAcc = 0;
   }
 
   draw(c, w, h) {
@@ -1357,8 +1389,16 @@ class ChangeScreen extends Screen {
     const areaY1 = y1 + 140 * s, areaY2 = by - 20 * s;
     const cols = this.cols = Math.max(1, Math.floor((areaX2 - areaX1 + gap) / (tileW + gap)));
     const rowsVisible = Math.max(1, Math.floor((areaY2 - areaY1 + gap) / (tileH + gap)));
-    const firstRow = Math.max(0, Math.floor(this.pick / cols) - rowsVisible + 1);
     const totalRows = Math.ceil(this.options.length / cols);
+    const pickRow = Math.floor(this.pick / cols);
+    if (this.followPick) {
+      if (pickRow < this.firstRow) this.firstRow = pickRow;
+      if (pickRow >= this.firstRow + rowsVisible) this.firstRow = pickRow - rowsVisible + 1;
+      this.followPick = false;
+    }
+    this.firstRow = Math.max(0, Math.min(this.firstRow, totalRows - rowsVisible));
+    const firstRow = this.firstRow;
+    this.rowStep = tileH + gap;
     const usedCols = Math.min(cols, this.options.length);
     const left = (x1 + x2) / 2 - (usedCols * tileW + (usedCols - 1) * gap) / 2;
 
@@ -1399,7 +1439,21 @@ class ChangeScreen extends Screen {
     else if (k === "Up") this.pick = Math.max(0, this.pick - cols);
     else if (KEYS_OK.has(k)) return this.choose(this.pick);
     else if (KEYS_BACK.has(k) || (char || "").toLowerCase() === "u") return this.back();
+    this.followPick = true;
     this.app.redraw();
+  }
+
+  /** Wischen blättert reihenweise durch die Kacheln. */
+  drag(dy) {
+    this.dragAcc += dy;
+    let changed = false;
+    while (this.dragAcc <= -this.rowStep * 0.6) { this.dragAcc += this.rowStep; this.firstRow++; changed = true; }
+    while (this.dragAcc >= this.rowStep * 0.6) { this.dragAcc -= this.rowStep; this.firstRow--; changed = true; }
+    if (changed) this.app.redraw();
+  }
+
+  dragEnd() {
+    this.dragAcc = 0;
   }
 
   motion(x, y) {
@@ -1484,8 +1538,12 @@ class App {
 
     window.addEventListener("resize", () => this.redraw());
     window.addEventListener("keydown", e => this.onKey(e));
-    canvas.addEventListener("pointerdown", e => this.onClick(e));
-    canvas.addEventListener("pointermove", e => { if (e.pointerType === "mouse") this.screen.motion(e.offsetX, e.offsetY); });
+    // Tippen/Klicken löst erst beim Loslassen aus – wer den Finger bewegt, scrollt stattdessen
+    this.press = null;
+    canvas.addEventListener("pointerdown", e => this.onPointerDown(e));
+    canvas.addEventListener("pointermove", e => this.onPointerMove(e));
+    canvas.addEventListener("pointerup", e => this.onPointerUp(e));
+    canvas.addEventListener("pointercancel", () => { this.press = null; });
     canvas.addEventListener("wheel", e => { e.preventDefault(); this.screen.wheel(-e.deltaY); }, { passive: false });
     canvas.focus();
     // Die Stimmen werden in manchen Browsern erst nach dem Start geladen
@@ -1585,11 +1643,48 @@ class App {
     this.screen.key(k, char);
   }
 
-  onClick(e) {
+  onPointerDown(e) {
+    if (e.button > 0) return;
     this.canvas.focus();
+    try { this.canvas.setPointerCapture(e.pointerId); } catch (err) { /* egal */ }
+    this.press = { id: e.pointerId, x: e.offsetX, y: e.offsetY, lastY: e.offsetY, moved: false, samples: [] };
+  }
+
+  onPointerMove(e) {
+    const p = this.press;
+    if (!p || p.id !== e.pointerId) {
+      if (e.pointerType === "mouse") this.screen.motion(e.offsetX, e.offsetY);
+      return;
+    }
+    // Ab 10 Pixel Bewegung ist es kein Tippen mehr, sondern Wischen
+    if (!p.moved && Math.hypot(e.offsetX - p.x, e.offsetY - p.y) > 10) p.moved = true;
+    if (!p.moved) return;
+    const dy = e.offsetY - p.lastY;
+    p.lastY = e.offsetY;
+    p.samples.push([performance.now(), dy]);
+    while (p.samples.length && performance.now() - p.samples[0][0] > 100) p.samples.shift();
+    if (dy) this.screen.drag(dy);
+  }
+
+  onPointerUp(e) {
+    const p = this.press;
+    this.press = null;
+    if (!p || p.id !== e.pointerId) return;
+    if (p.moved) {
+      // Geschwindigkeit der letzten 100 ms für den Schwung
+      const recent = p.samples.filter(([t]) => performance.now() - t < 100);
+      const dist = recent.reduce((a, [, dy]) => a + dy, 0);
+      const span = recent.length ? Math.max(16, performance.now() - recent[0][0]) : 1;
+      this.screen.dragEnd(recent.length ? dist / span : 0);
+      return;
+    }
+    this.click(p.x, p.y);
+  }
+
+  click(x, y) {
     for (let i = this.hits.length - 1; i >= 0; i--) {
       const [x1, y1, x2, y2, cb] = this.hits[i];
-      if (x1 <= e.offsetX && e.offsetX <= x2 && y1 <= e.offsetY && e.offsetY <= y2) {
+      if (x1 <= x && x <= x2 && y1 <= y && y <= y2) {
         cb();
         return;
       }
