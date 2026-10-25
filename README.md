@@ -8,6 +8,37 @@ S-Bahn Berlin sowie alle Regionalzüge, die durch Berlin fahren (15 S-Bahn-,
 9 U-Bahn-, 22 Tram-, 204 Bus- und 22 Regionallinien). Das
 Programm läuft komplett **offline**.
 
+## Browser-Version (ohne Installation)
+
+Im Ordner `web/` liegt dasselbe Spiel für den Browser, mit allen Funktionen.
+Es braucht kein Python und keinen Server:
+
+- **`web/berlin-faehrt.html`**: alles in einer einzigen Datei (gut 1 MB).
+  Per Doppelklick öffnen, fertig. Diese Datei kann man auch einfach per Mail
+  oder USB-Stick weitergeben.
+- **`web/index.html`**: dieselbe Version, aufgeteilt in mehrere Dateien
+  (`app.js`, `data.js`, `sounds.js`), falls du am Code etwas ändern
+  möchtest.
+
+Getestet mit Chromium; Safari, Firefox und Edge sollten genauso gehen. Am
+Tablet kann man auch tippen statt klicken.
+
+Unterschiede zur Python-Version:
+- Die Ansage nutzt die Sprachausgabe des Browsers. Ist keine deutsche
+  Stimme installiert, liest der Browser mit einer anderen Stimme vor.
+- Startbahnhof und Ankreuzfeld speichert der Browser (localStorage). Sie
+  gelten also nur für diesen Browser und gehen verloren, wenn man dort die
+  Websitedaten löscht.
+- Vollbild gibt es mit der Vollbild-Taste des Browsers (meist `F11`, am Mac
+  `Ctrl` + `Cmd` + `F`).
+
+Nach einem Neubau der Daten oder Töne wird die Browser-Version so
+aktualisiert:
+
+```sh
+python3 tools/build_web.py
+```
+
 ## So wird gespielt
 
 | Bildschirm | Bedienung |

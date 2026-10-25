@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Berlin fährt!</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #FFF8E7; overflow: hidden; }
+    canvas { display: block; width: 100vw; height: 100vh; touch-action: none; outline: none; }
+    #fehler { font: 20px sans-serif; padding: 2em; color: #2B2B2B; }
+  </style>
+</head>
+<body>
+  <canvas id="spiel" tabindex="0"></canvas>
+  <noscript><p id="fehler">Für „Berlin fährt!“ muss JavaScript eingeschaltet sein.</p></noscript>
+  <!-- Fahrplandaten und Töne als Skript, damit es auch per Doppelklick (file://) ohne Server läuft -->
+  <script src="data.js"></script>
+  <script src="sounds.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
