@@ -28,6 +28,7 @@ const MODES = [
   ["tram", "Straßenbahn", "#CC0A22", ["#F7D117", "#FFFFFF"]],
   ["bus", "Bus", "#A5027D", ["#F7D117", "#3A3A3A"]],
   ["regio", "Regionalbahn", "#4B5563", ["#D7001D", "#FFFFFF"]],
+  ["ice", "ICE", "#EC0016", ["#F4F4F4", "#EC0016"]],
 ];
 const MODE = Object.fromEntries(MODES.map(m => [m[0], m]));
 
@@ -198,8 +199,13 @@ function drawVehicle(c, kind, cx, cy, length, flip = false) {
   for (const wx of kind !== "bus" ? [-0.32, -0.22, 0.22, 0.32] : [-0.3, 0.3]) {
     poly(circlePoints(wx, bottom, wheelR, 12), { fill: "#333333" });
   }
-  // Wagenkasten
-  poly(roundRectPoints(-0.5, top, 0.5, bottom, kind === "bus" ? 0.05 : 0.09), { fill: body, outline, width: lw });
+  // Wagenkasten (der ICE hat vorne eine spitze Nase)
+  if (kind === "ice") {
+    poly([[-0.46, top], [0.2, top], [0.38, top + 0.04], [0.5, bottom - 0.07], [0.5, bottom - 0.02],
+      [0.47, bottom], [-0.46, bottom], [-0.5, bottom - 0.04], [-0.5, top + 0.04]], { fill: body, outline: "#9AA0A6", width: lw });
+  } else {
+    poly(roundRectPoints(-0.5, top, 0.5, bottom, kind === "bus" ? 0.05 : 0.09), { fill: body, outline, width: lw });
+  }
   // Zierstreifen
   if (kind === "sbahn") {
     poly([[-0.49, top + 0.005], [0.47, top + 0.005], [0.49, top + 0.06], [-0.49, top + 0.06]], { fill: accent });
@@ -209,7 +215,8 @@ function drawVehicle(c, kind, cx, cy, length, flip = false) {
   // Fenster (der Regionalzug ist ein Doppelstockwagen: zwei Fensterreihen)
   const win = "#CFE8FF";
   let wy1 = top + 0.07, wy2 = top + 0.07 + (kind !== "bus" ? 0.10 : 0.12);
-  const xs = kind !== "bus" ? [-0.42, -0.27, -0.12, 0.03, 0.18] : [-0.44, -0.29, -0.14, 0.01, 0.16];
+  let xs = kind !== "bus" ? [-0.42, -0.27, -0.12, 0.03, 0.18] : [-0.44, -0.29, -0.14, 0.01, 0.16];
+  if (kind === "ice") xs = [-0.44, -0.3, -0.16, 0.06];
   let rows = [[wy1, wy2]];
   if (kind === "regio") {
     wy1 = top + 0.05; wy2 = top + 0.13;
@@ -219,11 +226,12 @@ function drawVehicle(c, kind, cx, cy, length, flip = false) {
     for (const wx of xs) poly(roundRectPoints(wx, ry1, wx + 0.11, ry2, 0.015), { fill: win, outline, width: lw / 2 });
   }
   // Frontscheibe
-  poly(roundRectPoints(0.33, wy1, 0.47, wy2 + 0.03, 0.03), { fill: win, outline, width: lw / 2 });
+  if (kind === "ice") poly([[0.26, wy1], [0.36, wy1 + 0.01], [0.44, wy2 + 0.01], [0.3, wy2 + 0.01]], { fill: "#2B3440" });
+  else poly(roundRectPoints(0.33, wy1, 0.47, wy2 + 0.03, 0.03), { fill: win, outline, width: lw / 2 });
   // Tür
   const door = kind !== "bus" ? [-0.06, 0.04] : [0.29, 0.36];
   poly([[door[0], wy1], [door[1], wy1], [door[1], bottom - 0.055], [door[0], bottom - 0.055]],
-    { fill: darker(body, 0.85), outline, width: lw / 2 });
+    { fill: darker(body, 0.85), outline: kind === "ice" ? "#9AA0A6" : outline, width: lw / 2 });
   // Scheinwerfer
   poly(circlePoints(0.47, bottom - 0.07, 0.018, 10), { fill: "#FFF6B0" });
 }
@@ -239,6 +247,9 @@ function drawModeSign(c, app, kind, cx, cy, size) {
   } else if (kind === "ubahn") {
     c.roundRect(cx - r, cy - r, cx + r, cy + r, size * 0.08, { fill: color });
     c.text(cx, cy, "U", app.font(size / s * 0.62, "bold"), "white");
+  } else if (kind === "ice") {
+    c.roundRect(cx - r, cy - r, cx + r, cy + r, size * 0.22, { fill: color });
+    c.text(cx, cy, "ICE", app.font(size / s * 0.36, "bold"), "white");
   } else if (kind === "regio") {
     // wie die roten Zugschilder der Bahn: „RE“ in Rot auf Weiß
     c.roundRect(cx - r, cy - r, cx + r, cy + r, size * 0.22, { fill: color });
@@ -290,6 +301,20 @@ function wrapText(font, text, width, maxLines = 3) {
   return lines.map(line => fitText(font, line, width));
 }
 
+/** Ankreuzfeld mit Beschriftung; ganze Zeile anklickbar. */
+function checkbox(app, c, x, cy, label, on, callback) {
+  const s = app.s, box = 22 * s;
+  c.roundRect(x, cy - box / 2, x + box, cy + box / 2, 5 * s,
+    { fill: on ? "#2F855A" : "white", outline: on ? "#2F855A" : MUTED, width: 2 * s });
+  if (on) {
+    c.line([[x + box * 0.22, cy], [x + box * 0.43, cy + box * 0.22], [x + box * 0.8, cy - box * 0.25]],
+      { fill: "white", width: 3 * s, cap: "round", join: "round" });
+  }
+  const font = app.font(15);
+  c.text(x + box + 10 * s, cy, label, font, TEXT, "w");
+  app.hit(x - 6 * s, cy - box * 0.6, x + box + 16 * s + font.measure(label), cy + box * 0.6, callback);
+}
+
 function drawHouse(c, cx, cy, size, color) {
   const h = size / 2;
   c.polygon([[cx - h, cy - h * 0.1], [cx, cy - h], [cx + h, cy - h * 0.1]], { fill: color });
@@ -314,7 +339,7 @@ function spokenName(name) {
 
 /** "S85" -> "S 85", damit die Nummer als Zahl gesprochen wird. */
 function spokenLine(name) {
-  return name.replace(/^([A-Z]+)(\d)/, "$1 $2");
+  return name.replace("ICE", "I-C-E").replace(/^([A-Z]+)(\d)/, "$1 $2");
 }
 
 class SoundPlayer {
@@ -366,9 +391,9 @@ class SoundPlayer {
 // Umsteigen
 // --------------------------------------------------------------------------
 
-const MODE_ORDER = ["sbahn", "ubahn", "regio", "tram", "bus"];     // Reihenfolge beim Umsteigen
+const MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "tram", "bus"];     // Reihenfolge beim Umsteigen
 // Bei „Umsteigen getrennt“ sieht man nur Umstiege innerhalb der eigenen Gruppe
-const MODE_GROUPS = [["sbahn", "ubahn", "regio"], ["tram", "bus"]];
+const MODE_GROUPS = [["sbahn", "ubahn", "regio", "ice"], ["tram", "bus"]];
 const NEAR_M = 200;          // Haltestellen in diesem Umkreis gehören zusammen
 const SAME_NAME_M = 400;     // gleichnamige Stationen (z. B. "S+U" und "U Alexanderplatz") auch etwas weiter
 
@@ -637,7 +662,7 @@ class HomeScreen extends Screen {
     const rows = Math.ceil(n / cols);
     const gap = 30 * s;
     const areaTop = 165 * s;
-    const areaBottom = h - 150 * s;       // darunter: Start-Knopf
+    const areaBottom = h - 180 * s;       // darunter: Start-Knopf und Ankreuzfelder
     const tileW = Math.min((w - gap * (cols + 1)) / cols, (areaBottom - areaTop - gap * (rows - 1)) / rows * 0.95);
     const tileH = tileW * 1.05;
     const totalH = rows * tileH + (rows - 1) * gap;
@@ -671,7 +696,7 @@ class HomeScreen extends Screen {
     const home = app.homeStation();
     const sel = this.selected === HomeScreen.START;
     let bw = Math.min(w - 80 * s, 720 * s), bh = 86 * s;
-    let bx1 = (w - bw) / 2, by1 = h - 135 * s;
+    let bx1 = (w - bw) / 2, by1 = h - 165 * s;
     if (sel) { bx1 -= 6 * s; by1 -= 6 * s; bw += 12 * s; bh += 12 * s; }
     const bx2 = bx1 + bw, by2 = by1 + bh;
     const green = "#2F855A";
@@ -687,26 +712,18 @@ class HomeScreen extends Screen {
     this.startBox = [bx1, by1, bx2, by2];
     app.hit(bx1, by1, bx2, by2, () => this.start());
 
-    // Ankreuzfeld für Eltern: Umstiege nur innerhalb von Bahn bzw. Bus+Tram zeigen
-    const on = app.separateModes();
-    const box = 22 * s, cx1 = 24 * s, cy = h - 22 * s;
-    c.roundRect(cx1, cy - box / 2, cx1 + box, cy + box / 2, 5 * s,
-      { fill: on ? "#2F855A" : "white", outline: on ? "#2F855A" : MUTED, width: 2 * s });
-    if (on) {
-      c.line([[cx1 + box * 0.22, cy], [cx1 + box * 0.43, cy + box * 0.22], [cx1 + box * 0.8, cy - box * 0.25]],
-        { fill: "white", width: 3 * s, cap: "round", join: "round" });
-    }
-    const labelFont = app.font(15);
-    const label = "Umsteigen getrennt: S-Bahn, U-Bahn, Regio / Tram, Bus";
-    c.text(cx1 + box + 10 * s, cy, label, labelFont, TEXT, "w");
-    app.hit(cx1 - 6 * s, cy - box, cx1 + box + 16 * s + labelFont.measure(label), cy + box, () => this.toggleSeparate());
+    // Ankreuzfelder für Eltern
+    checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE / Tram, Bus",
+      app.separateModes(), () => this.toggle("separate_modes", app.separateModes()));
+    checkbox(app, c, 24 * s, h - 22 * s, "Zeige ICE-Umstiege", app.showIce(),
+      () => this.toggle("show_ice", app.showIce()));
 
     c.text(w - 24 * s, h - 22 * s, "Fahrplandaten: VBB (CC BY 4.0)", app.font(11), MUTED, "e");
   }
 
-  toggleSeparate() {
+  toggle(setting, current) {
     const app = this.app;
-    app.settings.separate_modes = !app.separateModes();
+    app.settings[setting] = !current;
     app.saveSettings();
     app.redraw();
   }
@@ -765,7 +782,7 @@ class HomeScreen extends Screen {
       return this.open(this.selected);
     } else if (k === PARENT_KEY) {
       return this.resetHome();
-    } else if (char && "12345".slice(0, n).includes(char)) {
+    } else if (char && "123456".slice(0, n).includes(char)) {
       return this.open(+char - 1);
     }
     if (this.selected < HomeScreen.START) this.lastTile = this.selected;
@@ -907,8 +924,12 @@ class LinesScreen extends Screen {
       const t = now();
       this.typed = (t - this.typedAt < 1.5 ? this.typed : "") + char.toUpperCase();
       this.typedAt = t;
-      const i = this.lines.findIndex(line => line.name.toUpperCase().startsWith(this.typed));
-      if (i >= 0) this.selected = i;
+      // erst der volle Name („100“, „RE1“), sonst nur die Nummer („10“ findet „ICE 10“)
+      const names = this.lines.map(line => line.name.toUpperCase().replace(/ /g, ""));
+      for (const candidates of [names, names.map(n => n.replace(/^[A-Z]+/, ""))]) {
+        const i = candidates.findIndex(n => n.startsWith(this.typed));
+        if (i >= 0) { this.selected = i; break; }
+      }
     } else return;
     this.follow = true;
     this.app.redraw();
@@ -1216,7 +1237,7 @@ class RideScreen extends Screen {
 
   doors() {
     const speech = { sbahn: "Zurückbleiben, bitte!", ubahn: "Zurückbleiben, bitte!",
-      regio: "Bitte einsteigen. Vorsicht bei der Abfahrt!" }[this.kind];
+      regio: "Bitte einsteigen. Vorsicht bei der Abfahrt!", ice: "Bitte einsteigen. Vorsicht bei der Abfahrt!" }[this.kind];
     this.app.sound.play(this.kind, speech);
     // Beim Bus zischt die Druckluft, wenn die Türen aufgehen
     this.say(this.kind === "bus" ? "Pssscht – Türen auf!" : "Türen schließen!", 2.5);
@@ -1570,10 +1591,16 @@ class App {
     return this.settings.separate_modes !== undefined ? this.settings.separate_modes : true;
   }
 
+  /** Ankreuzfeld „Zeige ICE-Umstiege“, standardmäßig an. */
+  showIce() {
+    return this.settings.show_ice !== undefined ? this.settings.show_ice : true;
+  }
+
   /** Verkehrsmittel, in die man von kind aus umsteigen kann (null = alle). */
   transferKinds(kind) {
-    if (!this.separateModes()) return null;
-    return MODE_GROUPS.find(g => g.includes(kind));
+    let kinds = this.separateModes() ? MODE_GROUPS.find(g => g.includes(kind)) : MODE_ORDER;
+    if (!this.showIce()) kinds = kinds.filter(k => k !== "ice");
+    return kinds.length === MODE_ORDER.length ? null : kinds;
   }
 
   /** Gespeicherter Startbahnhof, sonst Lichterfelde Ost. */

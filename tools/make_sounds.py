@@ -8,6 +8,7 @@ Die Töne sind den Berliner Fahrzeugen nachempfunden, keine Originalaufnahmen:
 - Tram:    Bimmel-Glocke („Ding-Ding“) und danach Pieptöne
 - Bus:     Zischen der Druckluft, wenn die Türen aufgehen, mit leisem „Klonk“
 - Regio:   langsamere, hohe Doppelpieptöne wie bei Doppelstockzügen, dann Druckluft
+- ICE:     Dreiklang-Gong wie am Bahnsteig, dann gleichmäßige Warnpieptöne
 
     python3 tools/make_sounds.py
 """
@@ -137,12 +138,22 @@ def regio():
     return s
 
 
+def ice():
+    s = []
+    for i, freq in enumerate((784, 659, 523)):       # Gong: drei weiche, absteigende Töne
+        mix_in(s, bell(freq, 1.1, 0.5), i * 0.36)
+    for i in range(6):
+        mix_in(s, tone(1900, 0.14, 0.4, (1.0, 0.25)), 1.5 + i * 0.3)
+    return s
+
+
 def main():
     save("sbahn.wav", sbahn())
     save("ubahn.wav", ubahn())
     save("tram.wav", tram())
     save("bus.wav", bus())
     save("regio.wav", regio())
+    save("ice.wav", ice())
 
 
 if __name__ == "__main__":

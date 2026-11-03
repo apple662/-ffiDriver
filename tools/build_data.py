@@ -44,7 +44,10 @@ OPERATORS = {"1", "796"}
 # Die U4 fehlt seit Februar 2026 im VBB-Datensatz.
 KEEP_LINES = ["U4"]
 MAX_LOOKBACK = 12   # so viele ältere Versionen werden höchstens durchsucht
-PRODUCTS = ("sbahn", "ubahn", "tram", "bus", "regio")
+PRODUCTS = ("sbahn", "ubahn", "tram", "bus", "regio", "ice")
+# ICE-Linien stehen nicht im VBB-Fahrplan; sie kommen aus dieser Datei (von Hand gepflegt)
+ICE_FILE = ROOT / "data" / "ice_lines.json"
+ICE_COLOR = "#EC0016"   # DB-Rot
 # Regionalzüge kommen von vielen Betreibern (DB Regio, ODEG, NEB …); genommen werden alle,
 # die mindestens einmal in Berlin halten (Haltestellen-IDs „de:11000:…“).
 BERLIN_PREFIX = "de:11000:"
@@ -70,7 +73,7 @@ LINE_COLORS = {
     "S75": "#816DA6", "S8": "#66AA22", "S85": "#66AA22", "S9": "#992746",
 }
 DEFAULT_COLORS = {"sbahn": "#008D4F", "ubahn": "#115D91", "tram": "#CC0A22", "bus": "#A5027D",
-                  "regio": "#E2001A"}
+                  "regio": "#E2001A", "ice": "#EC0016"}
 
 STATION_ID = re.compile(r"900\d{6}")
 
@@ -245,6 +248,48 @@ def sort_key(line):
     return (order, prefix, int(num) if num else 0, rest)
 
 
+def ice_name(name):
+    """ "Frankfurt (Main) Hbf" -> "Frankfurt (Main) Hauptbahnhof", passend zu den Regionalbahn-Namen."""
+    name = re.sub(r"\bHbf\b", "Hauptbahnhof", name)
+    return name.replace("Bad Bf", "Badischer Bahnhof")
+
+
+def add_ice_lines(result, stations, coords):
+    """ICE-Linien aus data/ice_lines.json; Koordinaten aus dem DB-Stationsverzeichnis (db-stations)."""
+    if not ICE_FILE.exists():
+        return
+    spec = json.loads(ICE_FILE.read_text(encoding="utf-8"))
+    (raw,), label = npm_files("db-stations", "data.ndjson")
+    db = {}
+    for row in raw.decode("utf-8").splitlines():
+        if row.strip():
+            st = json.loads(row)
+            db[st["name"]] = st
+    by_name = {}
+    for key, name in stations.items():
+        by_name.setdefault(name, key)
+
+    def station(name):
+        if name in spec.get("berlin", {}):
+            return by_name[spec["berlin"][name]]          # Berliner Bahnhof = VBB-Station
+        if name in db:
+            key = "db:" + db[name]["id"]
+            loc = db[name]["location"]
+            coords.setdefault(key, [round(loc["latitude"], 5), round(loc["longitude"], 5)])
+        elif name in spec.get("extra_coords", {}):
+            key = "db:" + re.sub(r"\W+", "-", name.lower())
+            coords.setdefault(key, spec["extra_coords"][name])
+        else:
+            raise SystemExit(f"ICE-Bahnhof unbekannt: {name!r} (Schreibweise wie in db-stations?)")
+        stations.setdefault(key, ice_name(name))
+        return key
+
+    for line in spec["lines"]:
+        stops = [station(n) for n in line["stops"]]
+        result["ice"].append({"name": line["name"], "color": ICE_COLOR, "directions": [stops, stops[::-1]]})
+    print(f"  {len(spec['lines'])} ICE-Linien aus {ICE_FILE.name}, Koordinaten aus {label}", file=sys.stderr)
+
+
 def build(lines, raw_names, raw_coords, source):
     # Namen je Station (900er-Nummer); Stationseinträge haben Vorrang vor Bahnsteigen
     by_station = {}
@@ -314,12 +359,14 @@ def build(lines, raw_names, raw_coords, source):
             "directions": directions,
         })
 
+    add_ice_lines(result, stations, coords)
+
     used = {s for p in result.values() for l in p for d in l["directions"] for s in d}
     for product in result:
         result[product].sort(key=sort_key)
 
     return {
-        "source": source,
+        "source": source + (" + ICE-Linien von Hand (data/ice_lines.json)" if result["ice"] else ""),
         "license": "Fahrplandaten: VBB Verkehrsverbund Berlin-Brandenburg GmbH, CC BY 4.0",
         "created": date.today().isoformat(),
         "stations": {k: v for k, v in sorted(stations.items()) if k in used},

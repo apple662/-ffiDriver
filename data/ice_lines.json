@@ -1,0 +1,51 @@
+{
+  "_hinweis": [
+    "ICE-Linien, die durch Berlin fahren. Von Hand nach dem DB-Liniennetz zusammengestellt,",
+    "weil die VBB-Fahrplandaten keine Fernzüge enthalten. Gezeigt wird je Linie der typische",
+    "Laufweg mit den wichtigsten Halten; einzelne Züge können abweichen (Flügelzüge, Sprinter).",
+    "Bahnhofsnamen wie im DB-Stationsverzeichnis (npm-Paket db-stations), daraus kommen die",
+    "Koordinaten. Berliner Bahnhöfe werden auf die VBB-Stationen abgebildet, damit das Umsteigen",
+    "zu S- und U-Bahn funktioniert. Nach Änderungen: python3 tools/build_data.py"
+  ],
+  "berlin": {
+    "Berlin Hauptbahnhof": "S+U Berlin Hauptbahnhof",
+    "Berlin Ostbahnhof": "S Ostbahnhof",
+    "Berlin-Spandau": "S Spandau",
+    "Berlin Südkreuz": "S Südkreuz",
+    "Berlin Gesundbrunnen": "S+U Gesundbrunnen"
+  },
+  "extra_coords": {
+    "Basel Bad Bf": [47.5672, 7.6075]
+  },
+  "lines": [
+    {"name": "ICE 10", "stops": [
+      "Berlin Ostbahnhof", "Berlin Hauptbahnhof", "Berlin-Spandau", "Wolfsburg Hbf", "Hannover Hbf",
+      "Bielefeld Hbf", "Hamm (Westf) Hbf", "Dortmund Hbf", "Bochum Hbf", "Essen Hbf", "Duisburg Hbf",
+      "Düsseldorf Hbf", "Köln Hbf"]},
+    {"name": "ICE 11", "stops": [
+      "Berlin Gesundbrunnen", "Berlin Hauptbahnhof", "Berlin Südkreuz", "Lutherstadt Wittenberg Hauptbahnhof",
+      "Leipzig Hbf", "Erfurt Hbf", "Eisenach", "Fulda", "Frankfurt (Main) Hbf", "Mannheim Hbf", "Stuttgart Hbf",
+      "Ulm Hbf", "Augsburg Hbf", "München Hbf"]},
+    {"name": "ICE 12", "stops": [
+      "Berlin Ostbahnhof", "Berlin Hauptbahnhof", "Berlin-Spandau", "Wolfsburg Hbf", "Braunschweig Hbf",
+      "Hildesheim Hbf", "Göttingen", "Kassel-Wilhelmshöhe", "Fulda", "Frankfurt (Main) Hbf", "Mannheim Hbf",
+      "Karlsruhe Hbf", "Offenburg", "Freiburg (Breisgau) Hbf", "Basel Bad Bf"]},
+    {"name": "ICE 13", "stops": [
+      "Berlin Ostbahnhof", "Berlin Hauptbahnhof", "Berlin-Spandau", "Wolfsburg Hbf", "Braunschweig Hbf",
+      "Hildesheim Hbf", "Göttingen", "Kassel-Wilhelmshöhe", "Fulda", "Hanau Hbf", "Frankfurt (Main) Hbf",
+      "Frankfurt am Main Flughafen Fernbahnhof"]},
+    {"name": "ICE 15", "stops": [
+      "Berlin Hauptbahnhof", "Berlin Südkreuz", "Halle (Saale) Hbf", "Erfurt Hbf", "Frankfurt (Main) Hbf"]},
+    {"name": "ICE 18", "stops": [
+      "Hamburg-Altona", "Hamburg Hbf", "Berlin-Spandau", "Berlin Hauptbahnhof", "Berlin Südkreuz",
+      "Lutherstadt Wittenberg Hauptbahnhof", "Halle (Saale) Hbf", "Erfurt Hbf", "Nürnberg Hbf",
+      "Ingolstadt Hbf", "München Hbf"]},
+    {"name": "ICE 28", "stops": [
+      "Hamburg-Altona", "Hamburg Hbf", "Ludwigslust", "Berlin-Spandau", "Berlin Hauptbahnhof", "Berlin Südkreuz",
+      "Lutherstadt Wittenberg Hauptbahnhof", "Leipzig Hbf", "Erfurt Hbf", "Coburg", "Bamberg", "Erlangen",
+      "Nürnberg Hbf", "Ingolstadt Hbf", "München Hbf"]},
+    {"name": "ICE 29", "stops": [
+      "Berlin Gesundbrunnen", "Berlin Hauptbahnhof", "Berlin Südkreuz", "Halle (Saale) Hbf", "Erfurt Hbf",
+      "Nürnberg Hbf", "München Hbf"]}
+  ]
+}

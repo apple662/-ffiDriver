@@ -56,6 +56,7 @@ MODES = [
     ("tram", "Straßenbahn", "#CC0A22", ("#F7D117", "#FFFFFF")),
     ("bus", "Bus", "#A5027D", ("#F7D117", "#3A3A3A")),
     ("regio", "Regionalbahn", "#4B5563", ("#D7001D", "#FFFFFF")),
+    ("ice", "ICE", "#EC0016", ("#F4F4F4", "#EC0016")),
 ]
 MODE = {m[0]: m for m in MODES}
 
@@ -131,9 +132,14 @@ def draw_vehicle(c, kind, cx, cy, length, flip=False):
     wheels = (-0.32, -0.22, 0.22, 0.32) if kind != "bus" else (-0.3, 0.3)
     for wx in wheels:
         poly(circle_points(wx, bottom, wheel_r, 12), fill="#333333", outline="")
-    # Wagenkasten
-    poly(round_rect_points(-0.5, top, 0.5, bottom, 0.05 if kind == "bus" else 0.09),
-         fill=body, outline=outline, width=lw)
+    # Wagenkasten (der ICE hat vorne eine spitze Nase)
+    if kind == "ice":
+        poly([(-0.46, top), (0.2, top), (0.38, top + 0.04), (0.5, bottom - 0.07), (0.5, bottom - 0.02),
+              (0.47, bottom), (-0.46, bottom), (-0.5, bottom - 0.04), (-0.5, top + 0.04)],
+             fill=body, outline="#9AA0A6", width=lw)
+    else:
+        poly(round_rect_points(-0.5, top, 0.5, bottom, 0.05 if kind == "bus" else 0.09),
+             fill=body, outline=outline, width=lw)
     # Zierstreifen
     if kind == "sbahn":
         poly([(-0.49, top + 0.005), (0.47, top + 0.005), (0.49, top + 0.06), (-0.49, top + 0.06)], fill=accent, outline="")
@@ -144,6 +150,8 @@ def draw_vehicle(c, kind, cx, cy, length, flip=False):
     win = "#CFE8FF"
     wy1, wy2 = top + 0.07, top + 0.07 + (0.10 if kind != "bus" else 0.12)
     xs = [-0.42, -0.27, -0.12, 0.03, 0.18] if kind != "bus" else [-0.44, -0.29, -0.14, 0.01, 0.16]
+    if kind == "ice":
+        xs = [-0.44, -0.3, -0.16, 0.06]
     rows = [(wy1, wy2)]
     if kind == "regio":
         wy1, wy2 = top + 0.05, top + 0.13
@@ -152,11 +160,14 @@ def draw_vehicle(c, kind, cx, cy, length, flip=False):
         for wx in xs:
             poly(round_rect_points(wx, ry1, wx + 0.11, ry2, 0.015), fill=win, outline=outline, width=lw / 2)
     # Frontscheibe
-    poly(round_rect_points(0.33, wy1, 0.47, wy2 + 0.03, 0.03), fill=win, outline=outline, width=lw / 2)
+    if kind == "ice":
+        poly([(0.26, wy1), (0.36, wy1 + 0.01), (0.44, wy2 + 0.01), (0.3, wy2 + 0.01)], fill="#2B3440", outline="")
+    else:
+        poly(round_rect_points(0.33, wy1, 0.47, wy2 + 0.03, 0.03), fill=win, outline=outline, width=lw / 2)
     # Tür
     door = (-0.06, 0.04) if kind != "bus" else (0.29, 0.36)
     poly([(door[0], wy1), (door[1], wy1), (door[1], bottom - 0.055), (door[0], bottom - 0.055)],
-         fill=darker(body, 0.85), outline=outline, width=lw / 2)
+         fill=darker(body, 0.85), outline="#9AA0A6" if kind == "ice" else outline, width=lw / 2)
     # Scheinwerfer
     poly(circle_points(0.47, bottom - 0.07, 0.018, 10), fill="#FFF6B0", outline="")
 
@@ -171,6 +182,9 @@ def draw_mode_sign(c, app, kind, cx, cy, size):
     elif kind == "ubahn":
         round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.08, fill=color, outline="")
         c.create_text(cx, cy, text="U", fill="white", font=app.font(size / app.s * 0.62, "bold"))
+    elif kind == "ice":
+        round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
+        c.create_text(cx, cy, text="ICE", fill="white", font=app.font(size / app.s * 0.36, "bold"))
     elif kind == "regio":
         # wie die roten Zugschilder der Bahn: „RE“ in Rot auf Weiß
         round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
@@ -243,6 +257,7 @@ def spoken_name(name):
 
 def spoken_line(name):
     """ "S85" -> "S 85", damit die Nummer als Zahl gesprochen wird."""
+    name = name.replace("ICE", "I-C-E")
     return re.sub(r"^([A-Z]+)(\d)", r"\1 \2", name)
 
 
@@ -325,9 +340,9 @@ class SoundPlayer:
 # Umsteigen
 # --------------------------------------------------------------------------
 
-MODE_ORDER = ["sbahn", "ubahn", "regio", "tram", "bus"]     # Reihenfolge beim Umsteigen
+MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "tram", "bus"]     # Reihenfolge beim Umsteigen
 # Bei „Umsteigen getrennt“ sieht man nur Umstiege innerhalb der eigenen Gruppe
-MODE_GROUPS = [("sbahn", "ubahn", "regio"), ("tram", "bus")]
+MODE_GROUPS = [("sbahn", "ubahn", "regio", "ice"), ("tram", "bus")]
 NEAR_M = 200          # Haltestellen in diesem Umkreis gehören zusammen
 SAME_NAME_M = 400     # gleichnamige Stationen (z. B. "S+U" und "U Alexanderplatz") auch etwas weiter
 
@@ -579,6 +594,20 @@ class Screen:
         return False
 
 
+def checkbox(app, c, x, cy, label, on, callback):
+    """Ankreuzfeld mit Beschriftung; ganze Zeile anklickbar."""
+    s = app.s
+    box = 22 * s
+    round_rect(c, x, cy - box / 2, x + box, cy + box / 2, 5 * s, fill="#2F855A" if on else "white",
+               outline="#2F855A" if on else MUTED, width=2 * s)
+    if on:
+        c.create_line(x + box * 0.22, cy, x + box * 0.43, cy + box * 0.22, x + box * 0.8, cy - box * 0.25,
+                      fill="white", width=3 * s, capstyle="round", joinstyle="round")
+    font = app.font(15)
+    c.create_text(x + box + 10 * s, cy, text=label, anchor="w", font=font, fill=TEXT)
+    app.hit(x - 6 * s, cy - box * 0.6, x + box + 16 * s + font.measure(label), cy + box * 0.6, callback)
+
+
 def draw_house(c, cx, cy, size, color):
     """Kleines Haus-Symbol für den Startbahnhof."""
     h = size / 2
@@ -609,7 +638,7 @@ class HomeScreen(Screen):
         rows = math.ceil(n / cols)
         gap = 30 * s
         area_top = 165 * s
-        area_bottom = h - 150 * s       # darunter: Start-Knopf
+        area_bottom = h - 180 * s       # darunter: Start-Knopf und Ankreuzfelder
         tile_w = min((w - gap * (cols + 1)) / cols, (area_bottom - area_top - gap * (rows - 1)) / rows * 0.95)
         tile_h = tile_w * 1.05
         total_h = rows * tile_h + (rows - 1) * gap
@@ -644,7 +673,7 @@ class HomeScreen(Screen):
         home = app.home_station()
         sel = self.selected == self.START
         bw, bh = min(w - 80 * s, 720 * s), 86 * s
-        bx1, by1 = (w - bw) / 2, h - 135 * s
+        bx1, by1 = (w - bw) / 2, h - 165 * s
         if sel:
             bx1 -= 6 * s; by1 -= 6 * s; bw += 12 * s; bh += 12 * s
         bx2, by2 = bx1 + bw, by1 + bh
@@ -663,26 +692,18 @@ class HomeScreen(Screen):
         self.start_box = (bx1, by1, bx2, by2)
         app.hit(bx1, by1, bx2, by2, self.start)
 
-        # Ankreuzfeld für Eltern: Umstiege nur innerhalb von Bahn bzw. Bus+Tram zeigen
-        on = app.separate_modes()
-        box = 22 * s
-        cx1, cy = 24 * s, h - 22 * s
-        round_rect(c, cx1, cy - box / 2, cx1 + box, cy + box / 2, 5 * s, fill="#2F855A" if on else "white",
-                   outline="#2F855A" if on else MUTED, width=2 * s)
-        if on:
-            c.create_line(cx1 + box * 0.22, cy, cx1 + box * 0.43, cy + box * 0.22, cx1 + box * 0.8, cy - box * 0.25,
-                          fill="white", width=3 * s, capstyle="round", joinstyle="round")
-        label_font = app.font(15)
-        label = "Umsteigen getrennt: S-Bahn, U-Bahn, Regio / Tram, Bus"
-        c.create_text(cx1 + box + 10 * s, cy, text=label, anchor="w", font=label_font, fill=TEXT)
-        app.hit(cx1 - 6 * s, cy - box, cx1 + box + 16 * s + label_font.measure(label), cy + box, self.toggle_separate)
+        # Ankreuzfelder für Eltern
+        checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE / Tram, Bus",
+                 app.separate_modes(), lambda: self.toggle("separate_modes", app.separate_modes()))
+        checkbox(app, c, 24 * s, h - 22 * s, "Zeige ICE-Umstiege", app.show_ice(),
+                 lambda: self.toggle("show_ice", app.show_ice()))
 
         c.create_text(w - 24 * s, h - 22 * s, text="Fahrplandaten: VBB (CC BY 4.0)", anchor="e",
                       font=app.font(11), fill=MUTED)
 
-    def toggle_separate(self):
+    def toggle(self, setting, current):
         app = self.app
-        app.settings["separate_modes"] = not app.separate_modes()
+        app.settings[setting] = not current
         app.save_settings()
         app.redraw()
 
@@ -749,7 +770,7 @@ class HomeScreen(Screen):
         elif k == PARENT_KEY:
             self.reset_home()
             return
-        elif char and char in "12345"[:len(MODES)]:
+        elif char and char in "123456"[:len(MODES)]:
             self.open(int(char) - 1)
             return
         if self.selected < self.START:
@@ -912,9 +933,12 @@ class LinesScreen(Screen):
             now = time.monotonic()
             self.typed = (self.typed if now - self.typed_at < 1.5 else "") + char.upper()
             self.typed_at = now
-            for i, line in enumerate(self.lines):
-                if line["name"].upper().startswith(self.typed):
-                    self.selected = i
+            # erst der volle Name („100“, „RE1“), sonst nur die Nummer („10“ findet „ICE 10“)
+            names = [line["name"].upper().replace(" ", "") for line in self.lines]
+            for candidates in (names, [re.sub(r"^[A-Z]+", "", n) for n in names]):
+                hit = next((i for i, n in enumerate(candidates) if n.startswith(self.typed)), None)
+                if hit is not None:
+                    self.selected = hit
                     break
         else:
             return
@@ -1209,7 +1233,8 @@ class RideScreen(Screen):
 
     def doors(self):
         speech = {"sbahn": "Zurückbleiben, bitte!", "ubahn": "Zurückbleiben, bitte!",
-                  "regio": "Bitte einsteigen. Vorsicht bei der Abfahrt!"}.get(self.kind)
+                  "regio": "Bitte einsteigen. Vorsicht bei der Abfahrt!",
+                  "ice": "Bitte einsteigen. Vorsicht bei der Abfahrt!"}.get(self.kind)
         self.app.sound.play(SOUND_DIR / f"{self.kind}.wav", speech)
         # Beim Bus zischt die Druckluft, wenn die Türen aufgehen
         self.say("Pssscht – Türen auf!" if self.kind == "bus" else "Türen schließen!", 2.5)
@@ -1532,11 +1557,16 @@ class App:
         """Ankreuzfeld im Hauptmenü, standardmäßig an."""
         return self.settings.get("separate_modes", True)
 
+    def show_ice(self):
+        """Ankreuzfeld „Zeige ICE-Umstiege“, standardmäßig an."""
+        return self.settings.get("show_ice", True)
+
     def transfer_kinds(self, kind):
         """Verkehrsmittel, in die man von ``kind`` aus umsteigen kann (None = alle)."""
-        if not self.separate_modes():
-            return None
-        return next(g for g in MODE_GROUPS if kind in g)
+        kinds = next(g for g in MODE_GROUPS if kind in g) if self.separate_modes() else MODE_ORDER
+        if not self.show_ice():
+            kinds = [k for k in kinds if k != "ice"]
+        return None if len(kinds) == len(MODE_ORDER) else kinds
 
     def home_station(self):
         """Gespeicherter Startbahnhof, sonst Lichterfelde Ost."""

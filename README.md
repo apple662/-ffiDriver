@@ -4,8 +4,8 @@ Ein einfaches Spiel für Kinder: Verkehrsmittel aussuchen, Linie wählen und
 dann Station für Station mit den Pfeiltasten durch Berlin fahren.
 
 Enthalten sind alle S-Bahn-, U-Bahn-, Straßenbahn- und Buslinien von BVG und
-S-Bahn Berlin sowie alle Regionalzüge, die durch Berlin fahren (15 S-Bahn-,
-9 U-Bahn-, 22 Tram-, 204 Bus- und 22 Regionallinien). Das
+S-Bahn Berlin sowie alle Regional- und ICE-Züge, die durch Berlin fahren
+(15 S-Bahn-, 9 U-Bahn-, 22 Tram-, 204 Bus-, 22 Regional- und 8 ICE-Linien). Das
 Programm läuft komplett **offline**.
 
 ## Browser-Version (ohne Installation)
@@ -13,7 +13,7 @@ Programm läuft komplett **offline**.
 Im Ordner `web/` liegt dasselbe Spiel für den Browser, mit allen Funktionen.
 Es braucht kein Python und keinen Server:
 
-- **`web/berlin-faehrt.html`**: alles in einer einzigen Datei (gut 1 MB).
+- **`web/berlin-faehrt.html`**: alles in einer einzigen Datei (gut 1,2 MB).
   Per Doppelklick öffnen, fertig. Diese Datei kann man auch einfach per Mail
   oder USB-Stick weitergeben.
 - **`web/index.html`**: dieselbe Version, aufgeteilt in mehrere Dateien
@@ -48,7 +48,7 @@ python3 tools/build_web.py
 
 | Bildschirm | Bedienung |
 |---|---|
-| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus oder Regionalbahn, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–5 gehen auch) |
+| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Regionalbahn oder ICE, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–6 gehen auch) |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
 | **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung |
 
@@ -63,6 +63,29 @@ RE1 von Frankfurt (Oder) über Alexanderplatz und Hauptbahnhof bis Magdeburg.
 Sie haben alle Funktionen der anderen Verkehrsmittel: Netzplan (auf die
 Strecke gezoomt), Umsteigen, Türsignal und Ansage. Die Linienschilder sind
 rot auf weiß wie an den Bahnhöfen, der Zug ist ein roter Doppelstockwagen.
+
+## ICE
+
+Die ICE-Linien, die durch Berlin fahren: ICE 10 (nach Köln), 11 (nach
+München über Frankfurt und Stuttgart), 12 (nach Basel), 13 (nach Frankfurt
+Flughafen), 15 (nach Frankfurt), 18, 28 und 29 (Hamburg bzw. Berlin nach
+München über Nürnberg). Der ICE ist weiß mit rotem Streifen und spitzer Nase,
+die Linienschilder sind rot. Beim Türsignal gibt es zuerst den Dreiklang-Gong
+vom Bahnsteig. Der Netzplan zeigt ganz Deutschland.
+
+**Wichtig:** Die VBB-Fahrplandaten enthalten keine Fernzüge, und die offenen
+Fernverkehrsdaten (gtfs.de, DELFI) waren beim Erstellen nicht erreichbar. Die
+Linien sind deshalb **von Hand nach dem DB-Liniennetz zusammengestellt**, in
+`data/ice_lines.json`. Gezeigt wird je Linie der typische Laufweg mit den
+wichtigsten Halten; einzelne Züge fahren anders (Flügelzüge, Sprinter,
+Umleitungen). Die Koordinaten der Bahnhöfe stammen aus dem
+DB-Stationsverzeichnis. Die Datei kannst du selbst korrigieren oder ergänzen
+und danach `python3 tools/build_data.py` ausführen.
+
+**Ankreuzfeld „Zeige ICE-Umstiege“** (unten links im Hauptmenü,
+standardmäßig angehakt): Ohne Haken werden ICE-Linien nie als Umstieg
+gezeigt, angeboten oder angesagt. Mit Haken gehört der ICE beim „Umsteigen
+getrennt“ zur Gruppe von S-Bahn, U-Bahn und Regionalbahn.
 
 ## Startbahnhof
 
@@ -108,8 +131,8 @@ Auswahl mit den Linienschildern (Pfeiltasten + Enter, `Esc` = doch nicht).
 Man kann auch auf die Linienschilder der aktuellen Station klicken.
 
 **Ankreuzfeld „Umsteigen getrennt“** (unten links im Hauptmenü,
-standardmäßig angehakt): Beim Fahren mit S-Bahn, U-Bahn oder Regionalbahn
-werden nur Umstiege in diese drei gezeigt, angeboten und angesagt. Beim Tram- oder
+standardmäßig angehakt): Beim Fahren mit S-Bahn, U-Bahn, Regionalbahn oder
+ICE werden nur Umstiege in diese vier gezeigt, angeboten und angesagt. Beim Tram- oder
 Busfahren gilt das Gleiche für Tram und Bus. Das macht die Liste deutlich
 übersichtlicher. Ohne Haken sieht man wieder alle Umstiege. Die Einstellung
 wird gespeichert. Der Start-Knopf im Hauptmenü zeigt immer alle Linien am
@@ -130,7 +153,7 @@ Die Töne in `sounds/` sind **nachgebaut**, es sind keine Originalaufnahmen.
 Die Aufnahmen von BVG und S-Bahn sind nicht frei verfügbar.
 `tools/make_sounds.py` erzeugt sie neu. Eigene Aufnahmen kannst du einfach
 als `sounds/sbahn.wav`, `sounds/ubahn.wav`, `sounds/tram.wav`,
-`sounds/bus.wav` oder `sounds/regio.wav` ablegen.
+`sounds/bus.wav`, `sounds/regio.wav` oder `sounds/ice.wav` ablegen.
 
 ## Stationsansage
 
