@@ -999,6 +999,18 @@ class RideScreen extends Screen {
     this.message = ["Einsteigen, bitte!", now() + 2];
     this.lastWheel = 0;
     this.dragAcc = 0;
+    this.v = 0;              // Tempo in der Cockpit-Ansicht (Stationen pro Sekunde)
+    this.lastTick = 0;
+    this.speed = 0;          // 0…1 für den Tacho
+  }
+
+  get cockpit() { return this.app.cockpit; }
+
+  toggleCockpit() {
+    this.app.cockpit = !this.app.cockpit;
+    this.scroll = null;
+    this.app.redraw();
+    this.app.animate();
   }
 
   get stops() { return this.line.directions[this.direction]; }
@@ -1010,6 +1022,7 @@ class RideScreen extends Screen {
   }
 
   draw(c, w, h) {
+    if (this.cockpit) return drawCockpit(this, c, w, h);
     const app = this.app, s = app.s;
     const st = app.data.stations;
     const line = this.line, kind = this.kind, color = line.color;
@@ -1194,11 +1207,24 @@ class RideScreen extends Screen {
     let moving = false;
     const d = this.index - this.pos;
     if (Math.abs(d) > 0.003) {
-      const step = Math.max(0.04, Math.abs(d) * 0.18);
+      let step;
+      if (this.cockpit) {
+        // Im Führerstand gemächlich: anfahren, rollen, vor der Station bremsen – nach echter Zeit
+        const t = now(), dt = Math.min(0.1, Math.max(0.001, t - this.lastTick));
+        this.lastTick = t;
+        const target = Math.min(COCKPIT_SPEED, Math.max(0.12, Math.abs(d) * 2.4));
+        this.v += (target - this.v) * Math.min(1, dt * 4);
+        step = this.v * dt;
+        this.speed = this.v / COCKPIT_SPEED;
+      } else {
+        step = Math.max(0.04, Math.abs(d) * 0.18);
+      }
       this.pos += Math.sign(d) * Math.min(step, Math.abs(d));
       moving = true;
     } else {
       this.pos = this.index;
+      this.v = 0;
+      if (this.speed > 0.01) { this.speed *= 0.6; moving = true; } else this.speed = 0;
     }
     const s = this.app.s;
     const rowH = ROW_H * s, viewH = this.app.height - HEADER_H * s;
@@ -1327,6 +1353,7 @@ class RideScreen extends Screen {
     else if (c === "t") this.doors();
     else if (c === "v") this.announce();
     else if (c === "u") this.change();
+    else if (c === "f") this.toggleCockpit();
     else if (k === PARENT_KEY) this.setHome();
   }
 
@@ -1366,6 +1393,403 @@ class RideScreen extends Screen {
     this.lastWheel = t;
     if (delta < 0) this.next(); else this.prev();
   }
+}
+
+// --------------------------------------------------------------------------
+// Cockpit-Ansicht (Taste F): Blick nach vorn wie aus dem Führerstand
+// --------------------------------------------------------------------------
+
+const SEG = 60;               // so viele Meter liegen in der Szene zwischen zwei Stationen
+const CAM_H = 2.4;            // Augenhöhe des Fahrers über den Schienen bzw. der Straße
+const Z_NEAR = 1.2, Z_FAR = 140;
+const VMAX = { sbahn: 100, ubahn: 70, tram: 60, bus: 50, regio: 160, ice: 300 };   // km/h am Tacho
+const COCKPIT_SPEED = 0.7;    // höchstes Tempo in Stationen pro Sekunde – ca. 1,5 s von Station zu Station
+const LED = "#FFA31A";        // Farbe der Leuchtschrift
+
+/** Gleichbleibende Zufallszahl 0…1 für Bäume, Häuser usw. (gleiche Stelle = gleiches Objekt). */
+function rnd(i, salt = 0) {
+  const x = Math.sin(i * 12.9898 + salt * 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+/** Einfache Zentralperspektive: X quer (rechts +), Y Höhe, Z Entfernung nach vorn (Meter). */
+class Scene {
+  constructor(c, x1, y1, x2, y2) {
+    this.c = c;
+    this.cx = (x1 + x2) / 2;
+    this.hy = y1 + (y2 - y1) * 0.42;
+    this.f = (x2 - x1) * 0.75;
+  }
+  p(X, Y, Z) {
+    Z = Math.max(Z, Z_NEAR);
+    return [this.cx + X * this.f / Z, this.hy + (CAM_H - Y) * this.f / Z];
+  }
+  poly(pts, fill, outline) {
+    this.c.polygon(pts.map(([X, Y, Z]) => this.p(X, Y, Z)), { fill, outline, width: 2 });
+  }
+  /** Fläche auf dem Boden (oder in Höhe y), z. B. Schwelle, Fahrbahn, Bahnsteig. */
+  ground(xa, xb, za, zb, fill, y = 0) {
+    if (zb < Z_NEAR || za > Z_FAR) return;
+    za = Math.max(za, Z_NEAR); zb = Math.min(zb, Z_FAR);
+    this.poly([[xa, y, za], [xb, y, za], [xb, y, zb], [xa, y, zb]], fill);
+  }
+  /** Senkrechte Wand längs der Strecke, z. B. Tunnelwand, Hauswand. */
+  wall(x, ya, yb, za, zb, fill) {
+    if (zb < Z_NEAR || za > Z_FAR) return;
+    za = Math.max(za, Z_NEAR); zb = Math.min(zb, Z_FAR);
+    this.poly([[x, ya, za], [x, yb, za], [x, yb, zb], [x, ya, zb]], fill);
+  }
+  /** Fläche, die dem Fahrer zugewandt ist, z. B. Mast, Schild. */
+  front(xa, xb, ya, yb, z, fill, outline) {
+    if (z > Z_NEAR && z < Z_FAR) this.poly([[xa, ya, z], [xb, ya, z], [xb, yb, z], [xa, yb, z]], fill, outline);
+  }
+  size(meters, z) { return meters * this.f / Math.max(z, Z_NEAR); }
+}
+
+/** Stationsschild, dem Fahrer zugewandt; der Name wird mit der Entfernung größer. */
+function stationSign(c, app, sc, xa, xb, ya, yb, z, name, border) {
+  if (!(z > Z_NEAR + 0.5 && z < Z_FAR)) return;
+  sc.front(xa, xb, ya, yb, z, "white", border);
+  const [ax, ay] = sc.p(xa, yb, z), [bx, by] = sc.p(xb, ya, z);
+  const height = by - ay;
+  if (height < 9) return;
+  let px = height * 0.5 / app.s;
+  let font = app.font(px, "bold");
+  while (font.measure(name) > (bx - ax) * 0.92 && px > 6) { px *= 0.85; font = app.font(px, "bold"); }
+  c.text((ax + bx) / 2, (ay + by) / 2, name, font, "#1E2A38");
+}
+
+/** Die Strecke vor dem Fahrzeug. Alles hängt von ride.pos ab – so zieht die Landschaft beim Fahren vorbei. */
+function drawScene(ride, c, app, x1, y1, x2, y2) {
+  const s = app.s, kind = ride.kind, st = app.data.stations, stops = ride.stops;
+  const cam = ride.pos * SEG;
+  const sc = new Scene(c, x1, y1, x2, y2);
+  const tunnel = kind === "ubahn", city = kind === "tram" || kind === "bus";
+  const railOut = ["sbahn", "regio", "ice"].includes(kind);
+  const hy = sc.hy;
+
+  // --- Himmel und Boden ---
+  if (tunnel) {
+    c.rect(x1, y1, x2, y2, "#0E1013");
+  } else {
+    const sky = ["#6FB6EA", "#82C0EE", "#96CAF1", "#AAD4F4", "#BFDFF6", "#D4EAF9"];
+    const band = (hy - y1) / sky.length;
+    sky.forEach((col, i) => c.rect(x1, y1 + i * band, x2, y1 + (i + 1) * band + 1, col));
+    c.rect(x1, hy, x2, y2, city ? "#B3AEA4" : "#86B86A");
+    if (city) {
+      // Häuser am Horizont
+      for (let k = 0; k < 14; k++) {
+        const bx = x1 + (x2 - x1) * k / 14, bh = (0.04 + 0.08 * rnd(k, 3)) * (y2 - y1);
+        c.rect(bx, hy - bh, bx + (x2 - x1) / 14 + 1, hy + 1, ["#C9C2B8", "#BDB6C4", "#B8C6C9", "#CFC4B0"][k % 4]);
+      }
+    } else {
+      // Hügel in der Ferne
+      const pts = [[x1, hy]];
+      for (let k = 0; k < 13; k++) pts.push([x1 + (x2 - x1) * k / 12, hy - (0.02 + 0.05 * rnd(k, 5)) * (y2 - y1)]);
+      pts.push([x2, hy]);
+      c.polygon(pts, { fill: "#6FA35C" });
+    }
+  }
+
+  // --- Fahrweg ---
+  if (tunnel) {
+    sc.wall(-3.0, 0, 4.6, Z_NEAR, Z_FAR, "#2A2B2E");
+    sc.wall(3.0, 0, 4.6, Z_NEAR, Z_FAR, "#2A2B2E");
+    sc.ground(-3.0, 3.0, Z_NEAR, Z_FAR, "#1E1F22", 4.6);
+    sc.ground(-3.0, 3.0, Z_NEAR, Z_FAR, "#3A3632");
+  }
+  if (railOut) sc.ground(-5.6, 2.2, Z_NEAR, Z_FAR, "#8E8578");             // Schotter für beide Gleise
+  if (city) {
+    sc.ground(-7.0, 2.3, Z_NEAR, Z_FAR, "#5C5E63");                         // Fahrbahn
+    sc.ground(2.3, 7.0, Z_NEAR, Z_FAR, "#CBC5B8");                          // Gehweg rechts
+    sc.ground(-10.0, -7.0, Z_NEAR, Z_FAR, "#CBC5B8");                       // Gehweg links
+    sc.ground(2.2, 2.4, Z_NEAR, Z_FAR, "#E8E8E8", 0.02);                    // Bordstein
+  }
+
+  /** Positionen [Index, Abstand nach vorn] von Dingen, die alle spacing Meter wiederkehren. */
+  function periodic(spacing, offset = 0) {
+    const out = [];
+    for (let k = Math.floor((cam + Z_NEAR - offset) / spacing); ; k++) {
+      const z = k * spacing + offset - cam;
+      if (z > Z_FAR) return out;
+      if (z >= Z_NEAR - spacing) out.push([k, z]);
+    }
+  }
+
+  if (kind === "bus") {
+    for (const [, z] of periodic(9)) sc.ground(-2.45, -2.25, z, z + 4, "#F2F2F2", 0.02);     // Mittellinie
+  } else if (kind === "tram") {
+    for (const [, z] of periodic(6)) sc.ground(-7.0, 2.3, z, z + 0.15, "#686A70", 0.01);     // Fugen
+  } else {
+    const wood = tunnel ? "#3D3B39" : "#6B5444";
+    for (const [, z] of periodic(2)) {
+      sc.ground(-1.25, 1.25, z, z + 0.35, wood, 0.02);                                       // Schwellen
+      if (railOut) sc.ground(-5.05, -2.55, z, z + 0.35, wood, 0.02);                         // Nachbargleis
+    }
+  }
+  if (kind !== "bus") {
+    const rail = city ? "#9A9A9A" : "#D6D6D6";
+    for (const X of [-0.75, 0.75]) sc.ground(X - 0.05, X + 0.05, Z_NEAR, Z_FAR, rail, 0.06);
+    if (railOut) for (const X of [-4.55, -3.05]) sc.ground(X - 0.05, X + 0.05, Z_NEAR, Z_FAR, "#C8C8C8", 0.06);
+    if (kind === "sbahn") sc.ground(1.45, 1.6, Z_NEAR, Z_FAR, "#7C7C7C", 0.15);              // Stromschiene
+  }
+
+  // --- Dinge am Rand, von hinten nach vorn gezeichnet ---
+  const items = [];
+  const houses = [];      // Häuserzeilen liegen ganz außen und werden zuerst gezeichnet
+
+  if (["regio", "ice", "tram"].includes(kind)) {
+    // Oberleitung: Draht und Masten
+    c.line([sc.p(0, 5.6, Z_NEAR), sc.p(0, 5.6, Z_FAR)], { fill: "#2E2E2E", width: Math.max(1, 2 * s) });
+    const mastX = kind !== "tram" ? -2.8 : 2.9;
+    for (const [, z] of periodic(30, 7)) {
+      items.push([z, () => {
+        sc.front(mastX - 0.12, mastX + 0.12, 0, 6.3, z, "#5A5F66");
+        sc.front(Math.min(mastX, 0.2), Math.max(mastX, -0.2), 5.75, 5.95, z, "#5A5F66");
+      }]);
+    }
+  }
+  const nearStation = z => { const rel = (z + cam) / SEG; return Math.abs(rel - Math.round(rel)) * SEG < 40; };
+  if (tunnel) {
+    for (const [, z] of periodic(8)) {
+      if (nearStation(z)) continue;      // in der Bahnhofshalle ist es ohnehin hell
+      items.push([z, () => {
+        sc.wall(-2.98, 3.5, 3.8, z, z + 1.4, "#FFE9A8");
+        sc.wall(2.98, 3.5, 3.8, z, z + 1.4, "#FFE9A8");
+      }]);
+    }
+  } else {
+    for (const [k, z] of periodic(13, 4)) {
+      if (rnd(k, 1) < 0.35) continue;
+      const side = rnd(k, 2) < 0.5 ? -1 : 1;
+      let X = side * (10 + 6 * rnd(k, 4));                                   // nicht auf Gleis oder Bahnsteig
+      if (city) X = side > 0 ? 4 + rnd(k, 4) * 2 : -(7.6 + rnd(k, 4) * 1.6);  // auf dem Gehweg
+      items.push([z, () => {
+        sc.front(X - 0.18, X + 0.18, 0, 2.4, z, "#6B4A2E");
+        const [cx, cy] = sc.p(X, 4.0, z), r = sc.size(1.9 + 0.6 * rnd(k, 6), z);
+        c.oval(cx - r, cy - r, cx + r, cy + r, { fill: ["#4F8F3F", "#5E9C46", "#477F38"][((k % 3) + 3) % 3] });
+      }]);
+    }
+  }
+  if (city) {
+    const colors = ["#D9B38C", "#C98D7A", "#E6D3A3", "#B7C3C9", "#D7A9A0", "#C2B59B"];
+    for (const [k, z] of periodic(12)) {
+      for (const side of [-1, 1]) {
+        const X = side < 0 ? -10 : 7, height = 9 + 9 * rnd(k, 7 + side);
+        const col = colors[Math.floor(rnd(k, 9 + side) * colors.length)];
+        houses.push([z + 11.5, () => {
+          sc.wall(X, 0, height, z, z + 11.5, col);
+          if (z < 45) {
+            for (let fy = 1; fy < Math.min(4, Math.floor(height / 3)); fy++) {
+              for (const wz of [2.5, 7.5]) sc.wall(X + (X > 0 ? 0.05 : -0.05), fy * 3 - 0.2, fy * 3 + 1.1, z + wz, z + wz + 1.4, "#5B7590");
+            }
+          }
+        }]);
+      }
+    }
+  }
+
+  // --- Stationen ---
+  const signBorder = MODE[kind][2];
+  for (let i = Math.floor(ride.pos) - 1; i < Math.floor(ride.pos) + 3; i++) {
+    if (i < 0 || i >= stops.length) continue;
+    const zs = i * SEG - cam, name = st[stops[i]];
+    const za = zs - 12, zb = zs + 28;        // 40 m Bahnsteig, dazwischen freie Strecke
+    if (zb < Z_NEAR || za > Z_FAR) continue;
+    if (city) {
+      items.push([zb, () => {
+        if (kind === "tram") {
+          sc.ground(1.4, 3.6, za, zb, "#B0AAA0", 0.25);
+          sc.wall(1.4, 0, 0.25, za, zb, "#8C857A");
+        }
+        const poleZ = zs + 12;
+        sc.front(2.95, 3.05, 0, 3.6, poleZ, "#6F7378");
+        stationSign(c, app, sc, 3.1, 6.4, 2.0, 2.7, poleZ, name, "#2F8F4E");
+        if (poleZ > Z_NEAR && poleZ < Z_FAR) {
+          // das gelbe Berliner Haltestellenschild mit grünem H
+          const [hx, hy2] = sc.p(3.0, 3.6, poleZ), r = sc.size(0.45, poleZ);
+          c.oval(hx - r, hy2 - r, hx + r, hy2 + r, { fill: "#F7D117", outline: "#2F8F4E", width: Math.max(1, r * 0.15) });
+          if (r > 5) c.text(hx, hy2, "H", app.font(r * 1.3 / s, "bold"), "#2F8F4E");
+        }
+      }]);
+    } else {
+      items.push([zb, () => {
+        if (tunnel) {
+          // helle Bahnhofshalle statt Tunnel
+          const tiles = ["#D8E2D0", "#E3D9C6", "#CFDDE6", "#E6D0CF"][i % 4];
+          sc.wall(8.0, 0, 4.8, za, zb, tiles);
+          sc.wall(-3.0, 0, 4.6, za, zb, tiles);
+          sc.ground(-3.0, 8.0, za, zb, "#EFEDE6", 4.7);
+          for (let lz = Math.trunc(za); lz < zb; lz += 6) sc.ground(-1.0, 6.0, lz, lz + 1.2, "#FFF6D8", 4.68);
+        }
+        sc.ground(2.0, 8.0, za, zb, "#B9B2A6", 1.0);
+        sc.wall(2.0, 0, 1.0, za, zb, "#8C857A");
+        sc.ground(2.0, 2.4, za, zb, "#F4F4F4", 1.01);
+        if (!tunnel) {
+          for (let pz = Math.trunc(za) + 4; pz < zb; pz += 9) sc.front(5.0, 5.18, 1.0, 4.3, pz, "#6F7378");
+          sc.ground(2.8, 8.0, za, zb, "#7A8088", 4.3);
+        }
+        stationSign(c, app, sc, 2.7, 7.0, 2.4, 3.4, zs + 14, name, signBorder);
+      }]);
+    }
+  }
+
+  const byDistance = (a, b) => b[0] - a[0];
+  for (const [, fn] of houses.sort(byDistance).concat(items.sort(byDistance))) fn();
+}
+
+/** Echter runder Knopf im Armaturenbrett. */
+function roundButton(app, c, cx, cy, r, color, symbol, label, enabled, callback, glow = false) {
+  const s = app.s;
+  const col = enabled ? color : "#4B5058";
+  c.oval(cx - r - 4 * s, cy - r, cx + r + 4 * s, cy + r + 8 * s, { fill: "#1B1E23" });
+  if (glow) c.oval(cx - r - 7 * s, cy - r - 7 * s, cx + r + 7 * s, cy + r + 7 * s, { outline: "#7FD4FF", width: 3 * s });
+  c.oval(cx - r - 3 * s, cy - r - 3 * s, cx + r + 3 * s, cy + r + 3 * s, { fill: "#8B9099" });
+  c.oval(cx - r, cy - r, cx + r, cy + r, { fill: darker(col, 0.8) });
+  c.oval(cx - r * 0.86, cy - r * 0.92, cx + r * 0.86, cy + r * 0.8, { fill: col });
+  c.oval(cx - r * 0.5, cy - r * 0.75, cx + r * 0.1, cy - r * 0.45, { fill: tint(col, 0.45) });
+  const fg = enabled ? textColorFor(col) : "#7A808A";
+  c.text(cx, cy, symbol, app.font(symbol.length <= 2 ? r * 0.75 / s : r * 0.42 / s, "bold"), fg);
+  c.text(cx, cy + r + 14 * s, label, app.font(13, "bold"), enabled ? "#C9CED6" : "#6B7079");
+  if (enabled) app.hit(cx - r - 6 * s, cy - r - 6 * s, cx + r + 6 * s, cy + r + 22 * s, callback);
+}
+
+/** Tacho mit Nadel und Ziffern. */
+function drawGauge(app, c, cx, cy, radius, speed, vmax) {
+  const s = app.s;
+  c.oval(cx - radius - 8 * s, cy - radius - 8 * s, cx + radius + 8 * s, cy + radius + 8 * s,
+    { fill: "#15181C", outline: "#8B9099", width: 3 * s });
+  const a0 = 225 * Math.PI / 180, a1 = -45 * Math.PI / 180;    // von links unten über oben nach rechts unten
+  const steps = 5;
+  for (let i = 0; i <= steps * 2; i++) {
+    const a = a0 + (a1 - a0) * i / (steps * 2);
+    const r1 = radius * (i % 2 === 0 ? 0.78 : 0.86);
+    c.line([[cx + Math.cos(a) * r1, cy - Math.sin(a) * r1], [cx + Math.cos(a) * radius * 0.95, cy - Math.sin(a) * radius * 0.95]],
+      { fill: "#E6E6E6", width: Math.max(1, (i % 2 === 0 ? 2.5 : 1.2) * s) });
+    if (i % 2 === 0) {
+      c.text(cx + Math.cos(a) * radius * 0.6, cy - Math.sin(a) * radius * 0.6, String(Math.round(vmax * i / (steps * 2))),
+        app.font(Math.max(9, radius * 0.14 / s), "bold"), "#E6E6E6");
+    }
+  }
+  const a = a0 + (a1 - a0) * Math.max(0, Math.min(1, speed / vmax));
+  c.line([[cx, cy], [cx + Math.cos(a) * radius * 0.88, cy - Math.sin(a) * radius * 0.88]], { fill: "#FF5A3C", width: Math.max(2, 4 * s), cap: "round" });
+  c.oval(cx - 7 * s, cy - 7 * s, cx + 7 * s, cy + 7 * s, { fill: "#C9CED6" });
+  c.text(cx, cy + radius * 0.62, `${Math.round(speed)} km/h`, app.font(Math.max(9, radius * 0.13 / s), "bold"), LED);
+}
+
+/** Führerstand: Fenster mit Strecke, Zielanzeige oben, Armaturenbrett mit Knöpfen unten. */
+function drawCockpit(ride, c, w, h) {
+  const app = ride.app, s = app.s, st = app.data.stations;
+  const line = ride.line, kind = ride.kind, stops = ride.stops;
+  const last = ride.index === stops.length - 1;
+  const frame = "#2B2F36", accent = readable(line.color);
+
+  const topH = 112 * s, dashTop = h * 0.6, pillar = 30 * s;
+  const wx1 = pillar, wy1 = topH, wx2 = w - pillar, wy2 = dashTop + 30 * s;
+  drawScene(ride, c, app, wx1, wy1, wx2, wy2);
+
+  // Fensterrahmen (deckt alles ab, was über das Fenster hinausragt)
+  c.rect(0, 0, w, wy1, frame);
+  c.rect(0, 0, wx1, h, frame);
+  c.rect(wx2, 0, w, h, frame);
+  c.roundRect(wx1 - 10 * s, wy1 - 10 * s, wx2 + 10 * s, wy2 + 10 * s, 30 * s, { outline: frame, width: 22 * s });
+  c.rect(0, topH - 8 * s, w, topH - 2 * s, accent);
+  // Scheibenwischer
+  c.line([[wx1 + (wx2 - wx1) * 0.32, wy2 - 6 * s], [wx1 + (wx2 - wx1) * 0.12, wy2 - 70 * s]], { fill: "#1B1E23", width: Math.max(2, 5 * s), cap: "round" });
+
+  // --- Zielanzeige an der Decke ---
+  const dx1 = 220 * s, dx2 = w - 220 * s, dy1 = 12 * s, dy2 = topH - 20 * s;
+  c.roundRect(dx1, dy1, dx2, dy2, 10 * s, { fill: "#0B0B0B", outline: "#45494F", width: 3 * s });
+  const bw = drawBadge(c, dx1 + 16 * s, (dy1 + dy2) / 2, line.name, line.color, kind, 46 * s, app.font(24, "bold"));
+  const ledBig = app.font(26, "bold"), ledSmall = app.font(19, "bold");
+  const tx = dx1 + 16 * s + bw + 18 * s, tw = dx2 - tx - 14 * s;
+  const dest = ride.ring ? "Ringfahrt ↻" : st[stops[stops.length - 1]];
+  c.text(tx, dy1 + 24 * s, fitText(ledBig, dest, tw), ledBig, LED, "w");
+  const [text, until] = ride.message;
+  let second;
+  if (text && now() < until) second = text;
+  else if (last) second = ride.ring ? "Einmal rund um die Stadt!" : "Endstation – bitte alle aussteigen";
+  else second = "Nächster Halt: " + st[stops[ride.index + 1]];
+  c.text(tx, dy2 - 20 * s, fitText(ledSmall, second, tw), ledSmall, "#FFD27A", "w");
+
+  // Kleine Knöpfe oben: Zurück und Ansicht wechseln
+  const smallButton = (x1, label, cb) => {
+    const bw2 = 180 * s, bh2 = 50 * s, by = (topH - 8 * s - bh2) / 2;
+    c.roundRect(x1, by, x1 + bw2, by + bh2, 25 * s, { fill: "#454A53" });
+    c.text(x1 + bw2 / 2, by + bh2 / 2, label, app.font(18, "bold"), "white");
+    app.hit(x1, by, x1 + bw2, by + bh2, cb);
+  };
+  smallButton(20 * s, "◀  Zurück", () => ride.back());
+  smallButton(w - 200 * s, "F  Normale Ansicht", () => ride.toggleCockpit());
+
+  // --- Armaturenbrett ---
+  c.polygon([[0, dashTop + 40 * s], [w * 0.12, dashTop], [w * 0.88, dashTop], [w, dashTop + 40 * s], [w, h], [0, h]], { fill: "#3A3F48" });
+  c.line([[w * 0.12, dashTop], [w * 0.88, dashTop]], { fill: accent, width: Math.max(2, 4 * s) });
+  const pad = 22 * s, py1 = dashTop + 28 * s, py2 = h - 18 * s, ph = py2 - py1;
+  const innerW = w - 2 * pad, gap = 18 * s;
+  const mapW = innerW * 0.27, gaugeW = innerW * 0.16, listW = innerW * 0.27;
+  const btnW = innerW - mapW - gaugeW - listW - 3 * gap;
+  let x = pad;
+
+  // Bildschirm mit Netzplan
+  c.roundRect(x, py1, x + mapW, py2, 14 * s, { fill: "#15181C", outline: "#8B9099", width: 2 * s });
+  const coords = app.data.coords || {};
+  const path = stops.filter(k => coords[k]).map(k => coords[k]);
+  app.networkMap(kind).draw(c, x + 8 * s, py1 + 8 * s, x + mapW - 8 * s, py2 - 8 * s, s, line.name, path, ride.pos,
+    MODE[kind][1], app.font(11, "bold"));
+  x += mapW + gap;
+
+  // Tacho
+  const radius = Math.min(gaugeW / 2 - 10 * s, ph / 2 - 10 * s);
+  drawGauge(app, c, x + gaugeW / 2, py1 + ph / 2 + 4 * s, radius, ride.speed * VMAX[kind], VMAX[kind]);
+  x += gaugeW + gap;
+
+  // Stationsanzeige
+  c.roundRect(x, py1, x + listW, py2, 14 * s, { fill: "#0B0B0B", outline: "#8B9099", width: 2 * s });
+  c.text(x + 14 * s, py1 + 18 * s, "STATIONEN", app.font(12, "bold"), LED, "w");
+  c.text(x + listW - 14 * s, py1 + 18 * s, `${ride.index + 1} / ${stops.length}`, app.font(12, "bold"), LED, "e");
+  const rowH = (ph - 40 * s) / 5;
+  let ry = py1 + 34 * s;
+  const mini = app.font(11, "bold");
+  for (let i = ride.index - 1; i < ride.index + 4; i++) {
+    if (i < 0 || i >= stops.length) continue;
+    const cur = i === ride.index;
+    const font = app.font(cur ? 17 : 14, cur ? "bold" : "normal");
+    const cy = ry + rowH / 2;
+    if (cur) c.roundRect(x + 6 * s, ry + 2 * s, x + listW - 6 * s, ry + rowH - 2 * s, 8 * s, { fill: "#3A2A0A" });
+    const fill = cur ? "#FFD27A" : (i < ride.index ? "#6E6A60" : "#E8E2D0");
+    let bx = x + listW - 10 * s;
+    const shown = [];
+    for (const o of ride.transferOptions(i).slice(0, 3)) {
+      const ww = Math.max(22 * 1.6 * s, mini.measure(o.name) + 22 * 0.6 * s);
+      if (bx - ww < x + listW * 0.55) break;
+      bx -= ww + 4 * s;
+      shown.push([bx, o]);
+    }
+    const name = fitText(font, (cur ? "▶ " : "   ") + st[stops[i]], (shown.length ? bx : x + listW - 10 * s) - (x + 12 * s) - 6 * s);
+    c.text(x + 12 * s, cy, name, font, fill, "w");
+    for (const [bx2, o] of shown) drawBadge(c, bx2 + 4 * s, cy, o.name, o.color, o.kind, 22 * s, mini);
+    app.hit(x, ry, x + listW, ry + rowH, () => ride.goTo(i));
+    ry += rowH;
+  }
+  x += listW + gap;
+
+  // Knöpfe
+  const canChange = ride.transferOptions().length > 0;
+  const buttons = [
+    ["▲", "Zurück", () => ride.prev(), ride.index > 0 || ride.ring, "#F7D117"],
+    ["▼", "Weiter", () => ride.next(), !last || ride.ring, "#F7D117"],
+    ["U", "Umsteigen", () => ride.change(), canChange, "#2F9E5B"],
+    ["Türen", "Türen", () => ride.doors(), true, "#E8483B"],
+    ["V", "Ansage", () => ride.announce(), true, "#3D8BD4"],
+    ["⇄", "Richtung", () => ride.switchDirection(), true, "#E8E8E8"],
+  ];
+  const cellW = btnW / 3, cellH = ph / 2;
+  const r = Math.max(14 * s, Math.min(cellW * 0.3, cellH * 0.3));
+  buttons.forEach(([sym, label, cb, enabled, color], n) => {
+    roundButton(app, c, x + cellW * (n % 3 + 0.5), py1 + cellH * Math.floor(n / 3) + cellH * 0.42, r, color, sym, label,
+      enabled, cb, sym === "U" && canChange);
+  });
 }
 
 /** In die Linie opt (aus Transfers.options) einsteigen, an der passenden Haltestelle. */
@@ -1577,6 +2001,7 @@ class App {
     this.transfers = new Transfers(data);
     this.maps = {};
     this.settings = this.loadSettings();
+    this.cockpit = false;    // Cockpit-Ansicht beim Fahren (Taste F), bleibt beim Umsteigen erhalten
     this.sound = new SoundPlayer();
     this.screen = new HomeScreen(this);
 

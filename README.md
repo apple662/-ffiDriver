@@ -50,11 +50,42 @@ python3 tools/build_web.py
 |---|---|
 | **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Regionalbahn oder ICE, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–6 gehen auch) |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
-| **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung |
+| **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht |
 
 `Esc` oder der Knopf „Zurück“ führt immer einen Schritt zurück. `F11`
 schaltet auf Vollbild. Auf der Ringbahn (S41/S42) kann man endlos im Kreis
 fahren.
+
+## Cockpit-Ansicht
+
+Beim Fahren schaltet `F` in den Führerstand (oder per Knopf „F Normale
+Ansicht“ zurück). Man blickt nach vorn auf die Strecke, in einfachem 3D:
+
+- **S-Bahn, Regionalbahn, ICE:** Schotter, Schwellen und Schienen, ein
+  Nachbargleis, Bäume und Hügel. Regio und ICE haben eine Oberleitung, die
+  Berliner S-Bahn eine Stromschiene.
+- **U-Bahn:** im Tunnel mit vorbeiziehenden Lampen, an den Stationen helle,
+  gekachelte Bahnhofshallen.
+- **Straßenbahn:** auf der Straße zwischen Häusern, mit eingelassenen
+  Schienen und Oberleitung.
+- **Bus:** Straße mit Mittellinie, Gehweg, Bäumen und Häusern.
+
+An jeder Station steht ein Bahnsteig (bzw. eine Haltestelle mit gelbem
+„H“-Schild) mit dem Namensschild, das beim Heranfahren größer wird. Das
+Fahrzeug fährt sanft an, rollt und bremst vor der Station; eine Station
+dauert gut 1,5 Sekunden.
+
+Alles andere ist ins Cockpit eingebaut:
+- oben die **Zielanzeige** in Leuchtschrift mit Linie, Ziel, nächstem Halt
+  und den Durchsagen,
+- unten auf dem Armaturenbrett ein **Bildschirm mit dem Netzplan**, der
+  **Tacho** (bis zur Höchstgeschwindigkeit des Verkehrsmittels, beim ICE
+  300 km/h), die **Stationsanzeige** mit Umsteigelinien (antippen springt zur
+  Station) und **echte runde Knöpfe** für Zurück, Weiter, Umsteigen (leuchtet,
+  wenn man umsteigen kann), Türen, Ansage und Richtung.
+
+Alle Tasten funktionieren genauso wie in der normalen Ansicht. Die gewählte
+Ansicht bleibt beim Umsteigen erhalten.
 
 ## Regionalbahn
 

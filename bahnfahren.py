@@ -970,6 +970,9 @@ class RideScreen(Screen):
         self.message = ("Einsteigen, bitte!", time.monotonic() + 2.0)
         self.line_index = line_index
         self.last_wheel = 0.0
+        self.v = 0.0            # Tempo in der Cockpit-Ansicht (Stationen pro Sekunde)
+        self.last_tick = 0.0
+        self.speed = 0.0        # 0…1 für den Tacho
 
     @property
     def stops(self):
@@ -979,7 +982,20 @@ class RideScreen(Screen):
         key = self.stops[self.index if i is None else i]
         return self.app.transfers.options(key, exclude=(self.kind, self.line_index), kinds=self.app.transfer_kinds(self.kind))
 
+    @property
+    def cockpit(self):
+        return self.app.cockpit
+
+    def toggle_cockpit(self):
+        self.app.cockpit = not self.app.cockpit
+        self.scroll = None
+        self.app.redraw()
+        self.app.animate()
+
     def draw(self, c, w, h):
+        if self.cockpit:
+            draw_cockpit(self, c, w, h)
+            return
         app, s = self.app, self.app.s
         st = self.app.data["stations"]
         line, kind, color = self.line, self.kind, self.line["color"]
@@ -1173,11 +1189,28 @@ class RideScreen(Screen):
         moving = False
         d = self.index - self.pos
         if abs(d) > 0.003:
-            step = max(0.04, abs(d) * 0.18)
+            if self.cockpit:
+                # Im Führerstand gemächlich: anfahren, rollen, vor der Station bremsen – nach echter Zeit,
+                # damit es auf langsamen Rechnern nicht langsamer fährt
+                now = time.monotonic()
+                dt = min(0.1, max(0.001, now - self.last_tick))
+                self.last_tick = now
+                target = min(COCKPIT_SPEED, max(0.12, abs(d) * 2.4))
+                self.v += (target - self.v) * min(1.0, dt * 4.0)
+                step = self.v * dt
+                self.speed = self.v / COCKPIT_SPEED
+            else:
+                step = max(0.04, abs(d) * 0.18)
             self.pos += math.copysign(min(step, abs(d)), d)
             moving = True
         else:
             self.pos = float(self.index)
+            self.v = 0.0
+            if self.speed > 0.01:
+                self.speed *= 0.6
+                moving = True
+            else:
+                self.speed = 0.0
         h = self.app.canvas.winfo_height()
         row_h = ROW_H * self.app.s
         view_h = h - HEADER_H * self.app.s
@@ -1307,6 +1340,8 @@ class RideScreen(Screen):
             self.announce()
         elif char in ("u", "U"):
             self.change()
+        elif char in ("f", "F"):
+            self.toggle_cockpit()
         elif k == PARENT_KEY:
             self.set_home()
 
@@ -1338,6 +1373,457 @@ class RideScreen(Screen):
             self.next()
         else:
             self.prev()
+
+
+# --------------------------------------------------------------------------
+# Cockpit-Ansicht (Taste F): Blick nach vorn wie aus dem Führerstand
+# --------------------------------------------------------------------------
+
+SEG = 60.0              # so viele Meter liegen in der Szene zwischen zwei Stationen
+CAM_H = 2.4             # Augenhöhe des Fahrers über den Schienen bzw. der Straße
+Z_NEAR, Z_FAR = 1.2, 140.0
+VMAX = {"sbahn": 100, "ubahn": 70, "tram": 60, "bus": 50, "regio": 160, "ice": 300}   # km/h am Tacho
+COCKPIT_SPEED = 0.7     # höchstes Tempo in Stationen pro Sekunde – ca. 1,5 s von Station zu Station
+LED = "#FFA31A"         # Farbe der Leuchtschrift
+
+
+def rnd(i, salt=0):
+    """Gleichbleibende Zufallszahl 0…1 für Bäume, Häuser usw. (gleiche Stelle = gleiches Objekt)."""
+    x = math.sin(i * 12.9898 + salt * 78.233) * 43758.5453
+    return x - math.floor(x)
+
+
+class Scene:
+    """Einfache Zentralperspektive: X quer (rechts +), Y Höhe, Z Entfernung nach vorn (Meter)."""
+
+    def __init__(self, c, x1, y1, x2, y2):
+        self.c = c
+        self.cx = (x1 + x2) / 2
+        self.hy = y1 + (y2 - y1) * 0.42
+        self.f = (x2 - x1) * 0.75
+
+    def p(self, X, Y, Z):
+        Z = max(Z, Z_NEAR)
+        return self.cx + X * self.f / Z, self.hy + (CAM_H - Y) * self.f / Z
+
+    def poly(self, pts, fill, outline=""):
+        self.c.create_polygon([v for P in pts for v in self.p(*P)], fill=fill, outline=outline)
+
+    def ground(self, xa, xb, za, zb, fill, y=0.0):
+        """Fläche auf dem Boden (oder in Höhe y), z. B. Schwelle, Fahrbahn, Bahnsteig."""
+        if zb < Z_NEAR or za > Z_FAR:
+            return
+        za, zb = max(za, Z_NEAR), min(zb, Z_FAR)
+        self.poly([(xa, y, za), (xb, y, za), (xb, y, zb), (xa, y, zb)], fill)
+
+    def wall(self, x, ya, yb, za, zb, fill):
+        """Senkrechte Wand längs der Strecke, z. B. Tunnelwand, Hauswand."""
+        if zb < Z_NEAR or za > Z_FAR:
+            return
+        za, zb = max(za, Z_NEAR), min(zb, Z_FAR)
+        self.poly([(x, ya, za), (x, yb, za), (x, yb, zb), (x, ya, zb)], fill)
+
+    def front(self, xa, xb, ya, yb, z, fill, outline=""):
+        """Fläche, die dem Fahrer zugewandt ist, z. B. Mast, Schild."""
+        if Z_NEAR < z < Z_FAR:
+            self.poly([(xa, ya, z), (xb, ya, z), (xb, yb, z), (xa, yb, z)], fill, outline)
+
+    def size(self, meters, z):
+        return meters * self.f / max(z, Z_NEAR)
+
+
+def draw_scene(ride, c, app, x1, y1, x2, y2):
+    """Die Strecke vor dem Fahrzeug. Alles hängt von ride.pos ab – so zieht die Landschaft beim Fahren vorbei."""
+    s = app.s
+    kind = ride.kind
+    st = app.data["stations"]
+    stops = ride.stops
+    cam = ride.pos * SEG
+    sc = Scene(c, x1, y1, x2, y2)
+    tunnel = kind == "ubahn"
+    city = kind in ("tram", "bus")
+    rail_out = kind in ("sbahn", "regio", "ice")
+    hy = sc.hy
+
+    # --- Himmel und Boden ---
+    if tunnel:
+        c.create_rectangle(x1, y1, x2, y2, fill="#0E1013", outline="")
+    else:
+        sky = ["#6FB6EA", "#82C0EE", "#96CAF1", "#AAD4F4", "#BFDFF6", "#D4EAF9"]
+        band = (hy - y1) / len(sky)
+        for i, col in enumerate(sky):
+            c.create_rectangle(x1, y1 + i * band, x2, y1 + (i + 1) * band + 1, fill=col, outline="")
+        c.create_rectangle(x1, hy, x2, y2, fill="#B3AEA4" if city else "#86B86A", outline="")
+        if city:
+            # Häuser am Horizont
+            for k in range(14):
+                bx = x1 + (x2 - x1) * k / 14
+                bh = (0.04 + 0.08 * rnd(k, 3)) * (y2 - y1)
+                c.create_rectangle(bx, hy - bh, bx + (x2 - x1) / 14 + 1, hy + 1,
+                                   fill=["#C9C2B8", "#BDB6C4", "#B8C6C9", "#CFC4B0"][k % 4], outline="")
+        else:
+            # Hügel in der Ferne
+            pts = [(x1, hy)]
+            for k in range(13):
+                pts.append((x1 + (x2 - x1) * k / 12, hy - (0.02 + 0.05 * rnd(k, 5)) * (y2 - y1)))
+            pts.append((x2, hy))
+            c.create_polygon([v for p in pts for v in p], fill="#6FA35C", outline="", smooth=True)
+
+    # --- Fahrweg ---
+    if tunnel:
+        sc.wall(-3.0, 0, 4.6, Z_NEAR, Z_FAR, "#2A2B2E")
+        sc.wall(3.0, 0, 4.6, Z_NEAR, Z_FAR, "#2A2B2E")
+        sc.ground(-3.0, 3.0, Z_NEAR, Z_FAR, "#1E1F22", y=4.6)
+        sc.ground(-3.0, 3.0, Z_NEAR, Z_FAR, "#3A3632")
+    if rail_out:
+        sc.ground(-5.6, 2.2, Z_NEAR, Z_FAR, "#8E8578")              # Schotter für beide Gleise
+    if city:
+        sc.ground(-7.0, 2.3, Z_NEAR, Z_FAR, "#5C5E63")              # Fahrbahn
+        sc.ground(2.3, 7.0, Z_NEAR, Z_FAR, "#CBC5B8")               # Gehweg rechts
+        sc.ground(-10.0, -7.0, Z_NEAR, Z_FAR, "#CBC5B8")            # Gehweg links
+        sc.ground(2.2, 2.4, Z_NEAR, Z_FAR, "#E8E8E8", y=0.02)       # Bordstein
+
+    def periodic(spacing, offset=0.0):
+        """Positionen (Index, Abstand nach vorn) von Dingen, die alle ``spacing`` Meter wiederkehren."""
+        k = math.floor((cam + Z_NEAR - offset) / spacing)
+        while True:
+            z = k * spacing + offset - cam
+            if z > Z_FAR:
+                return
+            if z >= Z_NEAR - spacing:
+                yield k, z
+            k += 1
+
+    if kind == "bus":
+        for k, z in periodic(9.0):
+            sc.ground(-2.45, -2.25, z, z + 4.0, "#F2F2F2", y=0.02)   # Mittellinie
+    elif kind == "tram":
+        for k, z in periodic(6.0):
+            sc.ground(-7.0, 2.3, z, z + 0.15, "#686A70", y=0.01)     # Fugen in der Fahrbahn
+    else:
+        wood = "#3D3B39" if tunnel else "#6B5444"
+        for k, z in periodic(2.0):
+            sc.ground(-1.25, 1.25, z, z + 0.35, wood, y=0.02)        # Schwellen
+            if rail_out:
+                sc.ground(-5.05, -2.55, z, z + 0.35, wood, y=0.02)   # Nachbargleis
+    if kind != "bus":
+        rail = "#9A9A9A" if city else "#D6D6D6"
+        for X in (-0.75, 0.75):
+            sc.ground(X - 0.05, X + 0.05, Z_NEAR, Z_FAR, rail, y=0.06)
+        if rail_out:
+            for X in (-4.55, -3.05):
+                sc.ground(X - 0.05, X + 0.05, Z_NEAR, Z_FAR, "#C8C8C8", y=0.06)
+        if kind == "sbahn":
+            sc.ground(1.45, 1.6, Z_NEAR, Z_FAR, "#7C7C7C", y=0.15)   # Stromschiene der Berliner S-Bahn
+
+    # --- Dinge am Rand, von hinten nach vorn gezeichnet ---
+    items = []
+    houses = []     # Häuserzeilen liegen ganz außen und werden zuerst gezeichnet
+
+    if kind in ("regio", "ice", "tram"):
+        # Oberleitung: Draht und Masten
+        wire_y = 5.6
+        c.create_line(*sc.p(0, wire_y, Z_NEAR), *sc.p(0, wire_y, Z_FAR), fill="#2E2E2E", width=max(1, 2 * s))
+        mast_x = -2.8 if kind != "tram" else 2.9
+        for k, z in periodic(30.0, 7.0):
+            def mast(z=z):
+                sc.front(mast_x - 0.12, mast_x + 0.12, 0, 6.3, z, "#5A5F66")
+                sc.front(min(mast_x, 0.2), max(mast_x, -0.2), 5.75, 5.95, z, "#5A5F66")
+            items.append((z, mast))
+    def near_station(z):
+        rel = (z + cam) / SEG
+        return abs(rel - round(rel)) * SEG < 40
+
+    if tunnel:
+        for k, z in periodic(8.0):
+            if near_station(z):
+                continue        # in der Bahnhofshalle ist es ohnehin hell
+
+            def lamps(z=z):
+                sc.wall(-2.98, 3.5, 3.8, z, z + 1.4, "#FFE9A8")
+                sc.wall(2.98, 3.5, 3.8, z, z + 1.4, "#FFE9A8")
+            items.append((z, lamps))
+    if not tunnel:
+        for k, z in periodic(13.0, 4.0):
+            if rnd(k, 1) < 0.35:
+                continue
+            side = -1 if rnd(k, 2) < 0.5 else 1
+            X = side * (10.0 + 6 * rnd(k, 4))                         # nicht auf Gleis oder Bahnsteig
+            if city:
+                X = 4.0 + rnd(k, 4) * 2.0 if side > 0 else -(7.6 + rnd(k, 4) * 1.6)   # auf dem Gehweg
+
+            def tree(z=z, X=X, k=k):
+                sc.front(X - 0.18, X + 0.18, 0, 2.4, z, "#6B4A2E")
+                cx, cy = sc.p(X, 4.0, z)
+                r = sc.size(1.9 + 0.6 * rnd(k, 6), z)
+                c.create_oval(cx - r, cy - r, cx + r, cy + r, fill=["#4F8F3F", "#5E9C46", "#477F38"][k % 3],
+                              outline="")
+            items.append((z, tree))
+    if city:
+        colors = ["#D9B38C", "#C98D7A", "#E6D3A3", "#B7C3C9", "#D7A9A0", "#C2B59B"]
+        for k, z in periodic(12.0):
+            for side in (-1, 1):
+                X = -10.0 if side < 0 else 7.0
+                height = 9 + 9 * rnd(k, 7 + side)
+                col = colors[int(rnd(k, 9 + side) * len(colors))]
+
+                def house(z=z, X=X, height=height, col=col):
+                    sc.wall(X, 0, height, z, z + 11.5, col)
+                    if z < 45:
+                        for fy in range(1, min(4, int(height // 3))):
+                            for wz in (2.5, 7.5):
+                                sc.wall(X + (0.05 if X > 0 else -0.05), fy * 3 - 0.2, fy * 3 + 1.1, z + wz, z + wz + 1.4,
+                                        "#5B7590")
+                houses.append((z + 11.5, house))
+
+    # --- Stationen ---
+    sign_border = MODE[kind][2]
+    for i in range(math.floor(ride.pos) - 1, math.floor(ride.pos) + 3):
+        if not 0 <= i < len(stops):
+            continue
+        zs = i * SEG - cam
+        name = st[stops[i]]
+        za, zb = zs - 12, zs + 28        # 40 m Bahnsteig, dazwischen freie Strecke
+        if zb < Z_NEAR or za > Z_FAR:
+            continue
+        if city:
+            def stop(zs=zs, za=za, zb=zb, name=name):
+                if kind == "tram":
+                    sc.ground(1.4, 3.6, za, zb, "#B0AAA0", y=0.25)
+                    sc.wall(1.4, 0, 0.25, za, zb, "#8C857A")
+                pole_z = zs + 12
+                sc.front(2.95, 3.05, 0, 3.6, pole_z, "#6F7378")
+                station_sign(c, app, sc, 3.1, 6.4, 2.0, 2.7, pole_z, name, "#2F8F4E")
+                if Z_NEAR < pole_z < Z_FAR:
+                    # das gelbe Berliner Haltestellenschild mit grünem H
+                    hx, hy2 = sc.p(3.0, 3.6, pole_z)
+                    r = sc.size(0.45, pole_z)
+                    c.create_oval(hx - r, hy2 - r, hx + r, hy2 + r, fill="#F7D117", outline="#2F8F4E", width=max(1, r * 0.15))
+                    if r > 5:
+                        c.create_text(hx, hy2, text="H", fill="#2F8F4E", font=app.font(r * 1.3 / s, "bold"))
+            items.append((zb, stop))
+        else:
+            def platform(zs=zs, za=za, zb=zb, name=name, i=i):
+                if tunnel:
+                    # helle Bahnhofshalle statt Tunnel
+                    tiles = ["#D8E2D0", "#E3D9C6", "#CFDDE6", "#E6D0CF"][i % 4]
+                    sc.wall(8.0, 0, 4.8, za, zb, tiles)
+                    sc.wall(-3.0, 0, 4.6, za, zb, tiles)
+                    sc.ground(-3.0, 8.0, za, zb, "#EFEDE6", y=4.7)
+                    for lz in range(int(za), int(zb), 6):
+                        sc.ground(-1.0, 6.0, lz, lz + 1.2, "#FFF6D8", y=4.68)
+                sc.ground(2.0, 8.0, za, zb, "#B9B2A6", y=1.0)
+                sc.wall(2.0, 0, 1.0, za, zb, "#8C857A")
+                sc.ground(2.0, 2.4, za, zb, "#F4F4F4", y=1.01)
+                if not tunnel:
+                    for pz in range(int(za) + 4, int(zb), 9):
+                        sc.front(5.0, 5.18, 1.0, 4.3, pz, "#6F7378")
+                    sc.ground(2.8, 8.0, za, zb, "#7A8088", y=4.3)
+                station_sign(c, app, sc, 2.7, 7.0, 2.4, 3.4, zs + 14, name, sign_border)
+            items.append((zb, platform))
+
+    for z, fn in sorted(houses, key=lambda it: -it[0]) + sorted(items, key=lambda it: -it[0]):
+        fn()
+
+
+def station_sign(c, app, sc, xa, xb, ya, yb, z, name, border):
+    """Stationsschild, dem Fahrer zugewandt; der Name wird mit der Entfernung größer."""
+    if not Z_NEAR + 0.5 < z < Z_FAR:
+        return
+    sc.front(xa, xb, ya, yb, z, "white", border)
+    (ax, ay), (bx, by) = sc.p(xa, yb, z), sc.p(xb, ya, z)
+    height = by - ay
+    if height < 9:
+        return
+    px = height * 0.5 / app.s
+    font = app.font(px, "bold")
+    while font.measure(name) > (bx - ax) * 0.92 and px > 6:
+        px *= 0.85
+        font = app.font(px, "bold")
+    c.create_text((ax + bx) / 2, (ay + by) / 2, text=name, fill="#1E2A38", font=font)
+
+
+def round_button(app, c, cx, cy, r, color, symbol, label, enabled, callback, glow=False):
+    """Echter runder Knopf im Armaturenbrett."""
+    s = app.s
+    col = color if enabled else "#4B5058"
+    c.create_oval(cx - r - 4 * s, cy - r - 4 * s + 4 * s, cx + r + 4 * s, cy + r + 4 * s + 4 * s, fill="#1B1E23",
+                  outline="")
+    if glow:
+        c.create_oval(cx - r - 7 * s, cy - r - 7 * s, cx + r + 7 * s, cy + r + 7 * s, fill="", outline="#7FD4FF",
+                      width=3 * s)
+    c.create_oval(cx - r - 3 * s, cy - r - 3 * s, cx + r + 3 * s, cy + r + 3 * s, fill="#8B9099", outline="")
+    c.create_oval(cx - r, cy - r, cx + r, cy + r, fill=darker(col, 0.8), outline="")
+    c.create_oval(cx - r * 0.86, cy - r * 0.92, cx + r * 0.86, cy + r * 0.8, fill=col, outline="")
+    c.create_oval(cx - r * 0.5, cy - r * 0.75, cx + r * 0.1, cy - r * 0.45, fill=tint(col, 0.45), outline="")
+    fg = text_color_for(col) if enabled else "#7A808A"
+    c.create_text(cx, cy, text=symbol, font=app.font(r * 0.75 / s if len(symbol) <= 2 else r * 0.42 / s, "bold"),
+                  fill=fg)
+    c.create_text(cx, cy + r + 14 * s, text=label, font=app.font(13, "bold"), fill="#C9CED6" if enabled else "#6B7079")
+    if enabled:
+        app.hit(cx - r - 6 * s, cy - r - 6 * s, cx + r + 6 * s, cy + r + 22 * s, callback)
+
+
+def draw_gauge(app, c, cx, cy, radius, speed, vmax):
+    """Tacho mit Nadel und Ziffern."""
+    s = app.s
+    c.create_oval(cx - radius - 8 * s, cy - radius - 8 * s, cx + radius + 8 * s, cy + radius + 8 * s,
+                  fill="#15181C", outline="#8B9099", width=3 * s)
+    a0, a1 = math.radians(225), math.radians(-45)     # von links unten über oben nach rechts unten
+    steps = 5
+    for i in range(steps * 2 + 1):
+        a = a0 + (a1 - a0) * i / (steps * 2)
+        r1 = radius * (0.78 if i % 2 == 0 else 0.86)
+        c.create_line(cx + math.cos(a) * r1, cy - math.sin(a) * r1, cx + math.cos(a) * radius * 0.95,
+                      cy - math.sin(a) * radius * 0.95, fill="#E6E6E6", width=max(1, (2.5 if i % 2 == 0 else 1.2) * s))
+        if i % 2 == 0:
+            v = round(vmax * i / (steps * 2))
+            c.create_text(cx + math.cos(a) * radius * 0.6, cy - math.sin(a) * radius * 0.6, text=str(v),
+                          font=app.font(max(9, radius * 0.14 / s), "bold"), fill="#E6E6E6")
+    frac = max(0.0, min(1.0, speed / vmax))
+    a = a0 + (a1 - a0) * frac
+    c.create_line(cx, cy, cx + math.cos(a) * radius * 0.88, cy - math.sin(a) * radius * 0.88, fill="#FF5A3C",
+                  width=max(2, 4 * s), capstyle="round")
+    c.create_oval(cx - 7 * s, cy - 7 * s, cx + 7 * s, cy + 7 * s, fill="#C9CED6", outline="")
+    c.create_text(cx, cy + radius * 0.62, text=f"{round(speed)} km/h", font=app.font(max(9, radius * 0.13 / s), "bold"),
+                  fill=LED)
+
+
+def draw_cockpit(ride, c, w, h):
+    """Führerstand: Fenster mit Strecke, Zielanzeige oben, Armaturenbrett mit Knöpfen unten."""
+    app, s = ride.app, ride.app.s
+    st = app.data["stations"]
+    line, kind = ride.line, ride.kind
+    stops = ride.stops
+    last = ride.index == len(stops) - 1
+    frame = "#2B2F36"
+    accent = readable(line["color"])
+
+    top_h = 112 * s
+    dash_top = h * 0.6
+    pillar = 30 * s
+    wx1, wy1, wx2, wy2 = pillar, top_h, w - pillar, dash_top + 30 * s
+    draw_scene(ride, c, app, wx1, wy1, wx2, wy2)
+
+    # Fensterrahmen (deckt alles ab, was über das Fenster hinausragt)
+    c.create_rectangle(0, 0, w, wy1, fill=frame, outline="")
+    c.create_rectangle(0, 0, wx1, h, fill=frame, outline="")
+    c.create_rectangle(wx2, 0, w, h, fill=frame, outline="")
+    round_rect(c, wx1 - 10 * s, wy1 - 10 * s, wx2 + 10 * s, wy2 + 10 * s, 30 * s, fill="", outline=frame, width=22 * s)
+    c.create_rectangle(0, top_h - 8 * s, w, top_h - 2 * s, fill=accent, outline="")
+    # Scheibenwischer
+    c.create_line(wx1 + (wx2 - wx1) * 0.32, wy2 - 6 * s, wx1 + (wx2 - wx1) * 0.12, wy2 - 70 * s, fill="#1B1E23",
+                  width=max(2, 5 * s), capstyle="round")
+
+    # --- Zielanzeige an der Decke ---
+    dx1, dx2 = 220 * s, w - 220 * s
+    dy1, dy2 = 12 * s, top_h - 20 * s
+    round_rect(c, dx1, dy1, dx2, dy2, 10 * s, fill="#0B0B0B", outline="#45494F", width=3 * s)
+    badge_font = app.font(24, "bold")
+    bw = draw_badge(c, dx1 + 16 * s, (dy1 + dy2) / 2, line["name"], line["color"], kind, 46 * s, badge_font)
+    led_big = app.font(26, "bold")
+    led_small = app.font(19, "bold")
+    tx = dx1 + 16 * s + bw + 18 * s
+    tw = dx2 - tx - 14 * s
+    dest = "Ringfahrt ↻" if ride.ring else st[stops[-1]]
+    c.create_text(tx, dy1 + 24 * s, text=fit_text(led_big, dest, tw), anchor="w", font=led_big, fill=LED)
+    text, until = ride.message
+    if text and time.monotonic() < until:
+        second = text
+    elif last:
+        second = "Einmal rund um die Stadt!" if ride.ring else "Endstation – bitte alle aussteigen"
+    else:
+        second = "Nächster Halt: " + st[stops[ride.index + 1]]
+    c.create_text(tx, dy2 - 20 * s, text=fit_text(led_small, second, tw), anchor="w", font=led_small,
+                  fill="#FFD27A")
+
+    # Kleine Knöpfe oben: Zurück und Ansicht wechseln
+    def small_button(x1, label, cb):
+        bw2, bh2 = 180 * s, 50 * s
+        by = (top_h - 8 * s - bh2) / 2
+        round_rect(c, x1, by, x1 + bw2, by + bh2, 25 * s, fill="#454A53", outline="")
+        c.create_text(x1 + bw2 / 2, by + bh2 / 2, text=label, font=app.font(18, "bold"), fill="white")
+        app.hit(x1, by, x1 + bw2, by + bh2, cb)
+    small_button(20 * s, "◀  Zurück", ride.back)
+    small_button(w - 200 * s, "F  Normale Ansicht", ride.toggle_cockpit)
+
+    # --- Armaturenbrett ---
+    c.create_polygon(0, dash_top + 40 * s, w * 0.12, dash_top, w * 0.88, dash_top, w, dash_top + 40 * s, w, h, 0, h,
+                     fill="#3A3F48", outline="")
+    c.create_line(w * 0.12, dash_top, w * 0.88, dash_top, fill=accent, width=max(2, 4 * s))
+    pad = 22 * s
+    py1, py2 = dash_top + 28 * s, h - 18 * s
+    ph = py2 - py1
+    inner_w = w - 2 * pad
+    gap = 18 * s
+    map_w = inner_w * 0.27
+    gauge_w = inner_w * 0.16
+    list_w = inner_w * 0.27
+    btn_w = inner_w - map_w - gauge_w - list_w - 3 * gap
+    x = pad
+
+    # Bildschirm mit Netzplan
+    round_rect(c, x, py1, x + map_w, py2, 14 * s, fill="#15181C", outline="#8B9099", width=2 * s)
+    coords = app.data.get("coords", {})
+    path = [coords[k] for k in stops if k in coords]
+    app.network_map(kind).draw(c, x + 8 * s, py1 + 8 * s, x + map_w - 8 * s, py2 - 8 * s, s, line["name"], path,
+                               ride.pos, MODE[kind][1], app.font(11, "bold"))
+    x += map_w + gap
+
+    # Tacho
+    radius = min(gauge_w / 2 - 10 * s, ph / 2 - 10 * s)
+    draw_gauge(app, c, x + gauge_w / 2, py1 + ph / 2 + 4 * s, radius, ride.speed * VMAX[kind], VMAX[kind])
+    x += gauge_w + gap
+
+    # Stationsanzeige
+    round_rect(c, x, py1, x + list_w, py2, 14 * s, fill="#0B0B0B", outline="#8B9099", width=2 * s)
+    c.create_text(x + 14 * s, py1 + 18 * s, text="STATIONEN", anchor="w", font=app.font(12, "bold"), fill=LED)
+    c.create_text(x + list_w - 14 * s, py1 + 18 * s, text=f"{ride.index + 1} / {len(stops)}", anchor="e",
+                  font=app.font(12, "bold"), fill=LED)
+    rows = [i for i in range(ride.index - 1, ride.index + 4) if 0 <= i < len(stops)]
+    row_h = (ph - 40 * s) / 5
+    ry = py1 + 34 * s
+    mini = app.font(11, "bold")
+    for i in rows:
+        cur = i == ride.index
+        font = app.font(17 if cur else 14, "bold" if cur else "normal")
+        cy = ry + row_h / 2
+        if cur:
+            round_rect(c, x + 6 * s, ry + 2 * s, x + list_w - 6 * s, ry + row_h - 2 * s, 8 * s, fill="#3A2A0A", outline="")
+        mark = "▶ " if cur else "   "
+        fill = "#FFD27A" if cur else ("#6E6A60" if i < ride.index else "#E8E2D0")
+        others = ride.transfer_options(i)
+        bx = x + list_w - 10 * s
+        shown = []
+        for o in others[:3]:
+            ww = max(22 * 1.6 * s, mini.measure(o["name"]) + 22 * 0.6 * s)
+            if bx - ww < x + list_w * 0.55:
+                break
+            bx -= ww + 4 * s
+            shown.append((bx, o))
+        name = fit_text(font, mark + st[stops[i]], (bx if shown else x + list_w - 10 * s) - (x + 12 * s) - 6 * s)
+        c.create_text(x + 12 * s, cy, text=name, anchor="w", font=font, fill=fill)
+        for bx2, o in shown:
+            draw_badge(c, bx2 + 4 * s, cy, o["name"], o["color"], o["kind"], 22 * s, mini)
+        app.hit(x, ry, x + list_w, ry + row_h, lambda i=i: ride.go_to(i))
+        ry += row_h
+    x += list_w + gap
+
+    # Knöpfe
+    can_change = bool(ride.transfer_options())
+    buttons = [("▲", "Zurück", ride.prev, ride.index > 0 or ride.ring, "#F7D117"),
+               ("▼", "Weiter", ride.next, not last or ride.ring, "#F7D117"),
+               ("U", "Umsteigen", ride.change, can_change, "#2F9E5B"),
+               ("Türen", "Türen", ride.doors, True, "#E8483B"),
+               ("V", "Ansage", ride.announce, True, "#3D8BD4"),
+               ("⇄", "Richtung", ride.switch, True, "#E8E8E8")]
+    cols, rows_n = 3, 2
+    cell_w, cell_h = btn_w / cols, ph / rows_n
+    r = max(14 * s, min(cell_w * 0.3, cell_h * 0.3))
+    for n, (sym, label, cb, enabled, color) in enumerate(buttons):
+        bx = x + cell_w * (n % cols + 0.5)
+        by = py1 + cell_h * (n // cols) + cell_h * 0.42
+        round_button(app, c, bx, by, r, color, sym, label, enabled, cb, glow=(sym == "U" and can_change))
 
 
 def board(app, opt, message):
@@ -1526,6 +2012,7 @@ class App:
         self.transfers = Transfers(data)
         self.maps = {}
         self.settings = self.load_settings()
+        self.cockpit = False    # Cockpit-Ansicht beim Fahren (Taste F), bleibt beim Umsteigen erhalten
         self.sound = SoundPlayer()
         root.bind("<Destroy>", lambda e: self.sound.stop() if e.widget is root else None)
 
