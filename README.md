@@ -5,7 +5,7 @@ dann Station für Station mit den Pfeiltasten durch Berlin fahren.
 
 Enthalten sind alle S-Bahn-, U-Bahn-, Straßenbahn- und Buslinien von BVG und
 S-Bahn Berlin sowie alle Regional- und ICE-Züge, die durch Berlin fahren
-(15 S-Bahn-, 9 U-Bahn-, 22 Tram-, 204 Bus-, 22 Regional- und 8 ICE-Linien). Das
+(16 S-Bahn-, 9 U-Bahn-, 22 Tram-, 204 Bus-, 22 Regional- und 8 ICE-Linien). Das
 Programm läuft komplett **offline**.
 
 ## Browser-Version (ohne Installation)
@@ -254,5 +254,15 @@ sie trotzdem im Spiel ist, übernimmt das Skript Linien aus der Liste
 `KEEP_LINES` (in `tools/build_data.py`) aus der letzten älteren Version, in
 der sie noch vorkommen. Für die U4 ist das der Fahrplan vom Januar 2026.
 Weitere Linien lassen sich dort einfach eintragen.
+
+**Neue Linien**, die im VBB-Datensatz noch fehlen, stehen in
+`data/extra_lines.json`. Zurzeit ist das die **S15** (seit 15. Juni 2026,
+Gesundbrunnen – Wedding – Hauptbahnhof). Ihre Farbe ist vorläufig
+S-Bahn-Grün, weil die offizielle Linienfarbe nicht zu ermitteln war. Sobald
+der VBB-Datensatz die Linie selbst enthält, nimmt das Skript automatisch die
+echten Daten.
+
+Fehlt ein Bahnhofsname im neuesten Haltestellenverzeichnis, nimmt das Skript
+ihn aus der Verzeichnisversion, die zum Fahrplanstand passt.
 
 Fahrplandaten: © VBB Verkehrsverbund Berlin-Brandenburg GmbH, CC BY 4.0.

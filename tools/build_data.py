@@ -47,6 +47,8 @@ MAX_LOOKBACK = 12   # so viele ältere Versionen werden höchstens durchsucht
 PRODUCTS = ("sbahn", "ubahn", "tram", "bus", "regio", "ice")
 # ICE-Linien stehen nicht im VBB-Fahrplan; sie kommen aus dieser Datei (von Hand gepflegt)
 ICE_FILE = ROOT / "data" / "ice_lines.json"
+# Neue Linien, die im VBB-Datensatz noch fehlen (z. B. die S15), von Hand gepflegt
+EXTRA_FILE = ROOT / "data" / "extra_lines.json"
 ICE_COLOR = "#EC0016"   # DB-Rot
 # Regionalzüge kommen von vielen Betreibern (DB Regio, ODEG, NEB …); genommen werden alle,
 # die mindestens einmal in Berlin halten (Haltestellen-IDs „de:11000:…“).
@@ -154,6 +156,18 @@ def load_npm():
     # data.json: [id, Name, Gewicht, Breite, Länge]
     coords = {row[0]: (row[3], row[4]) for row in json.loads(raw_data)}
 
+    # Fehlende Namen aus der Stationsversion ergänzen, die zum Fahrplanstand passt
+    # (im neuesten Verzeichnis fehlen manchmal Bahnhöfe, die im Fahrplan noch vorkommen)
+    st_versions, st_meta = npm_versions("vbb-stations")
+    lines_time = meta["time"][meta["dist-tags"]["latest"]]
+    matching = next((v for v in st_versions if st_meta["time"].get(v, "") <= lines_time), None)
+    if matching and matching != st_meta["dist-tags"]["latest"]:
+        (old_names, old_data), _ = npm_files("vbb-stations", "names.json", "data.json", version=matching, meta=st_meta)
+        for key, name in json.loads(old_names).items():
+            names.setdefault(key, name)
+        for row in json.loads(old_data):
+            coords.setdefault(row[0], (row[3], row[4]))
+
     lines = parse_npm_lines(raw_lines)
     notes = add_kept_lines(lines, versions, meta)
     source = f"VBB-GTFS über {v_lines} und {v_names}"
@@ -254,6 +268,31 @@ def ice_name(name):
     return name.replace("Bad Bf", "Badischer Bahnhof")
 
 
+def add_extra_lines(result, stations):
+    """Linien aus data/extra_lines.json, die im VBB-Datensatz (noch) fehlen. Gibt ihre Namen zurück."""
+    if not EXTRA_FILE.exists():
+        return []
+    by_name = {}
+    for key, name in stations.items():
+        by_name.setdefault(name, key)
+    added = []
+    for line in json.loads(EXTRA_FILE.read_text(encoding="utf-8"))["lines"]:
+        product = line["product"]
+        if any(l["name"] == line["name"] for l in result[product]):
+            print(f"  {line['name']} ist jetzt im VBB-Datensatz – Eintrag in {EXTRA_FILE.name} wird ignoriert",
+                  file=sys.stderr)
+            continue
+        missing = [n for n in line["stops"] if n not in by_name]
+        if missing:
+            raise SystemExit(f"{line['name']}: Station unbekannt: {missing} (Schreibweise wie in berlin_lines.json?)")
+        stops = [by_name[n] for n in line["stops"]]
+        result[product].append({"name": line["name"], "color": line.get("color", DEFAULT_COLORS[product]),
+                                "directions": [stops, stops[::-1]]})
+        added.append(line["name"])
+        print(f"  {line['name']} von Hand ergänzt aus {EXTRA_FILE.name}", file=sys.stderr)
+    return added
+
+
 def add_ice_lines(result, stations, coords):
     """ICE-Linien aus data/ice_lines.json; Koordinaten aus dem DB-Stationsverzeichnis (db-stations)."""
     if not ICE_FILE.exists():
@@ -337,8 +376,8 @@ def build(lines, raw_names, raw_coords, source):
             for stop in stops:
                 key = station_key(stop)
                 stop_name = name_of(stop)
-                if not stop_name:
-                    continue
+                if not stop_name or stop_name.startswith("Tarifgrenze"):
+                    continue        # namenlose Masten und reine Tarifzählpunkte auslassen
                 stations.setdefault(key, clean_name(stop_name))
                 if stop.startswith(BERLIN_PREFIX):
                     berlin.add(key)
@@ -359,6 +398,7 @@ def build(lines, raw_names, raw_coords, source):
             "directions": directions,
         })
 
+    extra = add_extra_lines(result, stations)
     add_ice_lines(result, stations, coords)
 
     used = {s for p in result.values() for l in p for d in l["directions"] for s in d}
@@ -366,7 +406,8 @@ def build(lines, raw_names, raw_coords, source):
         result[product].sort(key=sort_key)
 
     return {
-        "source": source + (" + ICE-Linien von Hand (data/ice_lines.json)" if result["ice"] else ""),
+        "source": source + (" + ICE-Linien von Hand (data/ice_lines.json)" if result["ice"] else "")
+        + (f" + {', '.join(extra)} von Hand (data/extra_lines.json)" if extra else ""),
         "license": "Fahrplandaten: VBB Verkehrsverbund Berlin-Brandenburg GmbH, CC BY 4.0",
         "created": date.today().isoformat(),
         "stations": {k: v for k, v in sorted(stations.items()) if k in used},
