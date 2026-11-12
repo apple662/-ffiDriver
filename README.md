@@ -50,11 +50,28 @@ python3 tools/build_web.py
 |---|---|
 | **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Regionalbahn oder ICE, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–6 gehen auch) |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
-| **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht |
+| **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht, an der Endhaltestelle `B`: Betriebshof (Bus, Tram) bzw. `A`: Abstellgleis (Bahnen) |
 
 `Esc` oder der Knopf „Zurück“ führt immer einen Schritt zurück. `F11`
 schaltet auf Vollbild. Auf der Ringbahn (S41/S42) kann man endlos im Kreis
 fahren.
+
+## Betriebshof und Abstellgleis
+
+An einer Endhaltestelle (am Anfang oder Ende der Linie) fahren **Bus und
+Straßenbahn mit `B` auf den Betriebshof**, **S-Bahn, U-Bahn, Regionalbahn und
+ICE mit `A` aufs Abstellgleis**. Dafür gibt es auch einen lila Knopf. In der
+Stationsliste erscheint hinter der Endstation eine eigene Zeile, im Cockpit
+sieht man:
+- beim Abstellgleis den rot-weißen Prellbock und daneben abgestellte Züge
+  (bei der U-Bahn das Tunnelende),
+- beim Betriebshof eine Halle mit offenen Toren und wartenden Fahrzeugen.
+
+Dort ist Pause: Weiterfahren, Umsteigen und Richtung wechseln gehen nicht.
+Ein erneuter Druck auf `B` bzw. `A` führt zurück auf die Strecke, und zwar
+gewendet, wie im echten Betrieb: Man fährt wieder an derselben
+Endhaltestelle ein, jetzt in Gegenrichtung. Drückt man die falsche Taste,
+mitten auf der Strecke oder auf der Ringbahn, gibt es einen Hinweis.
 
 ## Cockpit-Ansicht
 

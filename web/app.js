@@ -961,6 +961,11 @@ class LinesScreen extends Screen {
   }
 }
 
+/** [Name, Taste, „wohin“] – Bus und Tram fahren auf den Betriebshof, Bahnen aufs Abstellgleis. */
+function depotInfo(kind) {
+  return kind === "bus" || kind === "tram" ? ["Betriebshof", "B", "auf den Betriebshof"] : ["Abstellgleis", "A", "aufs Abstellgleis"];
+}
+
 class RideScreen extends Screen {
   constructor(app, kind, lineIndex, linesScreen) {
     super(app);
@@ -979,6 +984,54 @@ class RideScreen extends Screen {
     this.v = 0;              // Tempo in der Cockpit-Ansicht (Stationen pro Sekunde)
     this.lastTick = 0;
     this.speed = 0;          // 0…1 für den Tacho
+    this.depot = false;      // steht auf dem Betriebshof bzw. Abstellgleis hinter der Endstation
+  }
+
+  /** Wohin das Fahrzeug fährt: die Station – oder eine Zeile weiter auf Betriebshof/Abstellgleis. */
+  get target() { return this.index + (this.depot ? 1 : 0); }
+
+  atTerminus() { return !this.ring && (this.index === 0 || this.index === this.stops.length - 1); }
+
+  depotHint() {
+    const [name, key] = depotInfo(this.kind);
+    this.say(`Pause auf dem ${name}. Zurück auf die Strecke: Taste ${key}`, 2.5);
+    this.app.animate();
+  }
+
+  /** Taste B/A: an der Endhaltestelle auf den Betriebshof bzw. aufs Abstellgleis – und wieder zurück. */
+  toggleDepot(key = null) {
+    const [name, wanted, where] = depotInfo(this.kind);
+    if (key && key.toUpperCase() !== wanted) {
+      this.say(wanted === "A" ? "Bahnen fahren aufs Abstellgleis: Taste A" : `${MODE[this.kind][1]} fährt auf den Betriebshof: Taste B`, 2.5);
+    } else if (this.depot) {
+      // zurück auf die Strecke – gewendet, also in Gegenrichtung ab derselben Endhaltestelle
+      const here = this.stops[this.index];
+      this.depot = false;
+      this.direction = 1 - this.direction;
+      this.index = Math.max(0, this.stops.indexOf(here));
+      this.pos = this.index - 1;
+      this.backwards = false;
+      this.scroll = null;
+      this.say("Zurück auf der Strecke – nach " + this.app.data.stations[this.stops[this.stops.length - 1]], 3);
+    } else if (this.ring) {
+      this.say("Die Ringbahn hat keine Endhaltestelle.", 2.5);
+    } else if (!this.atTerminus()) {
+      this.say(`${wanted === "A" ? "Aufs" : "Auf den"} ${name} geht es nur an der Endhaltestelle.`, 2.5);
+    } else {
+      if (this.index === 0) {
+        // am Anfang der Linie: erst wenden, damit der Betriebshof „hinter“ der Endstation liegt
+        const here = this.stops[0];
+        this.direction = 1 - this.direction;
+        const i = this.stops.indexOf(here);
+        this.index = i >= 0 ? i : this.stops.length - 1;
+        this.pos = this.index;
+        this.scroll = null;
+      }
+      this.depot = true;
+      this.backwards = false;
+      this.say(`Wir fahren ${where}.`, 2.5);
+    }
+    this.app.animate();
   }
 
   get cockpit() { return this.app.cockpit; }
@@ -1018,12 +1071,26 @@ class RideScreen extends Screen {
     const nameX = trackX + 48 * s;
     const rowY = i => top + i * rowH - this.scroll + rowH / 2;
 
-    const curY = rowY(this.index);
+    const [depotName, depotKey] = depotInfo(kind);
+    const curY = rowY(this.target);
     c.roundRect(24 * s, curY - rowH / 2 + 4 * s, listX2, curY + rowH / 2 - 4 * s, 18 * s, { fill: HIGHLIGHT });
 
     // Gleis
     const yFirst = rowY(0), yLast = rowY(stops.length - 1);
     const tw = 16 * s;
+    if (this.depot || this.pos < 0) {
+      // Betriebshof/Abstellgleis: grauer Abzweig hinter (bzw. beim Zurückkommen vor) der Endstation
+      const dr = this.depot ? stops.length : -1, dy = rowY(dr);
+      const ctx = c.ctx;
+      ctx.setLineDash([6, 4]);
+      c.line([[trackX, rowY(dr + (this.depot ? -1 : 1))], [trackX, dy]], { fill: "#9A9488", width: tw * 0.7 });
+      ctx.setLineDash([]);
+      const r = 15 * s;
+      c.rect(trackX - r - 2.5 * s, dy - r - 2.5 * s, trackX + r + 2.5 * s, dy + r + 2.5 * s, "#6B6560");
+      c.rect(trackX - r + 2.5 * s, dy - r + 2.5 * s, trackX + r - 2.5 * s, dy + r - 2.5 * s, "white");
+      c.text(nameX, dy, `${depotName} (${st[stops[this.index]]})`, app.font(this.depot ? 26 : 22, this.depot ? "bold" : "normal"),
+        this.depot ? TEXT : MUTED, "w");
+    }
     c.line([[trackX, Math.max(top, yFirst)], [trackX, Math.min(h, yLast)]], { fill: color, width: tw, cap: "round" });
     if (this.pos > 0) {
       c.line([[trackX, Math.max(top, yFirst)], [trackX, rowY(this.pos)]], { fill: darker(color, 0.6), width: tw, cap: "round" });
@@ -1036,7 +1103,7 @@ class RideScreen extends Screen {
       const end = i === 0 || i === stops.length - 1;
       const r = (end ? 17 : 12) * s;
       c.oval(trackX - r, y - r, trackX + r, y + r, { fill: "white", outline: darker(color, 0.8), width: 5 * s });
-      const current = i === this.index;
+      const current = i === this.index && !this.depot;
       const font = current ? curFont : nameFont;
       const fill = i >= this.index ? TEXT : MUTED;
       // Der Name hat Vorrang; Linienschilder bekommen höchstens 45 % der Breite
@@ -1094,16 +1161,17 @@ class RideScreen extends Screen {
     let y = py + 16 * s + mapH + 24 * s;
 
     c.text(ix, y, "DU BIST HIER", labelFont, "#F7D117", "w");
-    c.text(ix + pw, y, `Station ${this.index + 1} von ${stops.length}`, app.font(14), "#B8C4D0", "e");
+    c.text(ix + pw, y, this.depot ? "Pause" : `Station ${this.index + 1} von ${stops.length}`, app.font(14), "#B8C4D0", "e");
     y += 22 * s;
-    for (const ln of wrapText(bigFont, st[stops[this.index]], pw, 2)) {
+    for (const ln of wrapText(bigFont, this.depot ? depotName : st[stops[this.index]], pw, 2)) {
       c.text(ix, y, ln, bigFont, "white", "nw");
       y += bigFont.linespace();
     }
     y += 14 * s;
     const last = this.index === stops.length - 1;
-    if (last) {
-      const [title, info] = this.ring ? ["RUNDE GESCHAFFT", "Einmal rund um die Stadt!"] : ["ENDSTATION", "Bitte alle aussteigen!"];
+    if (this.depot || last) {
+      let [title, info] = this.ring ? ["RUNDE GESCHAFFT", "Einmal rund um die Stadt!"] : ["ENDSTATION", "Bitte alle aussteigen!"];
+      if (this.depot) [title, info] = ["PAUSE", `Zurück auf die Strecke: Taste ${depotKey}`];
       c.text(ix, y, title, labelFont, "#F7D117", "w");
       y += 22 * s;
       for (const ln of wrapText(midFont, info, pw, 2)) {
@@ -1121,17 +1189,18 @@ class RideScreen extends Screen {
     y += 12 * s;
     const barW = px2 - px1 - 48 * s;
     c.roundRect(ix, y, ix + barW, y + 14 * s, 7 * s, { fill: "#3A4A5C" });
-    const frac = this.pos / Math.max(1, stops.length - 1);
+    const frac = Math.max(0, Math.min(1, this.pos / Math.max(1, stops.length - 1)));
     if (frac > 0) c.roundRect(ix, y, ix + Math.max(14 * s, barW * frac), y + 14 * s, 7 * s, { fill: color });
 
     // Knöpfe: [Beschriftung, Aktion, aktiv, Farbe, Schriftfarbe, Schriftgröße]
     const buttons = [
-      ["▲", () => this.prev(), this.index > 0, "#F7D117", PANEL, 36],
+      ["▲", () => this.prev(), this.index > 0 && !this.depot, "#F7D117", PANEL, 36],
       ["▼", () => this.next(), !last || this.ring, "#F7D117", PANEL, 36],
       ["Türen", () => this.doors(), true, "#E8483B", "white", 18],
       ["Ansage", () => this.announce(), true, "#3D8BD4", "white", 17],
+      [depotKey, () => this.toggleDepot(), this.depot || this.atTerminus(), "#8E6BBF", "white", 30],
     ];
-    const bgap = 14 * s;
+    const bgap = 12 * s;
     const bsize = Math.min(84 * s, (pw - (buttons.length - 1) * bgap) / buttons.length);
     const by2 = h - 50 * s;
     const btnY = by2 - bsize - 76 * s;
@@ -1144,9 +1213,9 @@ class RideScreen extends Screen {
       bx1 += bsize + bgap;
     }
     const rbw = px2 - px1 - 48 * s, rbh = 56 * s, rby = by2 - rbh;
-    c.roundRect(ix, rby, ix + rbw, rby + rbh, 28 * s, { fill: "white" });
-    c.text(ix + rbw / 2, rby + rbh / 2, "⇄  Andere Richtung", app.font(20, "bold"), PANEL);
-    app.hit(ix, rby, ix + rbw, rby + rbh, () => this.switchDirection());
+    c.roundRect(ix, rby, ix + rbw, rby + rbh, 28 * s, { fill: this.depot ? "#3A4A5C" : "white" });
+    c.text(ix + rbw / 2, rby + rbh / 2, "⇄  Andere Richtung", app.font(20, "bold"), this.depot ? "#5A6A7C" : PANEL);
+    if (!this.depot) app.hit(ix, rby, ix + rbw, rby + rbh, () => this.switchDirection());
 
     // Durchsage als Leuchtanzeige zwischen Fortschritt und Knöpfen
     let [text, until] = this.message;
@@ -1158,6 +1227,13 @@ class RideScreen extends Screen {
       let lines, font, fill;
       if (text) {
         [lines, font, fill] = [wrapText(mf, text, pw - 24 * s, 2), mf, "#FFB000"];
+      } else if (this.depot) {
+        [lines, font, fill] = [wrapText(mf, `Pause · Taste ${depotKey}: zurück`, pw - 24 * s, 2), mf, "#C8B6F0"];
+        app.hit(ix, boxY1, ix + pw, boxY2, () => this.toggleDepot());
+      } else if (last && !this.ring) {
+        // an der Endstation: Betriebshof bzw. Abstellgleis anbieten
+        [lines, font, fill] = [wrapText(mf, `Taste ${depotKey}: ${depotName}`, pw - 24 * s, 2), mf, "#C8B6F0"];
+        app.hit(ix, boxY1, ix + pw, boxY2, () => this.toggleDepot());
       } else if (this.transferOptions().length) {
         // Auffordern, wenn man hier umsteigen kann
         [lines, font, fill] = [wrapText(mf, "Umsteigen? Drücke U", pw - 24 * s, 2), mf, "#7FD4FF"];
@@ -1182,7 +1258,7 @@ class RideScreen extends Screen {
 
   tick() {
     let moving = false;
-    const d = this.index - this.pos;
+    const d = this.target - this.pos;
     if (Math.abs(d) > 0.003) {
       let step;
       if (this.cockpit) {
@@ -1199,7 +1275,7 @@ class RideScreen extends Screen {
       this.pos += Math.sign(d) * Math.min(step, Math.abs(d));
       moving = true;
     } else {
-      this.pos = this.index;
+      this.pos = this.target;
       this.v = 0;
       if (this.speed > 0.01) { this.speed *= 0.6; moving = true; } else this.speed = 0;
     }
@@ -1218,6 +1294,7 @@ class RideScreen extends Screen {
   }
 
   goTo(i) {
+    if (this.depot) return this.depotHint();
     if (i === this.index) return;
     this.backwards = i < this.index;
     if (this.index === 0 && i > 0) this.say("Zurückbleiben, bitte!");
@@ -1233,6 +1310,7 @@ class RideScreen extends Screen {
   }
 
   next() {
+    if (this.depot) return this.depotHint();
     const last = this.stops.length - 1;
     if (this.index === last && this.ring) {
       // Ringbahn: Start und Ziel sind derselbe Bahnhof, also einfach weiterfahren
@@ -1249,6 +1327,7 @@ class RideScreen extends Screen {
   }
 
   prev() {
+    if (this.depot) return this.depotHint();
     if (this.index === 0 && this.ring) {
       this.index = this.pos = this.stops.length - 1;
       this.scroll = null;
@@ -1272,6 +1351,12 @@ class RideScreen extends Screen {
 
   /** Sagt die aktuelle Station an, wie im Fahrzeug. */
   announce() {
+    if (this.depot) {
+      const name = depotInfo(this.kind)[0];
+      this.app.sound.speak(`${name}. Bitte nicht einsteigen.`);
+      this.say(`Hier ist: ${name}`, 3);
+      return this.app.animate();
+    }
     const stops = this.stops;
     const name = this.app.data.stations[stops[this.index]];
     let text = spokenName(name) + ".";
@@ -1289,6 +1374,7 @@ class RideScreen extends Screen {
 
   /** Taste U: umsteigen. Bei mehreren Möglichkeiten erscheint eine Auswahl. */
   change() {
+    if (this.depot) return this.depotHint();
     const options = this.transferOptions();
     if (!options.length) {
       this.say("Hier kann man nicht umsteigen.", 2);
@@ -1302,6 +1388,7 @@ class RideScreen extends Screen {
   }
 
   switchDirection() {
+    if (this.depot) return this.depotHint();
     const here = this.stops[this.index];
     this.direction = 1 - this.direction;
     const stops = this.stops;
@@ -1330,6 +1417,7 @@ class RideScreen extends Screen {
     else if (c === "t") this.doors();
     else if (c === "v") this.announce();
     else if (c === "u") this.change();
+    else if (c === "a" || c === "b") this.toggleDepot(c);
     else if (c === "f") this.toggleCockpit();
     else if (k === PARENT_KEY) this.setHome();
   }
@@ -1423,6 +1511,51 @@ class Scene {
   size(meters, z) { return meters * this.f / Math.max(z, Z_NEAR); }
 }
 
+/** Betriebshof: große Halle quer zur Straße, mit offenen Toren und abgestellten Fahrzeugen. */
+function drawDepotHall(c, app, sc, z, color, kind) {
+  if (!(z > Z_NEAR && z < Z_FAR)) return;
+  sc.front(-16, 16, 0, 9.5, z, "#B9A88E");
+  sc.front(-16.5, 16.5, 9.5, 10.4, z, "#7A6A55");
+  const body = MODE[kind][3][0];
+  for (const gx of [-11.0, -4.5, 2.0, 8.5]) {
+    sc.front(gx, gx + 5.0, 0, 6.0, z, "#2E3238");
+    sc.front(gx + 0.6, gx + 4.4, 0.4, 3.4, z, body);                   // Fahrzeug von vorn
+    sc.front(gx + 1.0, gx + 4.0, 1.9, 3.0, z, "#CFE8FF");               // Frontscheibe
+  }
+  stationSign(c, app, sc, -6.5, 6.5, 7.0, 8.9, z, "Betriebshof", color);
+}
+
+/** Abstellgleis: Prellbock am Gleisende, daneben abgestellte Züge (bei der U-Bahn im Tunnel). */
+function drawSiding(c, app, sc, zd, zEnd, kind) {
+  if (kind === "ubahn") {
+    sc.front(-3.0, 3.0, 0, 4.6, zEnd, "#3A3B3E");                      // Tunnelende
+  } else {
+    sc.front(-40, 40, 0, 3.2, zEnd, "#5E8B4C");                        // Erdwall mit Büschen
+    for (let k = -6; k <= 6; k++) {
+      const [cx, cy] = sc.p(k * 3.2, 3.2, zEnd), r = sc.size(1.8, zEnd);
+      c.oval(cx - r, cy - r, cx + r, cy + r, { fill: "#4F7F3F" });
+    }
+    // abgestellte Züge auf den Nachbargleisen
+    const [body, accent] = MODE[kind][3];
+    for (const [x1, x2] of [[4.4, 7.0], [-8.0, -5.4]]) {
+      sc.ground(x1 + 0.3, x1 + 0.4, zd - 30, zEnd, "#C8C8C8", 0.06);
+      sc.ground(x2 - 0.4, x2 - 0.3, zd - 30, zEnd, "#C8C8C8", 0.06);
+      const nearX = x1 > 0 ? x1 : x2;
+      sc.wall(nearX, 0.6, 3.9, zd + 8, zEnd - 1, body);
+      sc.wall(nearX, 0.6, 1.0, zd + 8, zEnd - 1, accent);
+      const side = nearX < 0 ? 0.02 : -0.02;
+      for (let wz = zd + 10; wz < zEnd - 3; wz += 3.6) sc.wall(nearX + side, 2.2, 3.3, wz, wz + 2.4, "#CFE8FF");   // Fenster
+      sc.front(x1, x2, 0.6, 3.9, zd + 8, body);
+      sc.front(x1 + 0.4, x2 - 0.4, 2.3, 3.4, zd + 8, "#2B3440");
+    }
+  }
+  // Prellbock: rot-weiß am Gleisende
+  const zb = zEnd - 1.5;
+  sc.front(-1.1, 1.1, 0, 1.3, zb, "#C62828");
+  for (let k = 0; k < 4; k++) sc.front(-1.1 + k * 0.55, -0.85 + k * 0.55, 0.2, 1.1, zb, "white");
+  sc.front(-0.9, 0.9, 1.3, 1.6, zb, "#3A3A3A");
+}
+
 /** Stationsschild, dem Fahrer zugewandt; der Name wird mit der Entfernung größer. */
 function stationSign(c, app, sc, xa, xb, ya, yb, z, name, border) {
   if (!(z > Z_NEAR + 0.5 && z < Z_FAR)) return;
@@ -1511,6 +1644,15 @@ function drawScene(ride, c, app, x1, y1, x2, y2) {
     if (kind === "sbahn") sc.ground(1.45, 1.6, Z_NEAR, Z_FAR, "#7C7C7C", 0.15);              // Stromschiene
   }
 
+  // --- Betriebshof bzw. Abstellgleis hinter der Endstation ---
+  // Was dahinter liegt, ist verdeckt: Häuser, Bäume und Masten werden dort nicht mehr gezeichnet.
+  let zEnd = Z_FAR + 100;
+  if (ride.depot) {
+    const zd = stops.length * SEG - cam;
+    if (city) { zEnd = zd + 34; drawDepotHall(c, app, sc, zEnd, MODE[kind][2], kind); }
+    else { zEnd = zd + 30; drawSiding(c, app, sc, zd, zEnd, kind); }
+  }
+
   // --- Dinge am Rand, von hinten nach vorn gezeichnet ---
   const items = [];
   const houses = [];      // Häuserzeilen liegen ganz außen und werden zuerst gezeichnet
@@ -1526,7 +1668,10 @@ function drawScene(ride, c, app, x1, y1, x2, y2) {
       }]);
     }
   }
-  const nearStation = z => { const rel = (z + cam) / SEG; return Math.abs(rel - Math.round(rel)) * SEG < 40; };
+  const nearStation = z => {
+    const rel = (z + cam) / SEG, i = Math.round(rel);
+    return i >= 0 && i < stops.length && Math.abs(rel - i) * SEG < 40;
+  };
   if (tunnel) {
     for (const [, z] of periodic(8)) {
       if (nearStation(z)) continue;      // in der Bahnhofshalle ist es ohnehin hell
@@ -1612,7 +1757,8 @@ function drawScene(ride, c, app, x1, y1, x2, y2) {
   }
 
   const byDistance = (a, b) => b[0] - a[0];
-  for (const [, fn] of houses.sort(byDistance).concat(items.sort(byDistance))) fn();
+  const visibleHouses = houses.filter(it => it[0] - 11.5 < zEnd), visibleItems = items.filter(it => it[0] < zEnd);
+  for (const [, fn] of visibleHouses.sort(byDistance).concat(visibleItems.sort(byDistance))) fn();
 }
 
 /** Echter runder Knopf im Armaturenbrett. */
@@ -1683,8 +1829,10 @@ function drawCockpit(ride, c, w, h) {
   const dest = ride.ring ? "Ringfahrt ↻" : st[stops[stops.length - 1]];
   c.text(tx, dy1 + 24 * s, fitText(ledBig, dest, tw), ledBig, LED, "w");
   const [text, until] = ride.message;
+  const [depotName, depotKey] = depotInfo(kind);
   let second;
   if (text && now() < until) second = text;
+  else if (ride.depot) second = `${depotName} – Pause. Zurück: Taste ${depotKey}`;
   else if (last) second = ride.ring ? "Einmal rund um die Stadt!" : "Endstation – bitte alle aussteigen";
   else second = "Nächster Halt: " + st[stops[ride.index + 1]];
   c.text(tx, dy2 - 20 * s, fitText(ledSmall, second, tw), ledSmall, "#FFD27A", "w");
@@ -1704,7 +1852,7 @@ function drawCockpit(ride, c, w, h) {
   c.line([[w * 0.12, dashTop], [w * 0.88, dashTop]], { fill: accent, width: Math.max(2, 4 * s) });
   const pad = 22 * s, py1 = dashTop + 28 * s, py2 = h - 18 * s, ph = py2 - py1;
   const innerW = w - 2 * pad, gap = 18 * s;
-  const mapW = innerW * 0.27, gaugeW = innerW * 0.16, listW = innerW * 0.27;
+  const mapW = innerW * 0.25, gaugeW = innerW * 0.14, listW = innerW * 0.25;
   const btnW = innerW - mapW - gaugeW - listW - 3 * gap;
   let x = pad;
 
@@ -1728,8 +1876,12 @@ function drawCockpit(ride, c, w, h) {
   const rowH = (ph - 40 * s) / 5;
   let ry = py1 + 34 * s;
   const mini = app.font(11, "bold");
+  if (ride.depot) {
+    c.text(x + listW / 2, py1 + ph * 0.45, depotName.toUpperCase(), app.font(22, "bold"), LED);
+    c.text(x + listW / 2, py1 + ph * 0.62, `Pause · Taste ${depotKey}: zurück`, app.font(14, "bold"), "#FFD27A");
+  }
   for (let i = ride.index - 1; i < ride.index + 4; i++) {
-    if (i < 0 || i >= stops.length) continue;
+    if (ride.depot || i < 0 || i >= stops.length) continue;
     const cur = i === ride.index;
     const font = app.font(cur ? 17 : 14, cur ? "bold" : "normal");
     const cy = ry + rowH / 2;
@@ -1752,20 +1904,22 @@ function drawCockpit(ride, c, w, h) {
   x += listW + gap;
 
   // Knöpfe
-  const canChange = ride.transferOptions().length > 0;
+  const canChange = ride.transferOptions().length > 0 && !ride.depot;
   const buttons = [
-    ["▲", "Zurück", () => ride.prev(), ride.index > 0 || ride.ring, "#F7D117"],
+    ["▲", "Zurück", () => ride.prev(), (ride.index > 0 || ride.ring) && !ride.depot, "#F7D117"],
     ["▼", "Weiter", () => ride.next(), !last || ride.ring, "#F7D117"],
     ["U", "Umsteigen", () => ride.change(), canChange, "#2F9E5B"],
     ["Türen", "Türen", () => ride.doors(), true, "#E8483B"],
     ["V", "Ansage", () => ride.announce(), true, "#3D8BD4"],
-    ["⇄", "Richtung", () => ride.switchDirection(), true, "#E8E8E8"],
+    ["⇄", "Richtung", () => ride.switchDirection(), !ride.depot, "#E8E8E8"],
+    [depotKey, depotName, () => ride.toggleDepot(), ride.depot || ride.atTerminus(), "#8E6BBF"],
   ];
-  const cellW = btnW / 3, cellH = ph / 2;
+  const cellW = btnW / 4, cellH = ph / 2;
   const r = Math.max(14 * s, Math.min(cellW * 0.3, cellH * 0.3));
   buttons.forEach(([sym, label, cb, enabled, color], n) => {
-    roundButton(app, c, x + cellW * (n % 3 + 0.5), py1 + cellH * Math.floor(n / 3) + cellH * 0.42, r, color, sym, label,
-      enabled, cb, sym === "U" && canChange);
+    const glow = (sym === "U" && canChange) || (sym === depotKey && (ride.depot || last) && enabled);
+    roundButton(app, c, x + cellW * (n % 4 + 0.5), py1 + cellH * Math.floor(n / 4) + cellH * 0.42, r, color, sym, label,
+      enabled, cb, glow);
   });
 }
 

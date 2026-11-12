@@ -956,6 +956,13 @@ class LinesScreen(Screen):
                 self.app.redraw()
 
 
+def depot_info(kind):
+    """(Name, Taste, „wohin“) – Bus und Tram fahren auf den Betriebshof, Bahnen aufs Abstellgleis."""
+    if kind in ("bus", "tram"):
+        return "Betriebshof", "B", "auf den Betriebshof"
+    return "Abstellgleis", "A", "aufs Abstellgleis"
+
+
 class RideScreen(Screen):
     def __init__(self, app, kind, line_index, lines_screen):
         super().__init__(app)
@@ -972,6 +979,7 @@ class RideScreen(Screen):
         self.last_wheel = 0.0
         self.v = 0.0            # Tempo in der Cockpit-Ansicht (Stationen pro Sekunde)
         self.last_tick = 0.0
+        self.depot = False       # steht auf dem Betriebshof bzw. Abstellgleis hinter der Endstation
         self.speed = 0.0        # 0…1 für den Tacho
 
     @property
@@ -1019,13 +1027,25 @@ class RideScreen(Screen):
         def row_y(i):
             return top + i * row_h - self.scroll + row_h / 2
 
-        cur_y = row_y(self.index)
+        depot_name, depot_key, _ = depot_info(kind)
+        cur_y = row_y(self.target)
         round_rect(c, 24 * s, cur_y - row_h / 2 + 4 * s, list_x2, cur_y + row_h / 2 - 4 * s, 18 * s,
                    fill=HIGHLIGHT, outline="")
 
         # Gleis
         y_first, y_last = row_y(0), row_y(len(stops) - 1)
         tw = 16 * s
+        if self.depot or self.pos < 0:
+            # Betriebshof/Abstellgleis: grauer Abzweig hinter (bzw. beim Zurückkommen vor) der Endstation
+            dr = len(stops) if self.depot else -1
+            dy = row_y(dr)
+            c.create_line(track_x, row_y(dr + (-1 if self.depot else 1)), track_x, dy, fill="#9A9488", width=tw * 0.7,
+                          dash=(6, 4))
+            r = 15 * s
+            c.create_rectangle(track_x - r, dy - r, track_x + r, dy + r, fill="white", outline="#6B6560", width=5 * s)
+            c.create_text(name_x, dy, text=f"{depot_name} ({st[stops[self.index]]})", anchor="w",
+                          font=app.font(26 if self.depot else 22, "bold" if self.depot else "normal"),
+                          fill=TEXT if self.depot else MUTED)
         c.create_line(track_x, max(top, y_first), track_x, min(h, y_last), fill=color, width=tw, capstyle="round")
         if 0 < self.pos:
             c.create_line(track_x, max(top, y_first), track_x, row_y(self.pos), fill=darker(color, 0.6), width=tw,
@@ -1042,7 +1062,7 @@ class RideScreen(Screen):
             r = (17 if end else 12) * s
             c.create_oval(track_x - r, y - r, track_x + r, y + r, fill="white", outline=darker(color, 0.8),
                           width=5 * s)
-            current = i == self.index
+            current = i == self.index and not self.depot
             font = cur_font if current else name_font
             fill = TEXT if i >= self.index else MUTED
             # Der Name hat Vorrang; Linienschilder bekommen höchstens 45 % der Breite
@@ -1098,17 +1118,19 @@ class RideScreen(Screen):
         y = py + 16 * s + map_h + 24 * s
 
         c.create_text(ix, y, text="DU BIST HIER", anchor="w", font=label_font, fill="#F7D117")
-        c.create_text(ix + pw, y, text=f"Station {self.index + 1} von {len(stops)}", anchor="e",
-                      font=app.font(14), fill="#B8C4D0")
+        c.create_text(ix + pw, y, text=f"Station {self.index + 1} von {len(stops)}" if not self.depot else "Pause",
+                      anchor="e", font=app.font(14), fill="#B8C4D0")
         y += 22 * s
-        for ln in wrap_text(big_font, st[stops[self.index]], pw, 2):
+        for ln in wrap_text(big_font, depot_name if self.depot else st[stops[self.index]], pw, 2):
             c.create_text(ix, y, text=ln, anchor="nw", font=big_font, fill="white")
             y += big_font.metrics("linespace")
         y += 14 * s
         last = self.index == len(stops) - 1
-        if last:
+        if self.depot or last:
             title, info = ("RUNDE GESCHAFFT", "Einmal rund um die Stadt!") if self.ring \
                 else ("ENDSTATION", "Bitte alle aussteigen!")
+            if self.depot:
+                title, info = "PAUSE", f"Zurück auf die Strecke: Taste {depot_key}"
             c.create_text(ix, y, text=title, anchor="w", font=label_font, fill="#F7D117")
             y += 22 * s
             for ln in wrap_text(mid_font, info, pw, 2):
@@ -1123,17 +1145,18 @@ class RideScreen(Screen):
         y += 12 * s
         bar_w = px2 - px1 - 48 * s
         round_rect(c, ix, y, ix + bar_w, y + 14 * s, 7 * s, fill="#3A4A5C", outline="")
-        frac = self.pos / max(1, len(stops) - 1)
+        frac = max(0.0, min(1.0, self.pos / max(1, len(stops) - 1)))
         if frac > 0:
             round_rect(c, ix, y, ix + max(14 * s, bar_w * frac), y + 14 * s, 7 * s, fill=color, outline="")
 
         # Knöpfe
         # (Beschriftung, Aktion, aktiv, Farbe, Schriftfarbe, Schriftgröße)
-        buttons = [("▲", self.prev, self.index > 0, "#F7D117", PANEL, 36),
+        buttons = [("▲", self.prev, self.index > 0 and not self.depot, "#F7D117", PANEL, 36),
                    ("▼", self.next, not last or self.ring, "#F7D117", PANEL, 36),
                    ("Türen", self.doors, True, "#E8483B", "white", 18),
-                   ("Ansage", self.announce, True, "#3D8BD4", "white", 17)]
-        bgap = 14 * s
+                   ("Ansage", self.announce, True, "#3D8BD4", "white", 17),
+                   (depot_key, self.toggle_depot, self.depot or self.at_terminus(), "#8E6BBF", "white", 30)]
+        bgap = 12 * s
         bsize = min(84 * s, (pw - (len(buttons) - 1) * bgap) / len(buttons))
         by2 = h - 50 * s
         btn_y = by2 - bsize - 76 * s
@@ -1149,10 +1172,11 @@ class RideScreen(Screen):
             bx1 += bsize + bgap
         rbw, rbh = px2 - px1 - 48 * s, 56 * s
         rby = by2 - rbh
-        round_rect(c, ix, rby, ix + rbw, rby + rbh, 28 * s, fill="white", outline="")
+        round_rect(c, ix, rby, ix + rbw, rby + rbh, 28 * s, fill="#3A4A5C" if self.depot else "white", outline="")
         c.create_text(ix + rbw / 2, rby + rbh / 2, text="⇄  Andere Richtung", font=app.font(20, "bold"),
-                      fill=PANEL)
-        app.hit(ix, rby, ix + rbw, rby + rbh, self.switch)
+                      fill="#5A6A7C" if self.depot else PANEL)
+        if not self.depot:
+            app.hit(ix, rby, ix + rbw, rby + rbh, self.switch)
 
         # Durchsage als Leuchtanzeige zwischen Fortschritt und Knöpfen
         text, until = self.message
@@ -1165,6 +1189,13 @@ class RideScreen(Screen):
             can_change = bool(self.transfer_options())
             if text:
                 lines, font, fill = wrap_text(mf, text, pw - 24 * s, 2), mf, "#FFB000"
+            elif self.depot:
+                lines, font, fill = wrap_text(mf, f"Pause · Taste {depot_key}: zurück", pw - 24 * s, 2), mf, "#C8B6F0"
+                app.hit(ix, box_y1, ix + pw, box_y2, self.toggle_depot)
+            elif last and not self.ring:
+                # an der Endstation: Betriebshof bzw. Abstellgleis anbieten
+                lines, font, fill = wrap_text(mf, f"Taste {depot_key}: {depot_name}", pw - 24 * s, 2), mf, "#C8B6F0"
+                app.hit(ix, box_y1, ix + pw, box_y2, self.toggle_depot)
             elif can_change:
                 # Auffordern, wenn man hier umsteigen kann
                 lines, font, fill = wrap_text(mf, "Umsteigen? Drücke U", pw - 24 * s, 2), mf, "#7FD4FF"
@@ -1187,7 +1218,7 @@ class RideScreen(Screen):
 
     def tick(self):
         moving = False
-        d = self.index - self.pos
+        d = self.target - self.pos
         if abs(d) > 0.003:
             if self.cockpit:
                 # Im Führerstand gemächlich: anfahren, rollen, vor der Station bremsen – nach echter Zeit,
@@ -1204,7 +1235,7 @@ class RideScreen(Screen):
             self.pos += math.copysign(min(step, abs(d)), d)
             moving = True
         else:
-            self.pos = float(self.index)
+            self.pos = float(self.target)
             self.v = 0.0
             if self.speed > 0.01:
                 self.speed *= 0.6
@@ -1224,6 +1255,8 @@ class RideScreen(Screen):
         self.message = (text, time.monotonic() + seconds)
 
     def go_to(self, i):
+        if self.depot:
+            return self.depot_hint()
         if i == self.index:
             return
         self.backwards = i < self.index
@@ -1237,11 +1270,60 @@ class RideScreen(Screen):
     def ring(self):
         return self.stops[0] == self.stops[-1]
 
+    @property
+    def target(self):
+        """Wohin das Fahrzeug fährt: die Station – oder eine Zeile weiter auf Betriebshof/Abstellgleis."""
+        return self.index + (1 if self.depot else 0)
+
+    def at_terminus(self):
+        return not self.ring and self.index in (0, len(self.stops) - 1)
+
+    def depot_hint(self):
+        name, key, _ = depot_info(self.kind)
+        self.say(f"Pause auf dem {name}. Zurück auf die Strecke: Taste {key}", 2.5)
+        self.app.animate()
+
+    def toggle_depot(self, key=None):
+        """Taste B/A: an der Endhaltestelle auf den Betriebshof bzw. aufs Abstellgleis – und wieder zurück."""
+        name, wanted, where = depot_info(self.kind)
+        if key and key.upper() != wanted:
+            self.say("Bahnen fahren aufs Abstellgleis: Taste A" if wanted == "A"
+                     else f"{MODE[self.kind][1]} fährt auf den Betriebshof: Taste B", 2.5)
+        elif self.depot:
+            # zurück auf die Strecke – gewendet, also in Gegenrichtung ab derselben Endhaltestelle
+            here = self.stops[self.index]
+            self.depot = False
+            self.direction = 1 - self.direction
+            stops = self.stops
+            self.index = stops.index(here) if here in stops else 0
+            self.pos = self.index - 1.0
+            self.backwards = False
+            self.scroll = None
+            self.say("Zurück auf der Strecke – nach " + self.app.data["stations"][stops[-1]], 3)
+        elif self.ring:
+            self.say("Die Ringbahn hat keine Endhaltestelle.", 2.5)
+        elif not self.at_terminus():
+            self.say(f"{'Aufs' if wanted == 'A' else 'Auf den'} {name} geht es nur an der Endhaltestelle.", 2.5)
+        else:
+            if self.index == 0:
+                # am Anfang der Linie: erst wenden, damit der Betriebshof „hinter“ der Endstation liegt
+                here = self.stops[0]
+                self.direction = 1 - self.direction
+                self.index = self.stops.index(here) if here in self.stops else len(self.stops) - 1
+                self.pos = float(self.index)
+                self.scroll = None
+            self.depot = True
+            self.backwards = False
+            self.say(f"Wir fahren {where}.", 2.5)
+        self.app.animate()
+
     def arrived(self):
         if self.index == len(self.stops) - 1:
             self.say("Einmal rund um die Stadt!" if self.ring else "Endstation – bitte alle aussteigen!", 3)
 
     def next(self):
+        if self.depot:
+            return self.depot_hint()
         last = len(self.stops) - 1
         if self.index == last and self.ring:
             # Ringbahn: Start und Ziel sind derselbe Bahnhof, also einfach weiterfahren
@@ -1255,6 +1337,8 @@ class RideScreen(Screen):
             self.app.animate()
 
     def prev(self):
+        if self.depot:
+            return self.depot_hint()
         if self.index == 0 and self.ring:
             self.index = self.pos = len(self.stops) - 1
             self.scroll = None
@@ -1275,6 +1359,11 @@ class RideScreen(Screen):
 
     def announce(self):
         """Sagt die aktuelle Station an, wie im Fahrzeug."""
+        if self.depot:
+            name = depot_info(self.kind)[0]
+            self.app.sound.speak(f"{name}. Bitte nicht einsteigen.")
+            self.say(f"Hier ist: {name}", 3)
+            return self.app.animate()
         stops = self.stops
         key = stops[self.index]
         name = self.app.data["stations"][key]
@@ -1292,6 +1381,8 @@ class RideScreen(Screen):
 
     def change(self):
         """Taste U: umsteigen. Bei mehreren Möglichkeiten erscheint eine Auswahl."""
+        if self.depot:
+            return self.depot_hint()
         options = self.transfer_options()
         if not options:
             self.say("Hier kann man nicht umsteigen.", 2)
@@ -1305,6 +1396,8 @@ class RideScreen(Screen):
         self.app.animate()
 
     def switch(self):
+        if self.depot:
+            return self.depot_hint()
         here = self.stops[self.index]
         self.direction = 1 - self.direction
         stops = self.stops
@@ -1340,6 +1433,8 @@ class RideScreen(Screen):
             self.announce()
         elif char in ("u", "U"):
             self.change()
+        elif char in ("a", "A", "b", "B"):
+            self.toggle_depot(char)
         elif char in ("f", "F"):
             self.toggle_cockpit()
         elif k == PARENT_KEY:
@@ -1516,6 +1611,18 @@ def draw_scene(ride, c, app, x1, y1, x2, y2):
         if kind == "sbahn":
             sc.ground(1.45, 1.6, Z_NEAR, Z_FAR, "#7C7C7C", y=0.15)   # Stromschiene der Berliner S-Bahn
 
+    # --- Betriebshof bzw. Abstellgleis hinter der Endstation ---
+    # Was dahinter liegt, ist verdeckt: Häuser, Bäume und Masten werden dort nicht mehr gezeichnet.
+    z_end = Z_FAR + 100
+    if ride.depot:
+        zd = len(stops) * SEG - cam
+        if city:
+            z_end = zd + 34
+            draw_depot_hall(c, app, sc, z_end, MODE[kind][2], kind)
+        else:
+            z_end = zd + 30
+            draw_siding(c, app, sc, zd, z_end, kind)
+
     # --- Dinge am Rand, von hinten nach vorn gezeichnet ---
     items = []
     houses = []     # Häuserzeilen liegen ganz außen und werden zuerst gezeichnet
@@ -1532,7 +1639,7 @@ def draw_scene(ride, c, app, x1, y1, x2, y2):
             items.append((z, mast))
     def near_station(z):
         rel = (z + cam) / SEG
-        return abs(rel - round(rel)) * SEG < 40
+        return 0 <= round(rel) < len(stops) and abs(rel - round(rel)) * SEG < 40
 
     if tunnel:
         for k, z in periodic(8.0):
@@ -1622,8 +1729,58 @@ def draw_scene(ride, c, app, x1, y1, x2, y2):
                 station_sign(c, app, sc, 2.7, 7.0, 2.4, 3.4, zs + 14, name, sign_border)
             items.append((zb, platform))
 
+    houses = [it for it in houses if it[0] - 11.5 < z_end]
+    items = [it for it in items if it[0] < z_end]
     for z, fn in sorted(houses, key=lambda it: -it[0]) + sorted(items, key=lambda it: -it[0]):
         fn()
+
+
+def draw_depot_hall(c, app, sc, z, color, kind):
+    """Betriebshof: große Halle quer zur Straße, mit offenen Toren und abgestellten Fahrzeugen."""
+    if not Z_NEAR < z < Z_FAR:
+        return
+    sc.front(-16, 16, 0, 9.5, z, "#B9A88E")
+    sc.front(-16.5, 16.5, 9.5, 10.4, z, "#7A6A55")
+    body = MODE[kind][3][0]
+    for gx in (-11.0, -4.5, 2.0, 8.5):
+        sc.front(gx, gx + 5.0, 0, 6.0, z, "#2E3238")
+        sc.front(gx + 0.6, gx + 4.4, 0.4, 3.4, z, body)                  # Fahrzeug von vorn
+        sc.front(gx + 1.0, gx + 4.0, 1.9, 3.0, z, "#CFE8FF")              # Frontscheibe
+    station_sign(c, app, sc, -6.5, 6.5, 7.0, 8.9, z, "Betriebshof", color)
+
+
+def draw_siding(c, app, sc, zd, z_end, kind):
+    """Abstellgleis: Prellbock am Gleisende, daneben abgestellte Züge (bei der U-Bahn im Tunnel)."""
+    tunnel = kind == "ubahn"
+    if tunnel:
+        sc.front(-3.0, 3.0, 0, 4.6, z_end, "#3A3B3E")                     # Tunnelende
+    else:
+        sc.front(-40, 40, 0, 3.2, z_end, "#5E8B4C")                       # Erdwall mit Büschen
+        for k in range(-6, 7):
+            cx, cy = sc.p(k * 3.2, 3.2, z_end)
+            r = sc.size(1.8, z_end)
+            c.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#4F7F3F", outline="")
+        # abgestellte Züge auf den Nachbargleisen
+        body, accent = MODE[kind][3]
+        for x1, x2 in ((4.4, 7.0), (-8.0, -5.4)):
+            sc.ground(x1 + 0.3, x1 + 0.4, zd - 30, z_end, "#C8C8C8", y=0.06)
+            sc.ground(x2 - 0.4, x2 - 0.3, zd - 30, z_end, "#C8C8C8", y=0.06)
+            near_x = x1 if x1 > 0 else x2
+            sc.wall(near_x, 0.6, 3.9, zd + 8, z_end - 1, body)
+            sc.wall(near_x, 0.6, 1.0, zd + 8, z_end - 1, accent)
+            side = 0.02 if near_x < 0 else -0.02
+            wz = zd + 10
+            while wz < z_end - 3:                                          # Fensterreihe
+                sc.wall(near_x + side, 2.2, 3.3, wz, wz + 2.4, "#CFE8FF")
+                wz += 3.6
+            sc.front(x1, x2, 0.6, 3.9, zd + 8, body)
+            sc.front(x1 + 0.4, x2 - 0.4, 2.3, 3.4, zd + 8, "#2B3440")
+    # Prellbock: rot-weiß am Gleisende
+    zb = z_end - 1.5
+    sc.front(-1.1, 1.1, 0, 1.3, zb, "#C62828")
+    for k in range(4):
+        sc.front(-1.1 + k * 0.55, -0.85 + k * 0.55, 0.2, 1.1, zb, "white")
+    sc.front(-0.9, 0.9, 1.3, 1.6, zb, "#3A3A3A")
 
 
 def station_sign(c, app, sc, xa, xb, ya, yb, z, name, border):
@@ -1728,8 +1885,11 @@ def draw_cockpit(ride, c, w, h):
     dest = "Ringfahrt ↻" if ride.ring else st[stops[-1]]
     c.create_text(tx, dy1 + 24 * s, text=fit_text(led_big, dest, tw), anchor="w", font=led_big, fill=LED)
     text, until = ride.message
+    depot_name, depot_key, _ = depot_info(kind)
     if text and time.monotonic() < until:
         second = text
+    elif ride.depot:
+        second = f"{depot_name} – Pause. Zurück: Taste {depot_key}"
     elif last:
         second = "Einmal rund um die Stadt!" if ride.ring else "Endstation – bitte alle aussteigen"
     else:
@@ -1756,9 +1916,9 @@ def draw_cockpit(ride, c, w, h):
     ph = py2 - py1
     inner_w = w - 2 * pad
     gap = 18 * s
-    map_w = inner_w * 0.27
-    gauge_w = inner_w * 0.16
-    list_w = inner_w * 0.27
+    map_w = inner_w * 0.25
+    gauge_w = inner_w * 0.14
+    list_w = inner_w * 0.25
     btn_w = inner_w - map_w - gauge_w - list_w - 3 * gap
     x = pad
 
@@ -1781,6 +1941,11 @@ def draw_cockpit(ride, c, w, h):
     c.create_text(x + list_w - 14 * s, py1 + 18 * s, text=f"{ride.index + 1} / {len(stops)}", anchor="e",
                   font=app.font(12, "bold"), fill=LED)
     rows = [i for i in range(ride.index - 1, ride.index + 4) if 0 <= i < len(stops)]
+    if ride.depot:
+        rows = []
+        c.create_text(x + list_w / 2, py1 + ph * 0.45, text=depot_name.upper(), font=app.font(22, "bold"), fill=LED)
+        c.create_text(x + list_w / 2, py1 + ph * 0.62, text=f"Pause · Taste {depot_key}: zurück",
+                      font=app.font(14, "bold"), fill="#FFD27A")
     row_h = (ph - 40 * s) / 5
     ry = py1 + 34 * s
     mini = app.font(11, "bold")
@@ -1810,20 +1975,22 @@ def draw_cockpit(ride, c, w, h):
     x += list_w + gap
 
     # Knöpfe
-    can_change = bool(ride.transfer_options())
-    buttons = [("▲", "Zurück", ride.prev, ride.index > 0 or ride.ring, "#F7D117"),
+    can_change = bool(ride.transfer_options()) and not ride.depot
+    buttons = [("▲", "Zurück", ride.prev, (ride.index > 0 or ride.ring) and not ride.depot, "#F7D117"),
                ("▼", "Weiter", ride.next, not last or ride.ring, "#F7D117"),
                ("U", "Umsteigen", ride.change, can_change, "#2F9E5B"),
                ("Türen", "Türen", ride.doors, True, "#E8483B"),
                ("V", "Ansage", ride.announce, True, "#3D8BD4"),
-               ("⇄", "Richtung", ride.switch, True, "#E8E8E8")]
-    cols, rows_n = 3, 2
+               ("⇄", "Richtung", ride.switch, not ride.depot, "#E8E8E8"),
+               (depot_key, depot_name, ride.toggle_depot, ride.depot or ride.at_terminus(), "#8E6BBF")]
+    cols, rows_n = 4, 2
     cell_w, cell_h = btn_w / cols, ph / rows_n
     r = max(14 * s, min(cell_w * 0.3, cell_h * 0.3))
     for n, (sym, label, cb, enabled, color) in enumerate(buttons):
         bx = x + cell_w * (n % cols + 0.5)
         by = py1 + cell_h * (n // cols) + cell_h * 0.42
-        round_button(app, c, bx, by, r, color, sym, label, enabled, cb, glow=(sym == "U" and can_change))
+        glow = (sym == "U" and can_change) or (sym == depot_key and (ride.depot or last) and enabled)
+        round_button(app, c, bx, by, r, color, sym, label, enabled, cb, glow=glow)
 
 
 def board(app, opt, message):
