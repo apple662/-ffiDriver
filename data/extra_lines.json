@@ -4,10 +4,10 @@
     "Sie werden nur verwendet, solange der VBB-Datensatz die Linie nicht selbst enthält.",
     "Stationsnamen genau wie in data/berlin_lines.json. Nach Änderungen: python3 tools/build_data.py",
     "S15: seit 15. Juni 2026, Gesundbrunnen – Wedding – Hauptbahnhof (erster Abschnitt der S21).",
-    "Die Linienfarbe ist vorläufig (S-Bahn-Grün), die offizielle Farbe war nicht zu ermitteln."
+    "Linienfarbe: Pink wie die S1."
   ],
   "lines": [
-    {"name": "S15", "product": "sbahn", "color": "#008D4F",
+    {"name": "S15", "product": "sbahn", "color": "#DC6BA6",
      "stops": ["S+U Gesundbrunnen", "S+U Wedding", "S+U Berlin Hauptbahnhof"]}
   ]
 }

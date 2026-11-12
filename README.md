@@ -257,8 +257,7 @@ Weitere Linien lassen sich dort einfach eintragen.
 
 **Neue Linien**, die im VBB-Datensatz noch fehlen, stehen in
 `data/extra_lines.json`. Zurzeit ist das die **S15** (seit 15. Juni 2026,
-Gesundbrunnen – Wedding – Hauptbahnhof). Ihre Farbe ist vorläufig
-S-Bahn-Grün, weil die offizielle Linienfarbe nicht zu ermitteln war. Sobald
+Gesundbrunnen – Wedding – Hauptbahnhof) in Pink wie die S1. Sobald
 der VBB-Datensatz die Linie selbst enthält, nimmt das Skript automatisch die
 echten Daten.
 
