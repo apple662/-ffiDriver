@@ -1008,6 +1008,7 @@ class RideScreen extends Screen {
     this.lastTick = 0;
     this.speed = 0;          // 0…1 für den Tacho
     this.depot = false;      // steht auf dem Betriebshof bzw. Abstellgleis hinter der Endstation
+    this.fullLine = this.line;   // Taste E kürzt die Linie nur für diese Fahrt (this.line), nicht dauerhaft
   }
 
   /** Höhenlage jedes Bahnhofs in der aktuellen Richtung (für die Cockpit-Ansicht). */
@@ -1033,6 +1034,40 @@ class RideScreen extends Screen {
   }
 
   /** Taste B/A: an der Endhaltestelle auf den Betriebshof bzw. aufs Abstellgleis – und wieder zurück. */
+  /** Taste E: die Linie endet hier – oder fährt wieder bis zur echten Endstation (nur für diese Fahrt). */
+  toggleEnd() {
+    if (this.depot) return this.depotHint();
+    const st = this.app.data.stations, here = this.stops[this.index];
+    if (this.line !== this.fullLine) {
+      // Kürzung aufheben: wieder die ganze Linie, in derselben Fahrtrichtung (gleicher nächster Halt)
+      const nxt = this.index + 1 < this.stops.length ? this.stops[this.index + 1] : null;
+      const sameWay = stops => {
+        const i = stops.indexOf(here);
+        return (nxt === null && i < stops.length - 1) || (i + 1 < stops.length && stops[i + 1] === nxt);
+      };
+      const dirs = this.fullLine.directions;
+      let d = dirs.findIndex(stops => stops.includes(here) && sameWay(stops));
+      if (d < 0) d = dirs.findIndex(stops => stops.includes(here));
+      this.line = this.fullLine;
+      this.direction = d;
+      this.index = Math.max(0, this.stops.indexOf(here));
+      this.say("Die Linie fährt wieder bis " + st[this.stops[this.stops.length - 1]], 3);
+    } else if (this.index === 0) {
+      this.say("Hier beginnt die Linie – fahr erst ein Stück.", 2.5);
+    } else if (this.index === this.stops.length - 1 && !this.ring) {
+      this.say("Das ist schon die Endstation.", 2.5);
+    } else {
+      const short = this.stops.slice(0, this.index + 1);
+      this.line = Object.assign({}, this.fullLine, { directions: [short, short.slice().reverse()] });
+      this.direction = 0;
+      this.say("Endstation! Die Linie endet heute hier.", 2.5);
+    }
+    this.pos = this.index;
+    this.backwards = false;
+    this.scroll = null;
+    this.app.animate();
+  }
+
   toggleDepot(key = null) {
     const [name, wanted, where] = depotInfo(this.kind);
     if (key && key.toUpperCase() !== wanted) {
@@ -1451,6 +1486,7 @@ class RideScreen extends Screen {
     else if (c === "t") this.doors();
     else if (c === "v") this.announce();
     else if (c === "u") this.change();
+    else if (c === "e") this.toggleEnd();
     else if (c === "a" || c === "b") this.toggleDepot(c);
     else if (c === "f") this.toggleCockpit();
     else if (k === PARENT_KEY) this.setHome();

@@ -50,7 +50,7 @@ python3 tools/build_web.py
 |---|---|
 | **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Regionalbahn oder ICE, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–6 gehen auch) |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
-| **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht, an der Endhaltestelle `B`: Betriebshof (Bus, Tram) bzw. `A`: Abstellgleis (Bahnen) |
+| **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht, an der Endhaltestelle `B`: Betriebshof (Bus, Tram) bzw. `A`: Abstellgleis (Bahnen), `E`: Linie endet hier |
 
 `Esc` oder der Knopf „Zurück“ führt immer einen Schritt zurück. `F11`
 schaltet auf Vollbild. Auf der Ringbahn (S41/S42) kann man endlos im Kreis
@@ -72,6 +72,16 @@ Ein erneuter Druck auf `B` bzw. `A` führt zurück auf die Strecke, und zwar
 gewendet, wie im echten Betrieb: Man fährt wieder an derselben
 Endhaltestelle ein, jetzt in Gegenrichtung. Drückt man die falsche Taste,
 mitten auf der Strecke oder auf der Ringbahn, gibt es einen Hinweis.
+
+### Eigene Endstation (Taste `E`)
+
+Mit `E` endet die Linie an der Station, an der man gerade steht. Die Anzeige
+zeigt dann „nach …“ mit dieser Station, und man kann wie an einer echten
+Endhaltestelle mit `A`/`B` aufs Abstellgleis bzw. auf den Betriebshof fahren
+und gewendet zurückkommen. Ein zweites `E` lässt die Linie wieder bis zur
+echten Endstation fahren, in der Richtung, in der man gerade unterwegs ist.
+Das gilt nur für die aktuelle Fahrt und wird nicht gespeichert. Wählt man
+die Linie neu aus, fährt sie wieder ganz.
 
 ## Cockpit-Ansicht
 

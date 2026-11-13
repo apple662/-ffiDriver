@@ -980,6 +980,7 @@ class RideScreen(Screen):
         self.v = 0.0            # Tempo in der Cockpit-Ansicht (Stationen pro Sekunde)
         self.last_tick = 0.0
         self.depot = False       # steht auf dem Betriebshof bzw. Abstellgleis hinter der Endstation
+        self.full_line = self.line   # Taste E kürzt die Linie nur für diese Fahrt (self.line), nicht dauerhaft
         self.speed = 0.0        # 0…1 für den Tacho
 
     @property
@@ -1293,6 +1294,39 @@ class RideScreen(Screen):
         self.say(f"Pause auf dem {name}. Zurück auf die Strecke: Taste {key}", 2.5)
         self.app.animate()
 
+    def toggle_end(self):
+        """Taste E: die Linie endet hier – oder fährt wieder bis zur echten Endstation (nur für diese Fahrt)."""
+        if self.depot:
+            return self.depot_hint()
+        st = self.app.data["stations"]
+        here = self.stops[self.index]
+        if self.line is not self.full_line:
+            # Kürzung aufheben: wieder die ganze Linie, in derselben Fahrtrichtung (gleicher nächster Halt)
+            nxt = self.stops[self.index + 1] if self.index + 1 < len(self.stops) else None
+
+            def same_way(stops):
+                i = stops.index(here)
+                return nxt is None and i < len(stops) - 1 or i + 1 < len(stops) and stops[i + 1] == nxt
+            dirs = self.full_line["directions"]
+            d = next((d for d, stops in enumerate(dirs) if here in stops and same_way(stops)),
+                     next(d for d, stops in enumerate(dirs) if here in stops))
+            self.line, self.direction = self.full_line, d
+            self.index = self.stops.index(here)
+            self.say("Die Linie fährt wieder bis " + st[self.stops[-1]], 3)
+        elif self.index == 0:
+            self.say("Hier beginnt die Linie – fahr erst ein Stück.", 2.5)
+        elif self.index == len(self.stops) - 1 and not self.ring:
+            self.say("Das ist schon die Endstation.", 2.5)
+        else:
+            short = self.stops[:self.index + 1]
+            self.line = dict(self.full_line, directions=[short, short[::-1]])
+            self.direction = 0
+            self.say("Endstation! Die Linie endet heute hier.", 2.5)
+        self.pos = float(self.index)
+        self.backwards = False
+        self.scroll = None
+        self.app.animate()
+
     def toggle_depot(self, key=None):
         """Taste B/A: an der Endhaltestelle auf den Betriebshof bzw. aufs Abstellgleis – und wieder zurück."""
         name, wanted, where = depot_info(self.kind)
@@ -1443,6 +1477,8 @@ class RideScreen(Screen):
             self.announce()
         elif char in ("u", "U"):
             self.change()
+        elif char in ("e", "E"):
+            self.toggle_end()
         elif char in ("a", "A", "b", "B"):
             self.toggle_depot(char)
         elif char in ("f", "F"):
