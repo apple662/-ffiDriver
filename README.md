@@ -309,6 +309,11 @@ der VBB-Datensatz die Linie selbst enthält, nimmt das Skript automatisch die
 echten Daten.
 
 Fehlt ein Bahnhofsname im neuesten Haltestellenverzeichnis, nimmt das Skript
-ihn aus der Verzeichnisversion, die zum Fahrplanstand passt.
+ihn aus der Verzeichnisversion, die zum Fahrplanstand passt. Einige Bahnsteige
+haben im Fahrplan eine eigene Nummer, die im Verzeichnis gar nicht vorkommt.
+Sie stehen in der Tabelle `STATION_ALIASES` in `tools/build_data.py` und
+werden der richtigen Station zugeordnet: der Hauptbahnhof der Regional- und
+Fernbahn (sonst fehlte er bei RE3, RE4, RE5, RE8, RE20, RE85, RB10 und FEX)
+und der U2-Bahnsteig von Stadtmitte.
 
 Fahrplandaten: © VBB Verkehrsverbund Berlin-Brandenburg GmbH, CC BY 4.0.

@@ -80,10 +80,19 @@ DEFAULT_COLORS = {"sbahn": "#008D4F", "ubahn": "#115D91", "tram": "#CC0A22", "bu
 STATION_ID = re.compile(r"900\d{6}")
 
 
+# Einige Bahnsteige haben im Fahrplan eine eigene Nummer, die im Haltestellenverzeichnis fehlt.
+# Ohne Namen würden diese Halte wegfallen – deshalb werden sie der passenden Station zugeordnet.
+STATION_ALIASES = {
+    "900003200": "900003201",   # Berlin Hauptbahnhof, Regional- und Fernbahn (RE3, RE4, RE5, RE8, RB10, FEX …)
+    "900100701": "900100011",   # U Stadtmitte, Bahnsteig der U2 (Umsteigen zur U6)
+}
+
+
 def station_key(stop_id):
     """Fasst Bahnsteige/Masten einer Haltestelle über die 900er-Nummer zusammen."""
     m = STATION_ID.search(stop_id)
-    return m.group(0) if m else stop_id
+    key = m.group(0) if m else stop_id
+    return STATION_ALIASES.get(key, key)
 
 
 def fetch(url):
