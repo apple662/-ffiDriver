@@ -987,6 +987,17 @@ class RideScreen extends Screen {
     this.depot = false;      // steht auf dem Betriebshof bzw. Abstellgleis hinter der Endstation
   }
 
+  /** Höhenlage jedes Bahnhofs in der aktuellen Richtung (für die Cockpit-Ansicht). */
+  get levels() {
+    const key = this.direction + "/" + this.stops.length;
+    if (this.levelsKey !== key) {
+      const names = this.stops.map(k => this.app.data.stations[k]);
+      this.levelsCache = names.map((_, i) => stationLevel(this.kind, this.line.name, names, i));
+      this.levelsKey = key;
+    }
+    return this.levelsCache;
+  }
+
   /** Wohin das Fahrzeug fährt: die Station – oder eine Zeile weiter auf Betriebshof/Abstellgleis. */
   get target() { return this.index + (this.depot ? 1 : 0); }
 
@@ -1525,19 +1536,19 @@ function drawDepotHall(c, app, sc, z, color, kind) {
   stationSign(c, app, sc, -6.5, 6.5, 7.0, 8.9, z, "Betriebshof", color);
 }
 
-/** Abstellgleis: Prellbock am Gleisende, daneben abgestellte Züge (bei der U-Bahn im Tunnel). */
-function drawSiding(c, app, sc, zd, zEnd, kind) {
-  if (kind === "ubahn") {
+/** Abstellgleis: Prellbock am Gleisende, daneben abgestellte Züge (im Tunnel nur das Tunnelende). */
+function drawSiding(c, app, sc, zd, zEnd, kind, level = "ground") {
+  if (level === "tunnel") {
     sc.front(-3.0, 3.0, 0, 4.6, zEnd, "#3A3B3E");                      // Tunnelende
   } else {
-    sc.front(-40, 40, 0, 3.2, zEnd, "#5E8B4C");                        // Erdwall mit Büschen
+    sc.front(-40, 40, level === "elevated" ? ELEV : 0, 3.2, zEnd, "#5E8B4C");   // Erdwall mit Büschen
     for (let k = -6; k <= 6; k++) {
       const [cx, cy] = sc.p(k * 3.2, 3.2, zEnd), r = sc.size(1.8, zEnd);
       c.oval(cx - r, cy - r, cx + r, cy + r, { fill: "#4F7F3F" });
     }
-    // abgestellte Züge auf den Nachbargleisen
+    // abgestellte Züge auf den Nachbargleisen (auf dem Viadukt ist dafür kein Platz)
     const [body, accent] = MODE[kind][3];
-    for (const [x1, x2] of [[4.4, 7.0], [-8.0, -5.4]]) {
+    for (const [x1, x2] of level === "elevated" ? [] : [[4.4, 7.0], [-8.0, -5.4]]) {
       sc.ground(x1 + 0.3, x1 + 0.4, zd - 30, zEnd, "#C8C8C8", 0.06);
       sc.ground(x2 - 0.4, x2 - 0.3, zd - 30, zEnd, "#C8C8C8", 0.06);
       const nearX = x1 > 0 ? x1 : x2;
@@ -1569,52 +1580,253 @@ function stationSign(c, app, sc, xa, xb, ya, yb, z, name, border) {
   c.text((ax + bx) / 2, (ay + by) / 2, name, font, "#1E2A38");
 }
 
+// --- Höhenlage der Bahnhöfe: Tunnel, ebenerdig oder auf dem Viadukt ---------
+// Offene Daten dazu gibt es nicht; die Tabelle beschreibt die bekannten Berliner Strecken.
+
+// U-Bahn: alles unterirdisch, außer diesen Bahnhöfen (je Linie, denn z. B. am Kottbusser Tor
+// hält die U1 oben auf dem Viadukt, die U8 aber unten im Tunnel)
+const U1_VIADUKT = ["S+U Warschauer Str.", "U Schlesisches Tor", "U Görlitzer Bahnhof", "U Kottbusser Tor",
+  "U Prinzenstr.", "U Hallesches Tor", "U Möckernbrücke", "U Gleisdreieck"];
+const U_ELEVATED = {
+  U1: new Set(U1_VIADUKT),
+  U2: new Set(["S+U Schönhauser Allee", "U Eberswalder Str.", "U Gleisdreieck", "U Bülowstr.", "U Nollendorfplatz"]),
+  U3: new Set(U1_VIADUKT),
+};
+const U_GROUND = {
+  U2: new Set(["U Olympia-Stadion", "U Ruhleben"]),
+  U3: new Set(["U Krumme Lanke", "U Onkel Toms Hütte", "U Oskar-Helene-Heim", "U Freie Universität (Thielplatz)",
+    "U Dahlem-Dorf", "U Podbielskiallee"]),
+  U5: new Set(["U Hönow", "U Louis-Lewin-Str.", "U Hellersdorf", "U Cottbusser Platz", "U Kienberg (Gärten der Welt)",
+    "U Kaulsdorf-Nord", "S+U Wuhletal", "U Elsterwerdaer Platz", "U Biesdorf-Süd"]),
+  U6: new Set(["U Scharnweberstr.", "U Otisstr.", "U Holzhauser Str."]),
+};
+// S-Bahn und Fernbahn: Nord-Süd-Tunnel und Flughafen unter der Erde, Stadtbahn auf dem Viadukt
+const RAIL_TUNNEL = new Set(["S Nordbahnhof", "S Oranienburger Str.", "S+U Brandenburger Tor", "S+U Potsdamer Platz",
+  "S Anhalter Bahnhof", "Flughafen BER"]);
+const STADTBAHN = new Set(["S Charlottenburg", "S Savignyplatz", "S+U Zoologischer Garten", "S Tiergarten", "S Bellevue",
+  "S+U Berlin Hauptbahnhof", "S+U Friedrichstr.", "S Hackescher Markt", "S+U Alexanderplatz",
+  "S+U Jannowitzbrücke", "S Ostbahnhof"]);
+// Hauptbahnhof unten (Nord-Süd), wenn die Linie von/nach diesen Bahnhöfen fährt; sonst oben (Stadtbahn)
+const HBF_LOWER_NEIGHBORS = new Set(["S Südkreuz", "S+U Gesundbrunnen", "S+U Potsdamer Platz", "S+U Wedding"]);
+
+/** "tunnel", "ground" oder "elevated" für Bahnhof i der Liste names. */
+function stationLevel(kind, lineName, names, i) {
+  const name = names[i];
+  const neighbors = [names[i - 1], names[i + 1]].filter(Boolean);
+  if (kind === "tram" || kind === "bus") return "ground";
+  if (kind === "ubahn") {
+    if (U_ELEVATED[lineName] && U_ELEVATED[lineName].has(name)) return "elevated";
+    return U_GROUND[lineName] && U_GROUND[lineName].has(name) ? "ground" : "tunnel";
+  }
+  if (RAIL_TUNNEL.has(name)) return "tunnel";
+  if (name === "S+U Friedrichstr.") return neighbors.some(n => RAIL_TUNNEL.has(n)) ? "tunnel" : "elevated";   // Stadtbahn oben, Nord-Süd-S-Bahn unten
+  if (name === "S+U Berlin Hauptbahnhof") return neighbors.some(n => HBF_LOWER_NEIGHBORS.has(n)) ? "tunnel" : "elevated";
+  return STADTBAHN.has(name) ? "elevated" : "ground";
+}
+
+const ELEV = -7;    // so tief liegt die Straße unter einem Viadukt (das Gleis ist immer bei 0)
+
+/** Strecke für S-Bahn, U-Bahn, Regio und ICE. Jede Station hat ihren Abschnitt (±30 m), der im Tunnel,
+ *  ebenerdig oder auf dem Viadukt liegt; an den Übergängen gibt es Tunnelportale bzw. Rampen. */
+function drawRailScene(ride, c, app, x1, y1, x2, y2) {
+  const kind = ride.kind, st = app.data.stations, stops = ride.stops, n = stops.length;
+  const levels = ride.levels;
+  const cam = ride.pos * SEG;
+  const sc = new Scene(c, x1, y1, x2, y2);
+  const hy = sc.hy;
+  const level = k => levels[Math.max(0, Math.min(n - 1, k))];
+
+  // Himmel, Wiese und Hügel – im Tunnel verdecken Wände und Decke alles davon
+  const sky = ["#6FB6EA", "#82C0EE", "#96CAF1", "#AAD4F4", "#BFDFF6", "#D4EAF9"];
+  const band = (hy - y1) / sky.length;
+  sky.forEach((col, i) => c.rect(x1, y1 + i * band, x2, y1 + (i + 1) * band + 1, col));
+  c.rect(x1, hy, x2, y2, "#86B86A");
+  const pts = [[x1, hy]];
+  for (let k = 0; k < 13; k++) pts.push([x1 + (x2 - x1) * k / 12, hy - (0.02 + 0.05 * rnd(k, 5)) * (y2 - y1)]);
+  pts.push([x2, hy]);
+  c.polygon(pts, { fill: "#6FA35C" });
+
+  const zd = n * SEG - cam;
+  const zEnd = ride.depot ? zd + 30 : Z_FAR + 100;   // dahinter verdecken Prellbock und Erdwall bzw. Tunnelende alles
+
+  // Abschnitte von hinten nach vorn
+  const regions = [];
+  for (let k = Math.floor((cam + Z_NEAR + SEG / 2) / SEG); ; k++) {
+    const za = k * SEG - SEG / 2 - cam;
+    if (za > Math.min(Z_FAR, zEnd)) break;
+    regions.push([k, za, Math.min(za + SEG, Z_FAR, zEnd), level(k)]);
+  }
+  for (let idx = regions.length - 1; idx >= 0; idx--) {
+    const [k, za, zb, lv] = regions[idx];
+    const hasEnd = ride.depot && zb >= zEnd - 0.01;
+    drawRailRegion(ride, c, app, sc, k, Math.max(za, Z_NEAR), zb, lv, st, stops,
+      hasEnd ? () => drawSiding(c, app, sc, zd, zEnd, kind, lv) : null);
+    if (idx > 0 && za > Z_NEAR) drawTransition(sc, za, lv, regions[idx - 1][3]);
+  }
+}
+
+/** Übergang zwischen zwei Abschnitten bei Entfernung z (vom näheren aus gesehen). */
+function drawTransition(sc, z, far, near) {
+  if (far === near || near === "tunnel") return;            // aus dem Tunnel heraus sieht man keine Kante
+  const concrete = "#8F8A80";
+  if (far === "tunnel") {
+    const low = near === "elevated" ? ELEV : 0, grass = "#6E8F57";
+    // begrünter Erdwall, in dem der Tunnel verschwindet, mit Betonrahmen um die Öffnung
+    sc.front(-60, -3.0, low, 4.0, z + 0.5, grass);
+    sc.front(3.0, 60, low, 4.0, z + 0.5, grass);
+    sc.front(-9.0, 9.0, 4.0, 6.0, z + 0.5, grass);
+    sc.front(-4.6, -3.0, low, 6.2, z, concrete);
+    sc.front(3.0, 4.6, low, 6.2, z, concrete);
+    sc.front(-3.0, 3.0, 4.6, 6.2, z, concrete);
+    if (low < 0) sc.front(-3.0, 3.0, low, 0, z, concrete);
+  } else {
+    sc.front(-300, 300, ELEV, 0, z, "#9C8B73");              // Rampe zwischen Viadukt und ebenem Gleis
+  }
+}
+
+function drawRailRegion(ride, c, app, sc, k, za, zb, lv, st, stops, afterGround) {
+  const s = app.s, kind = ride.kind, n = stops.length, cam = ride.pos * SEG;
+  const tunnel = lv === "tunnel";
+
+  /** Positionen [Index, Entfernung] von Dingen alle spacing Meter, nur in diesem Abschnitt. */
+  const periodic = (spacing, offset = 0) => {
+    const out = [];
+    for (let j = Math.floor((cam + za - offset) / spacing); ; j++) {
+      const z = j * spacing + offset - cam;
+      if (z > zb) return out;
+      if (z >= za - 0.01) out.push([j, z]);
+    }
+  };
+  const byDistance = (a, b) => b[0] - a[0];
+
+  // --- Boden, Tunnel bzw. Viadukt ---
+  const background = [];
+  if (tunnel) {
+    if (zb >= Z_FAR - 0.01) sc.front(-3.0, 3.0, 0, 4.6, Z_FAR - 0.1, "#0E1013");   // der Tunnel geht im Dunkeln weiter
+    sc.wall(-3.0, 0, 4.6, za, zb, "#2A2B2E");
+    sc.wall(3.0, 0, 4.6, za, zb, "#2A2B2E");
+    sc.ground(-3.0, 3.0, za, zb, "#1E1F22", 4.6);
+    sc.ground(-3.0, 3.0, za, zb, "#3A3632");
+  } else if (lv === "ground") {
+    sc.ground(-300, 300, za, zb, "#86B86A");
+    sc.ground(-5.6, 2.2, za, zb, "#8E8578");
+  } else {
+    // unten die Stadt mit Straße und Häusern, oben das Viadukt mit Geländer
+    sc.ground(-300, 300, za, zb, "#A9A39A", ELEV);
+    sc.ground(-4.0, 1.0, za, zb, "#6C6E73", ELEV + 0.01);
+    const colors = ["#D9B38C", "#C98D7A", "#E6D3A3", "#B7C3C9", "#D7A9A0", "#C2B59B"];
+    for (const [j, z] of periodic(14)) {
+      for (const X of [-14, 11]) {
+        const height = 14 + 8 * rnd(j, 7 + X), col = colors[Math.floor(rnd(j, 9 + X) * colors.length)];
+        background.push([z + 12, () => sc.wall(X, ELEV, ELEV + height, z, Math.min(z + 12, zb), col)]);
+      }
+    }
+    for (const [, z] of periodic(15, 5)) {
+      background.push([z, () => { sc.front(-6.0, -5.3, ELEV, 0, z, "#8A847A"); sc.front(2.0, 2.7, ELEV, 0, z, "#8A847A"); }]);
+    }
+  }
+  for (const [, fn] of background.sort(byDistance)) fn();
+  if (lv === "elevated") {
+    sc.ground(-5.9, 2.7, za, zb, "#8C8780");
+    sc.ground(-5.6, 2.2, za, zb, "#8E8578", 0.01);
+  }
+
+  // --- Gleise ---
+  const wood = tunnel ? "#3D3B39" : "#6B5444";
+  for (const [, z] of periodic(2)) {
+    sc.ground(-1.25, 1.25, z, Math.min(z + 0.35, zb), wood, 0.02);
+    if (!tunnel) sc.ground(-5.05, -2.55, z, Math.min(z + 0.35, zb), wood, 0.02);      // Nachbargleis
+  }
+  for (const X of [-0.75, 0.75]) sc.ground(X - 0.05, X + 0.05, za, zb, "#D6D6D6", 0.06);
+  if (!tunnel) for (const X of [-4.55, -3.05]) sc.ground(X - 0.05, X + 0.05, za, zb, "#C8C8C8", 0.06);
+  if (kind === "sbahn" || kind === "ubahn") sc.ground(1.45, 1.6, za, zb, "#7C7C7C", 0.15);   // Stromschiene
+  if (lv === "elevated") {
+    sc.wall(2.75, 0, 1.1, za, zb, "#5F646B");                                         // Geländer
+    sc.wall(-5.95, 0, 1.1, za, zb, "#5F646B");
+  }
+  if (afterGround) afterGround();
+
+  // --- Dinge am Rand ---
+  const items = [];
+  if ((kind === "regio" || kind === "ice") && !tunnel) {
+    c.line([sc.p(0, 5.6, za), sc.p(0, 5.6, zb)], { fill: "#2E2E2E", width: Math.max(1, 2 * s) });
+    for (const [, z] of periodic(30, 7)) {
+      items.push([z, () => { sc.front(-2.92, -2.68, 0, 6.3, z, "#5A5F66"); sc.front(-2.8, 0.2, 5.75, 5.95, z, "#5A5F66"); }]);
+    }
+  }
+  const zs = k * SEG - cam, inStation = k >= 0 && k < n;
+  if (tunnel) {
+    for (const [, z] of periodic(8)) {
+      if (inStation && Math.abs(z - zs) < 40) continue;          // in der Bahnhofshalle ist es ohnehin hell
+      items.push([z, () => { sc.wall(-2.98, 3.5, 3.8, z, z + 1.4, "#FFE9A8"); sc.wall(2.98, 3.5, 3.8, z, z + 1.4, "#FFE9A8"); }]);
+    }
+  } else if (lv === "ground") {
+    for (const [j, z] of periodic(13, 4)) {
+      if (rnd(j, 1) < 0.35) continue;
+      const X = (rnd(j, 2) < 0.5 ? -1 : 1) * (10 + 6 * rnd(j, 4));
+      items.push([z, () => {
+        sc.front(X - 0.18, X + 0.18, 0, 2.4, z, "#6B4A2E");
+        const [cx, cy] = sc.p(X, 4.0, z), r = sc.size(1.9 + 0.6 * rnd(j, 6), z);
+        c.oval(cx - r, cy - r, cx + r, cy + r, { fill: ["#4F8F3F", "#5E9C46", "#477F38"][((j % 3) + 3) % 3] });
+      }]);
+    }
+  }
+  if (inStation) {
+    const pa = Math.max(zs - 12, za), pb = Math.min(zs + 28, zb);
+    if (pb > pa) items.push([pb, () => drawPlatform(c, app, sc, ride, k, zs, pa, pb, lv, st[stops[k]])]);
+  }
+  for (const [, fn] of items.sort(byDistance)) fn();
+}
+
+/** Bahnsteig rechts neben dem Gleis – in der Bahnhofshalle, ebenerdig oder oben auf dem Viadukt. */
+function drawPlatform(c, app, sc, ride, i, zs, za, zb, lv, name) {
+  if (lv === "tunnel") {
+    // helle, gekachelte Bahnhofshalle statt Tunnel
+    const tiles = ["#D8E2D0", "#E3D9C6", "#CFDDE6", "#E6D0CF"][i % 4];
+    sc.wall(8.0, 0, 4.8, za, zb, tiles);
+    sc.wall(-3.0, 0, 4.6, za, zb, tiles);
+    sc.ground(-3.0, 8.0, za, zb, "#EFEDE6", 4.7);
+    for (let lz = Math.trunc(za); lz < zb; lz += 6) sc.ground(-1.0, 6.0, lz, lz + 1.2, "#FFF6D8", 4.68);
+  }
+  if (lv === "elevated") {
+    sc.ground(2.7, 8.4, za, zb, "#8C8780");                  // Viadukt ist am Bahnhof breiter
+    sc.wall(8.4, 0, 1.1, za, zb, "#5F646B");
+  }
+  sc.ground(2.0, 8.0, za, zb, "#B9B2A6", 1.0);
+  sc.wall(2.0, 0, 1.0, za, zb, "#8C857A");
+  sc.ground(2.0, 2.4, za, zb, "#F4F4F4", 1.01);
+  sc.front(2.0, 8.0, 0, 1.0, za, "#8C857A");                  // Stirnseite am Bahnsteiganfang
+  if (lv !== "tunnel") {
+    for (let pz = Math.trunc(za) + 4; pz < zb; pz += 9) sc.front(5.0, 5.18, 1.0, 4.3, pz, "#6F7378");
+    sc.ground(2.8, 8.0, za, zb, "#7A8088", 4.3);
+  }
+  stationSign(c, app, sc, 2.7, 7.0, 2.4, 3.4, zs + 14, name, MODE[ride.kind][2]);
+}
+
 /** Die Strecke vor dem Fahrzeug. Alles hängt von ride.pos ab – so zieht die Landschaft beim Fahren vorbei. */
 function drawScene(ride, c, app, x1, y1, x2, y2) {
+  if (ride.kind !== "tram" && ride.kind !== "bus") return drawRailScene(ride, c, app, x1, y1, x2, y2);
+  // ab hier Straßenbahn und Bus: Straße zwischen Häusern
   const s = app.s, kind = ride.kind, st = app.data.stations, stops = ride.stops;
   const cam = ride.pos * SEG;
   const sc = new Scene(c, x1, y1, x2, y2);
-  const tunnel = kind === "ubahn", city = kind === "tram" || kind === "bus";
-  const railOut = ["sbahn", "regio", "ice"].includes(kind);
   const hy = sc.hy;
 
   // --- Himmel und Boden ---
-  if (tunnel) {
-    c.rect(x1, y1, x2, y2, "#0E1013");
-  } else {
-    const sky = ["#6FB6EA", "#82C0EE", "#96CAF1", "#AAD4F4", "#BFDFF6", "#D4EAF9"];
-    const band = (hy - y1) / sky.length;
-    sky.forEach((col, i) => c.rect(x1, y1 + i * band, x2, y1 + (i + 1) * band + 1, col));
-    c.rect(x1, hy, x2, y2, city ? "#B3AEA4" : "#86B86A");
-    if (city) {
-      // Häuser am Horizont
-      for (let k = 0; k < 14; k++) {
-        const bx = x1 + (x2 - x1) * k / 14, bh = (0.04 + 0.08 * rnd(k, 3)) * (y2 - y1);
-        c.rect(bx, hy - bh, bx + (x2 - x1) / 14 + 1, hy + 1, ["#C9C2B8", "#BDB6C4", "#B8C6C9", "#CFC4B0"][k % 4]);
-      }
-    } else {
-      // Hügel in der Ferne
-      const pts = [[x1, hy]];
-      for (let k = 0; k < 13; k++) pts.push([x1 + (x2 - x1) * k / 12, hy - (0.02 + 0.05 * rnd(k, 5)) * (y2 - y1)]);
-      pts.push([x2, hy]);
-      c.polygon(pts, { fill: "#6FA35C" });
-    }
+  const sky = ["#6FB6EA", "#82C0EE", "#96CAF1", "#AAD4F4", "#BFDFF6", "#D4EAF9"];
+  const band = (hy - y1) / sky.length;
+  sky.forEach((col, i) => c.rect(x1, y1 + i * band, x2, y1 + (i + 1) * band + 1, col));
+  c.rect(x1, hy, x2, y2, "#B3AEA4");
+  for (let k = 0; k < 14; k++) {                                           // Häuser am Horizont
+    const bx = x1 + (x2 - x1) * k / 14, bh = (0.04 + 0.08 * rnd(k, 3)) * (y2 - y1);
+    c.rect(bx, hy - bh, bx + (x2 - x1) / 14 + 1, hy + 1, ["#C9C2B8", "#BDB6C4", "#B8C6C9", "#CFC4B0"][k % 4]);
   }
 
   // --- Fahrweg ---
-  if (tunnel) {
-    sc.wall(-3.0, 0, 4.6, Z_NEAR, Z_FAR, "#2A2B2E");
-    sc.wall(3.0, 0, 4.6, Z_NEAR, Z_FAR, "#2A2B2E");
-    sc.ground(-3.0, 3.0, Z_NEAR, Z_FAR, "#1E1F22", 4.6);
-    sc.ground(-3.0, 3.0, Z_NEAR, Z_FAR, "#3A3632");
-  }
-  if (railOut) sc.ground(-5.6, 2.2, Z_NEAR, Z_FAR, "#8E8578");             // Schotter für beide Gleise
-  if (city) {
-    sc.ground(-7.0, 2.3, Z_NEAR, Z_FAR, "#5C5E63");                         // Fahrbahn
-    sc.ground(2.3, 7.0, Z_NEAR, Z_FAR, "#CBC5B8");                          // Gehweg rechts
-    sc.ground(-10.0, -7.0, Z_NEAR, Z_FAR, "#CBC5B8");                       // Gehweg links
-    sc.ground(2.2, 2.4, Z_NEAR, Z_FAR, "#E8E8E8", 0.02);                    // Bordstein
-  }
+  sc.ground(-7.0, 2.3, Z_NEAR, Z_FAR, "#5C5E63");                         // Fahrbahn
+  sc.ground(2.3, 7.0, Z_NEAR, Z_FAR, "#CBC5B8");                          // Gehweg rechts
+  sc.ground(-10.0, -7.0, Z_NEAR, Z_FAR, "#CBC5B8");                       // Gehweg links
+  sc.ground(2.2, 2.4, Z_NEAR, Z_FAR, "#E8E8E8", 0.02);                    // Bordstein
 
   /** Positionen [Index, Abstand nach vorn] von Dingen, die alle spacing Meter wiederkehren. */
   function periodic(spacing, offset = 0) {
@@ -1628,132 +1840,81 @@ function drawScene(ride, c, app, x1, y1, x2, y2) {
 
   if (kind === "bus") {
     for (const [, z] of periodic(9)) sc.ground(-2.45, -2.25, z, z + 4, "#F2F2F2", 0.02);     // Mittellinie
-  } else if (kind === "tram") {
-    for (const [, z] of periodic(6)) sc.ground(-7.0, 2.3, z, z + 0.15, "#686A70", 0.01);     // Fugen
   } else {
-    const wood = tunnel ? "#3D3B39" : "#6B5444";
-    for (const [, z] of periodic(2)) {
-      sc.ground(-1.25, 1.25, z, z + 0.35, wood, 0.02);                                       // Schwellen
-      if (railOut) sc.ground(-5.05, -2.55, z, z + 0.35, wood, 0.02);                         // Nachbargleis
-    }
-  }
-  if (kind !== "bus") {
-    const rail = city ? "#9A9A9A" : "#D6D6D6";
-    for (const X of [-0.75, 0.75]) sc.ground(X - 0.05, X + 0.05, Z_NEAR, Z_FAR, rail, 0.06);
-    if (railOut) for (const X of [-4.55, -3.05]) sc.ground(X - 0.05, X + 0.05, Z_NEAR, Z_FAR, "#C8C8C8", 0.06);
-    if (kind === "sbahn") sc.ground(1.45, 1.6, Z_NEAR, Z_FAR, "#7C7C7C", 0.15);              // Stromschiene
+    for (const [, z] of periodic(6)) sc.ground(-7.0, 2.3, z, z + 0.15, "#686A70", 0.01);     // Fugen
+    for (const X of [-0.75, 0.75]) sc.ground(X - 0.05, X + 0.05, Z_NEAR, Z_FAR, "#9A9A9A", 0.06);   // Schienen in der Straße
   }
 
-  // --- Betriebshof bzw. Abstellgleis hinter der Endstation ---
+  // --- Betriebshof hinter der Endstation ---
   // Was dahinter liegt, ist verdeckt: Häuser, Bäume und Masten werden dort nicht mehr gezeichnet.
   let zEnd = Z_FAR + 100;
   if (ride.depot) {
-    const zd = stops.length * SEG - cam;
-    if (city) { zEnd = zd + 34; drawDepotHall(c, app, sc, zEnd, MODE[kind][2], kind); }
-    else { zEnd = zd + 30; drawSiding(c, app, sc, zd, zEnd, kind); }
+    zEnd = stops.length * SEG - cam + 34;
+    drawDepotHall(c, app, sc, zEnd, MODE[kind][2], kind);
   }
 
   // --- Dinge am Rand, von hinten nach vorn gezeichnet ---
   const items = [];
   const houses = [];      // Häuserzeilen liegen ganz außen und werden zuerst gezeichnet
 
-  if (["regio", "ice", "tram"].includes(kind)) {
+  if (kind === "tram") {
     // Oberleitung: Draht und Masten
     c.line([sc.p(0, 5.6, Z_NEAR), sc.p(0, 5.6, Z_FAR)], { fill: "#2E2E2E", width: Math.max(1, 2 * s) });
-    const mastX = kind !== "tram" ? -2.8 : 2.9;
+    const mastX = 2.9;
     for (const [, z] of periodic(30, 7)) {
       items.push([z, () => {
         sc.front(mastX - 0.12, mastX + 0.12, 0, 6.3, z, "#5A5F66");
-        sc.front(Math.min(mastX, 0.2), Math.max(mastX, -0.2), 5.75, 5.95, z, "#5A5F66");
+        sc.front(0.2, mastX, 5.75, 5.95, z, "#5A5F66");
       }]);
     }
   }
-  const nearStation = z => {
-    const rel = (z + cam) / SEG, i = Math.round(rel);
-    return i >= 0 && i < stops.length && Math.abs(rel - i) * SEG < 40;
-  };
-  if (tunnel) {
-    for (const [, z] of periodic(8)) {
-      if (nearStation(z)) continue;      // in der Bahnhofshalle ist es ohnehin hell
-      items.push([z, () => {
-        sc.wall(-2.98, 3.5, 3.8, z, z + 1.4, "#FFE9A8");
-        sc.wall(2.98, 3.5, 3.8, z, z + 1.4, "#FFE9A8");
-      }]);
-    }
-  } else {
-    for (const [k, z] of periodic(13, 4)) {
-      if (rnd(k, 1) < 0.35) continue;
-      const side = rnd(k, 2) < 0.5 ? -1 : 1;
-      let X = side * (10 + 6 * rnd(k, 4));                                   // nicht auf Gleis oder Bahnsteig
-      if (city) X = side > 0 ? 4 + rnd(k, 4) * 2 : -(7.6 + rnd(k, 4) * 1.6);  // auf dem Gehweg
-      items.push([z, () => {
-        sc.front(X - 0.18, X + 0.18, 0, 2.4, z, "#6B4A2E");
-        const [cx, cy] = sc.p(X, 4.0, z), r = sc.size(1.9 + 0.6 * rnd(k, 6), z);
-        c.oval(cx - r, cy - r, cx + r, cy + r, { fill: ["#4F8F3F", "#5E9C46", "#477F38"][((k % 3) + 3) % 3] });
-      }]);
-    }
+  for (const [k, z] of periodic(13, 4)) {
+    if (rnd(k, 1) < 0.35) continue;
+    const side = rnd(k, 2) < 0.5 ? -1 : 1;
+    const X = side > 0 ? 4 + rnd(k, 4) * 2 : -(7.6 + rnd(k, 4) * 1.6);     // Bäume auf dem Gehweg
+    items.push([z, () => {
+      sc.front(X - 0.18, X + 0.18, 0, 2.4, z, "#6B4A2E");
+      const [cx, cy] = sc.p(X, 4.0, z), r = sc.size(1.9 + 0.6 * rnd(k, 6), z);
+      c.oval(cx - r, cy - r, cx + r, cy + r, { fill: ["#4F8F3F", "#5E9C46", "#477F38"][((k % 3) + 3) % 3] });
+    }]);
   }
-  if (city) {
-    const colors = ["#D9B38C", "#C98D7A", "#E6D3A3", "#B7C3C9", "#D7A9A0", "#C2B59B"];
-    for (const [k, z] of periodic(12)) {
-      for (const side of [-1, 1]) {
-        const X = side < 0 ? -10 : 7, height = 9 + 9 * rnd(k, 7 + side);
-        const col = colors[Math.floor(rnd(k, 9 + side) * colors.length)];
-        houses.push([z + 11.5, () => {
-          sc.wall(X, 0, height, z, z + 11.5, col);
-          if (z < 45) {
-            for (let fy = 1; fy < Math.min(4, Math.floor(height / 3)); fy++) {
-              for (const wz of [2.5, 7.5]) sc.wall(X + (X > 0 ? 0.05 : -0.05), fy * 3 - 0.2, fy * 3 + 1.1, z + wz, z + wz + 1.4, "#5B7590");
-            }
+  const colors = ["#D9B38C", "#C98D7A", "#E6D3A3", "#B7C3C9", "#D7A9A0", "#C2B59B"];
+  for (const [k, z] of periodic(12)) {
+    for (const side of [-1, 1]) {
+      const X = side < 0 ? -10 : 7, height = 9 + 9 * rnd(k, 7 + side);
+      const col = colors[Math.floor(rnd(k, 9 + side) * colors.length)];
+      houses.push([z + 11.5, () => {
+        sc.wall(X, 0, height, z, z + 11.5, col);
+        if (z < 45) {
+          for (let fy = 1; fy < Math.min(4, Math.floor(height / 3)); fy++) {
+            for (const wz of [2.5, 7.5]) sc.wall(X + (X > 0 ? 0.05 : -0.05), fy * 3 - 0.2, fy * 3 + 1.1, z + wz, z + wz + 1.4, "#5B7590");
           }
-        }]);
-      }
+        }
+      }]);
     }
   }
 
-  // --- Stationen ---
-  const signBorder = MODE[kind][2];
+  // --- Haltestellen ---
   for (let i = Math.floor(ride.pos) - 1; i < Math.floor(ride.pos) + 3; i++) {
     if (i < 0 || i >= stops.length) continue;
     const zs = i * SEG - cam, name = st[stops[i]];
-    const za = zs - 12, zb = zs + 28;        // 40 m Bahnsteig, dazwischen freie Strecke
+    const za = zs - 12, zb = zs + 28;        // 40 m Haltestelle, dazwischen freie Strecke
     if (zb < Z_NEAR || za > Z_FAR) continue;
-    if (city) {
-      items.push([zb, () => {
-        if (kind === "tram") {
-          sc.ground(1.4, 3.6, za, zb, "#B0AAA0", 0.25);
-          sc.wall(1.4, 0, 0.25, za, zb, "#8C857A");
-        }
-        const poleZ = zs + 12;
-        sc.front(2.95, 3.05, 0, 3.6, poleZ, "#6F7378");
-        stationSign(c, app, sc, 3.1, 6.4, 2.0, 2.7, poleZ, name, "#2F8F4E");
-        if (poleZ > Z_NEAR && poleZ < Z_FAR) {
-          // das gelbe Berliner Haltestellenschild mit grünem H
-          const [hx, hy2] = sc.p(3.0, 3.6, poleZ), r = sc.size(0.45, poleZ);
-          c.oval(hx - r, hy2 - r, hx + r, hy2 + r, { fill: "#F7D117", outline: "#2F8F4E", width: Math.max(1, r * 0.15) });
-          if (r > 5) c.text(hx, hy2, "H", app.font(r * 1.3 / s, "bold"), "#2F8F4E");
-        }
-      }]);
-    } else {
-      items.push([zb, () => {
-        if (tunnel) {
-          // helle Bahnhofshalle statt Tunnel
-          const tiles = ["#D8E2D0", "#E3D9C6", "#CFDDE6", "#E6D0CF"][i % 4];
-          sc.wall(8.0, 0, 4.8, za, zb, tiles);
-          sc.wall(-3.0, 0, 4.6, za, zb, tiles);
-          sc.ground(-3.0, 8.0, za, zb, "#EFEDE6", 4.7);
-          for (let lz = Math.trunc(za); lz < zb; lz += 6) sc.ground(-1.0, 6.0, lz, lz + 1.2, "#FFF6D8", 4.68);
-        }
-        sc.ground(2.0, 8.0, za, zb, "#B9B2A6", 1.0);
-        sc.wall(2.0, 0, 1.0, za, zb, "#8C857A");
-        sc.ground(2.0, 2.4, za, zb, "#F4F4F4", 1.01);
-        if (!tunnel) {
-          for (let pz = Math.trunc(za) + 4; pz < zb; pz += 9) sc.front(5.0, 5.18, 1.0, 4.3, pz, "#6F7378");
-          sc.ground(2.8, 8.0, za, zb, "#7A8088", 4.3);
-        }
-        stationSign(c, app, sc, 2.7, 7.0, 2.4, 3.4, zs + 14, name, signBorder);
-      }]);
-    }
+    items.push([zb, () => {
+      if (kind === "tram") {
+        sc.ground(1.4, 3.6, za, zb, "#B0AAA0", 0.25);
+        sc.wall(1.4, 0, 0.25, za, zb, "#8C857A");
+      }
+      const poleZ = zs + 12;
+      sc.front(2.95, 3.05, 0, 3.6, poleZ, "#6F7378");
+      stationSign(c, app, sc, 3.1, 6.4, 2.0, 2.7, poleZ, name, "#2F8F4E");
+      if (poleZ > Z_NEAR && poleZ < Z_FAR) {
+        // das gelbe Berliner Haltestellenschild mit grünem H
+        const [hx, hy2] = sc.p(3.0, 3.6, poleZ), r = sc.size(0.45, poleZ);
+        c.oval(hx - r, hy2 - r, hx + r, hy2 + r, { fill: "#F7D117", outline: "#2F8F4E", width: Math.max(1, r * 0.15) });
+        if (r > 5) c.text(hx, hy2, "H", app.font(r * 1.3 / s, "bold"), "#2F8F4E");
+      }
+    }]);
   }
 
   const byDistance = (a, b) => b[0] - a[0];

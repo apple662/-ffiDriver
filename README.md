@@ -87,6 +87,26 @@ Ansicht“ zurück). Man blickt nach vorn auf die Strecke, in einfachem 3D:
   Schienen und Oberleitung.
 - **Bus:** Straße mit Mittellinie, Gehweg, Bäumen und Häusern.
 
+**Tunnel, ebenerdig oder auf dem Viadukt:** Bei den Bahnen liegt jeder
+Bahnhof auf der richtigen Ebene, dazwischen gibt es Tunnelportale und Rampen.
+Beispiele:
+- Die U1/U3 fährt von Warschauer Straße bis Gleisdreieck oben auf dem
+  Kreuzberger Viadukt und taucht dann in den Tunnel ab.
+- Die U5 fährt bis Biesdorf-Süd draußen, ab Tierpark im Tunnel.
+- Die U3 fährt durch Dahlem im offenen Einschnitt, die U2 am Olympia-Stadion
+  draußen und an der Schönhauser Allee oben.
+- Die S-Bahn fährt auf der Stadtbahn (Charlottenburg bis Ostbahnhof) auf dem
+  Viadukt, über der Stadt.
+- Die Nord-Süd-S-Bahn (Nordbahnhof bis Anhalter Bahnhof) und der Flughafen BER
+  liegen unter der Erde.
+- Am Hauptbahnhof halten Stadtbahn-Linien oben, Nord-Süd-Linien (z. B. ICE 11,
+  S15) unten; an der Friedrichstraße genauso.
+
+Offene Daten zur Höhenlage gibt es nicht. Die Zuordnung steht als Tabelle im
+Programm (`U_ELEVATED`, `U_GROUND`, `RAIL_TUNNEL`, `STADTBAHN` in
+`bahnfahren.py` und `web/app.js`). Alle übrigen Bahnhöfe gelten als
+ebenerdig, bei der U-Bahn als unterirdisch.
+
 An jeder Station steht ein Bahnsteig (bzw. eine Haltestelle mit gelbem
 „H“-Schild) mit dem Namensschild, das beim Heranfahren größer wird. Das
 Fahrzeug fährt sanft an, rollt und bremst vor der Station; eine Station

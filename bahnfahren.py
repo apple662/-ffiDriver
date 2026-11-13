@@ -1271,6 +1271,16 @@ class RideScreen(Screen):
         return self.stops[0] == self.stops[-1]
 
     @property
+    def levels(self):
+        """Höhenlage jedes Bahnhofs in der aktuellen Richtung (für die Cockpit-Ansicht)."""
+        key = (self.direction, len(self.stops))
+        if getattr(self, "_levels_key", None) != key:
+            names = [self.app.data["stations"][k] for k in self.stops]
+            self._levels = [station_level(self.kind, self.line["name"], names, i) for i in range(len(names))]
+            self._levels_key = key
+        return self._levels
+
+    @property
     def target(self):
         """Wohin das Fahrzeug fährt: die Station – oder eine Zeile weiter auf Betriebshof/Abstellgleis."""
         return self.index + (1 if self.depot else 0)
@@ -1488,6 +1498,58 @@ def rnd(i, salt=0):
     return x - math.floor(x)
 
 
+# --- Höhenlage der Bahnhöfe: Tunnel, ebenerdig oder auf dem Viadukt ---------
+# Offene Daten dazu gibt es nicht; die Tabelle beschreibt die bekannten Berliner Strecken.
+
+# U-Bahn: alles unterirdisch, außer diesen Bahnhöfen (je Linie, denn z. B. am Kottbusser Tor
+# hält die U1 oben auf dem Viadukt, die U8 aber unten im Tunnel)
+U_ELEVATED = {
+    "U1": {"S+U Warschauer Str.", "U Schlesisches Tor", "U Görlitzer Bahnhof", "U Kottbusser Tor",
+           "U Prinzenstr.", "U Hallesches Tor", "U Möckernbrücke", "U Gleisdreieck"},
+    "U2": {"S+U Schönhauser Allee", "U Eberswalder Str.", "U Gleisdreieck", "U Bülowstr.", "U Nollendorfplatz"},
+    "U3": {"S+U Warschauer Str.", "U Schlesisches Tor", "U Görlitzer Bahnhof", "U Kottbusser Tor",
+           "U Prinzenstr.", "U Hallesches Tor", "U Möckernbrücke", "U Gleisdreieck"},
+}
+U_GROUND = {
+    "U2": {"U Olympia-Stadion", "U Ruhleben"},
+    "U3": {"U Krumme Lanke", "U Onkel Toms Hütte", "U Oskar-Helene-Heim", "U Freie Universität (Thielplatz)",
+           "U Dahlem-Dorf", "U Podbielskiallee"},
+    "U5": {"U Hönow", "U Louis-Lewin-Str.", "U Hellersdorf", "U Cottbusser Platz", "U Kienberg (Gärten der Welt)",
+           "U Kaulsdorf-Nord", "S+U Wuhletal", "U Elsterwerdaer Platz", "U Biesdorf-Süd"},
+    "U6": {"U Scharnweberstr.", "U Otisstr.", "U Holzhauser Str."},
+}
+# S-Bahn und Fernbahn: Nord-Süd-Tunnel und Flughafen unter der Erde, Stadtbahn auf dem Viadukt
+RAIL_TUNNEL = {"S Nordbahnhof", "S Oranienburger Str.", "S+U Brandenburger Tor", "S+U Potsdamer Platz",
+               "S Anhalter Bahnhof", "Flughafen BER"}
+STADTBAHN = {"S Charlottenburg", "S Savignyplatz", "S+U Zoologischer Garten", "S Tiergarten", "S Bellevue",
+             "S+U Berlin Hauptbahnhof", "S+U Friedrichstr.", "S Hackescher Markt", "S+U Alexanderplatz",
+             "S+U Jannowitzbrücke", "S Ostbahnhof"}
+# Hauptbahnhof unten (Nord-Süd), wenn die Linie von/nach diesen Bahnhöfen fährt; sonst oben (Stadtbahn)
+HBF_LOWER_NEIGHBORS = {"S Südkreuz", "S+U Gesundbrunnen", "S+U Potsdamer Platz", "S+U Wedding"}
+
+
+def station_level(kind, line_name, names, i):
+    """'tunnel', 'ground' oder 'elevated' für Bahnhof ``i`` der Liste ``names``."""
+    name = names[i]
+    neighbors = {names[j] for j in (i - 1, i + 1) if 0 <= j < len(names)}
+    if kind in ("tram", "bus"):
+        return "ground"
+    if kind == "ubahn":
+        if name in U_ELEVATED.get(line_name, ()):
+            return "elevated"
+        return "ground" if name in U_GROUND.get(line_name, ()) else "tunnel"
+    if name in RAIL_TUNNEL:
+        return "tunnel"
+    if name == "S+U Friedrichstr.":                      # Stadtbahn oben, Nord-Süd-S-Bahn unten
+        return "tunnel" if neighbors & RAIL_TUNNEL else "elevated"
+    if name == "S+U Berlin Hauptbahnhof":
+        return "tunnel" if neighbors & HBF_LOWER_NEIGHBORS else "elevated"
+    return "elevated" if name in STADTBAHN else "ground"
+
+
+ELEV = -7.0     # so tief liegt die Straße unter einem Viadukt (das Gleis ist immer bei 0)
+
+
 class Scene:
     """Einfache Zentralperspektive: X quer (rechts +), Y Höhe, Z Entfernung nach vorn (Meter)."""
 
@@ -1529,54 +1591,34 @@ class Scene:
 
 def draw_scene(ride, c, app, x1, y1, x2, y2):
     """Die Strecke vor dem Fahrzeug. Alles hängt von ride.pos ab – so zieht die Landschaft beim Fahren vorbei."""
+    if ride.kind not in ("tram", "bus"):
+        return draw_rail_scene(ride, c, app, x1, y1, x2, y2)
+    # ab hier Straßenbahn und Bus: Straße zwischen Häusern
     s = app.s
     kind = ride.kind
     st = app.data["stations"]
     stops = ride.stops
     cam = ride.pos * SEG
     sc = Scene(c, x1, y1, x2, y2)
-    tunnel = kind == "ubahn"
-    city = kind in ("tram", "bus")
-    rail_out = kind in ("sbahn", "regio", "ice")
     hy = sc.hy
 
     # --- Himmel und Boden ---
-    if tunnel:
-        c.create_rectangle(x1, y1, x2, y2, fill="#0E1013", outline="")
-    else:
-        sky = ["#6FB6EA", "#82C0EE", "#96CAF1", "#AAD4F4", "#BFDFF6", "#D4EAF9"]
-        band = (hy - y1) / len(sky)
-        for i, col in enumerate(sky):
-            c.create_rectangle(x1, y1 + i * band, x2, y1 + (i + 1) * band + 1, fill=col, outline="")
-        c.create_rectangle(x1, hy, x2, y2, fill="#B3AEA4" if city else "#86B86A", outline="")
-        if city:
-            # Häuser am Horizont
-            for k in range(14):
-                bx = x1 + (x2 - x1) * k / 14
-                bh = (0.04 + 0.08 * rnd(k, 3)) * (y2 - y1)
-                c.create_rectangle(bx, hy - bh, bx + (x2 - x1) / 14 + 1, hy + 1,
-                                   fill=["#C9C2B8", "#BDB6C4", "#B8C6C9", "#CFC4B0"][k % 4], outline="")
-        else:
-            # Hügel in der Ferne
-            pts = [(x1, hy)]
-            for k in range(13):
-                pts.append((x1 + (x2 - x1) * k / 12, hy - (0.02 + 0.05 * rnd(k, 5)) * (y2 - y1)))
-            pts.append((x2, hy))
-            c.create_polygon([v for p in pts for v in p], fill="#6FA35C", outline="", smooth=True)
+    sky = ["#6FB6EA", "#82C0EE", "#96CAF1", "#AAD4F4", "#BFDFF6", "#D4EAF9"]
+    band = (hy - y1) / len(sky)
+    for i, col in enumerate(sky):
+        c.create_rectangle(x1, y1 + i * band, x2, y1 + (i + 1) * band + 1, fill=col, outline="")
+    c.create_rectangle(x1, hy, x2, y2, fill="#B3AEA4", outline="")
+    for k in range(14):                                         # Häuser am Horizont
+        bx = x1 + (x2 - x1) * k / 14
+        bh = (0.04 + 0.08 * rnd(k, 3)) * (y2 - y1)
+        c.create_rectangle(bx, hy - bh, bx + (x2 - x1) / 14 + 1, hy + 1,
+                           fill=["#C9C2B8", "#BDB6C4", "#B8C6C9", "#CFC4B0"][k % 4], outline="")
 
     # --- Fahrweg ---
-    if tunnel:
-        sc.wall(-3.0, 0, 4.6, Z_NEAR, Z_FAR, "#2A2B2E")
-        sc.wall(3.0, 0, 4.6, Z_NEAR, Z_FAR, "#2A2B2E")
-        sc.ground(-3.0, 3.0, Z_NEAR, Z_FAR, "#1E1F22", y=4.6)
-        sc.ground(-3.0, 3.0, Z_NEAR, Z_FAR, "#3A3632")
-    if rail_out:
-        sc.ground(-5.6, 2.2, Z_NEAR, Z_FAR, "#8E8578")              # Schotter für beide Gleise
-    if city:
-        sc.ground(-7.0, 2.3, Z_NEAR, Z_FAR, "#5C5E63")              # Fahrbahn
-        sc.ground(2.3, 7.0, Z_NEAR, Z_FAR, "#CBC5B8")               # Gehweg rechts
-        sc.ground(-10.0, -7.0, Z_NEAR, Z_FAR, "#CBC5B8")            # Gehweg links
-        sc.ground(2.2, 2.4, Z_NEAR, Z_FAR, "#E8E8E8", y=0.02)       # Bordstein
+    sc.ground(-7.0, 2.3, Z_NEAR, Z_FAR, "#5C5E63")              # Fahrbahn
+    sc.ground(2.3, 7.0, Z_NEAR, Z_FAR, "#CBC5B8")               # Gehweg rechts
+    sc.ground(-10.0, -7.0, Z_NEAR, Z_FAR, "#CBC5B8")            # Gehweg links
+    sc.ground(2.2, 2.4, Z_NEAR, Z_FAR, "#E8E8E8", y=0.02)       # Bordstein
 
     def periodic(spacing, offset=0.0):
         """Positionen (Index, Abstand nach vorn) von Dingen, die alle ``spacing`` Meter wiederkehren."""
@@ -1592,99 +1634,63 @@ def draw_scene(ride, c, app, x1, y1, x2, y2):
     if kind == "bus":
         for k, z in periodic(9.0):
             sc.ground(-2.45, -2.25, z, z + 4.0, "#F2F2F2", y=0.02)   # Mittellinie
-    elif kind == "tram":
+    else:
         for k, z in periodic(6.0):
             sc.ground(-7.0, 2.3, z, z + 0.15, "#686A70", y=0.01)     # Fugen in der Fahrbahn
-    else:
-        wood = "#3D3B39" if tunnel else "#6B5444"
-        for k, z in periodic(2.0):
-            sc.ground(-1.25, 1.25, z, z + 0.35, wood, y=0.02)        # Schwellen
-            if rail_out:
-                sc.ground(-5.05, -2.55, z, z + 0.35, wood, y=0.02)   # Nachbargleis
-    if kind != "bus":
-        rail = "#9A9A9A" if city else "#D6D6D6"
         for X in (-0.75, 0.75):
-            sc.ground(X - 0.05, X + 0.05, Z_NEAR, Z_FAR, rail, y=0.06)
-        if rail_out:
-            for X in (-4.55, -3.05):
-                sc.ground(X - 0.05, X + 0.05, Z_NEAR, Z_FAR, "#C8C8C8", y=0.06)
-        if kind == "sbahn":
-            sc.ground(1.45, 1.6, Z_NEAR, Z_FAR, "#7C7C7C", y=0.15)   # Stromschiene der Berliner S-Bahn
+            sc.ground(X - 0.05, X + 0.05, Z_NEAR, Z_FAR, "#9A9A9A", y=0.06)   # Schienen in der Straße
 
-    # --- Betriebshof bzw. Abstellgleis hinter der Endstation ---
+    # --- Betriebshof hinter der Endstation ---
     # Was dahinter liegt, ist verdeckt: Häuser, Bäume und Masten werden dort nicht mehr gezeichnet.
     z_end = Z_FAR + 100
     if ride.depot:
-        zd = len(stops) * SEG - cam
-        if city:
-            z_end = zd + 34
-            draw_depot_hall(c, app, sc, z_end, MODE[kind][2], kind)
-        else:
-            z_end = zd + 30
-            draw_siding(c, app, sc, zd, z_end, kind)
+        z_end = len(stops) * SEG - cam + 34
+        draw_depot_hall(c, app, sc, z_end, MODE[kind][2], kind)
 
     # --- Dinge am Rand, von hinten nach vorn gezeichnet ---
     items = []
     houses = []     # Häuserzeilen liegen ganz außen und werden zuerst gezeichnet
 
-    if kind in ("regio", "ice", "tram"):
+    if kind == "tram":
         # Oberleitung: Draht und Masten
         wire_y = 5.6
         c.create_line(*sc.p(0, wire_y, Z_NEAR), *sc.p(0, wire_y, Z_FAR), fill="#2E2E2E", width=max(1, 2 * s))
-        mast_x = -2.8 if kind != "tram" else 2.9
+        mast_x = 2.9
         for k, z in periodic(30.0, 7.0):
             def mast(z=z):
                 sc.front(mast_x - 0.12, mast_x + 0.12, 0, 6.3, z, "#5A5F66")
                 sc.front(min(mast_x, 0.2), max(mast_x, -0.2), 5.75, 5.95, z, "#5A5F66")
             items.append((z, mast))
-    def near_station(z):
-        rel = (z + cam) / SEG
-        return 0 <= round(rel) < len(stops) and abs(rel - round(rel)) * SEG < 40
+    for k, z in periodic(13.0, 4.0):
+        if rnd(k, 1) < 0.35:
+            continue
+        side = -1 if rnd(k, 2) < 0.5 else 1
+        X = 4.0 + rnd(k, 4) * 2.0 if side > 0 else -(7.6 + rnd(k, 4) * 1.6)   # Bäume auf dem Gehweg
 
-    if tunnel:
-        for k, z in periodic(8.0):
-            if near_station(z):
-                continue        # in der Bahnhofshalle ist es ohnehin hell
+        def tree(z=z, X=X, k=k):
+            sc.front(X - 0.18, X + 0.18, 0, 2.4, z, "#6B4A2E")
+            cx, cy = sc.p(X, 4.0, z)
+            r = sc.size(1.9 + 0.6 * rnd(k, 6), z)
+            c.create_oval(cx - r, cy - r, cx + r, cy + r, fill=["#4F8F3F", "#5E9C46", "#477F38"][k % 3],
+                          outline="")
+        items.append((z, tree))
+    colors = ["#D9B38C", "#C98D7A", "#E6D3A3", "#B7C3C9", "#D7A9A0", "#C2B59B"]
+    for k, z in periodic(12.0):
+        for side in (-1, 1):
+            X = -10.0 if side < 0 else 7.0
+            height = 9 + 9 * rnd(k, 7 + side)
+            col = colors[int(rnd(k, 9 + side) * len(colors))]
 
-            def lamps(z=z):
-                sc.wall(-2.98, 3.5, 3.8, z, z + 1.4, "#FFE9A8")
-                sc.wall(2.98, 3.5, 3.8, z, z + 1.4, "#FFE9A8")
-            items.append((z, lamps))
-    if not tunnel:
-        for k, z in periodic(13.0, 4.0):
-            if rnd(k, 1) < 0.35:
-                continue
-            side = -1 if rnd(k, 2) < 0.5 else 1
-            X = side * (10.0 + 6 * rnd(k, 4))                         # nicht auf Gleis oder Bahnsteig
-            if city:
-                X = 4.0 + rnd(k, 4) * 2.0 if side > 0 else -(7.6 + rnd(k, 4) * 1.6)   # auf dem Gehweg
+            def house(z=z, X=X, height=height, col=col):
+                sc.wall(X, 0, height, z, z + 11.5, col)
+                if z < 45:
+                    for fy in range(1, min(4, int(height // 3))):
+                        for wz in (2.5, 7.5):
+                            sc.wall(X + (0.05 if X > 0 else -0.05), fy * 3 - 0.2, fy * 3 + 1.1, z + wz, z + wz + 1.4,
+                                    "#5B7590")
+            houses.append((z + 11.5, house))
 
-            def tree(z=z, X=X, k=k):
-                sc.front(X - 0.18, X + 0.18, 0, 2.4, z, "#6B4A2E")
-                cx, cy = sc.p(X, 4.0, z)
-                r = sc.size(1.9 + 0.6 * rnd(k, 6), z)
-                c.create_oval(cx - r, cy - r, cx + r, cy + r, fill=["#4F8F3F", "#5E9C46", "#477F38"][k % 3],
-                              outline="")
-            items.append((z, tree))
-    if city:
-        colors = ["#D9B38C", "#C98D7A", "#E6D3A3", "#B7C3C9", "#D7A9A0", "#C2B59B"]
-        for k, z in periodic(12.0):
-            for side in (-1, 1):
-                X = -10.0 if side < 0 else 7.0
-                height = 9 + 9 * rnd(k, 7 + side)
-                col = colors[int(rnd(k, 9 + side) * len(colors))]
-
-                def house(z=z, X=X, height=height, col=col):
-                    sc.wall(X, 0, height, z, z + 11.5, col)
-                    if z < 45:
-                        for fy in range(1, min(4, int(height // 3))):
-                            for wz in (2.5, 7.5):
-                                sc.wall(X + (0.05 if X > 0 else -0.05), fy * 3 - 0.2, fy * 3 + 1.1, z + wz, z + wz + 1.4,
-                                        "#5B7590")
-                houses.append((z + 11.5, house))
-
-    # --- Stationen ---
-    sign_border = MODE[kind][2]
+    # --- Haltestellen ---
     for i in range(math.floor(ride.pos) - 1, math.floor(ride.pos) + 3):
         if not 0 <= i < len(stops):
             continue
@@ -1693,46 +1699,227 @@ def draw_scene(ride, c, app, x1, y1, x2, y2):
         za, zb = zs - 12, zs + 28        # 40 m Bahnsteig, dazwischen freie Strecke
         if zb < Z_NEAR or za > Z_FAR:
             continue
-        if city:
-            def stop(zs=zs, za=za, zb=zb, name=name):
-                if kind == "tram":
-                    sc.ground(1.4, 3.6, za, zb, "#B0AAA0", y=0.25)
-                    sc.wall(1.4, 0, 0.25, za, zb, "#8C857A")
-                pole_z = zs + 12
-                sc.front(2.95, 3.05, 0, 3.6, pole_z, "#6F7378")
-                station_sign(c, app, sc, 3.1, 6.4, 2.0, 2.7, pole_z, name, "#2F8F4E")
-                if Z_NEAR < pole_z < Z_FAR:
-                    # das gelbe Berliner Haltestellenschild mit grünem H
-                    hx, hy2 = sc.p(3.0, 3.6, pole_z)
-                    r = sc.size(0.45, pole_z)
-                    c.create_oval(hx - r, hy2 - r, hx + r, hy2 + r, fill="#F7D117", outline="#2F8F4E", width=max(1, r * 0.15))
-                    if r > 5:
-                        c.create_text(hx, hy2, text="H", fill="#2F8F4E", font=app.font(r * 1.3 / s, "bold"))
-            items.append((zb, stop))
-        else:
-            def platform(zs=zs, za=za, zb=zb, name=name, i=i):
-                if tunnel:
-                    # helle Bahnhofshalle statt Tunnel
-                    tiles = ["#D8E2D0", "#E3D9C6", "#CFDDE6", "#E6D0CF"][i % 4]
-                    sc.wall(8.0, 0, 4.8, za, zb, tiles)
-                    sc.wall(-3.0, 0, 4.6, za, zb, tiles)
-                    sc.ground(-3.0, 8.0, za, zb, "#EFEDE6", y=4.7)
-                    for lz in range(int(za), int(zb), 6):
-                        sc.ground(-1.0, 6.0, lz, lz + 1.2, "#FFF6D8", y=4.68)
-                sc.ground(2.0, 8.0, za, zb, "#B9B2A6", y=1.0)
-                sc.wall(2.0, 0, 1.0, za, zb, "#8C857A")
-                sc.ground(2.0, 2.4, za, zb, "#F4F4F4", y=1.01)
-                if not tunnel:
-                    for pz in range(int(za) + 4, int(zb), 9):
-                        sc.front(5.0, 5.18, 1.0, 4.3, pz, "#6F7378")
-                    sc.ground(2.8, 8.0, za, zb, "#7A8088", y=4.3)
-                station_sign(c, app, sc, 2.7, 7.0, 2.4, 3.4, zs + 14, name, sign_border)
-            items.append((zb, platform))
+
+        def stop(zs=zs, za=za, zb=zb, name=name):
+            if kind == "tram":
+                sc.ground(1.4, 3.6, za, zb, "#B0AAA0", y=0.25)
+                sc.wall(1.4, 0, 0.25, za, zb, "#8C857A")
+            pole_z = zs + 12
+            sc.front(2.95, 3.05, 0, 3.6, pole_z, "#6F7378")
+            station_sign(c, app, sc, 3.1, 6.4, 2.0, 2.7, pole_z, name, "#2F8F4E")
+            if Z_NEAR < pole_z < Z_FAR:
+                # das gelbe Berliner Haltestellenschild mit grünem H
+                hx, hy2 = sc.p(3.0, 3.6, pole_z)
+                r = sc.size(0.45, pole_z)
+                c.create_oval(hx - r, hy2 - r, hx + r, hy2 + r, fill="#F7D117", outline="#2F8F4E", width=max(1, r * 0.15))
+                if r > 5:
+                    c.create_text(hx, hy2, text="H", fill="#2F8F4E", font=app.font(r * 1.3 / s, "bold"))
+        items.append((zb, stop))
 
     houses = [it for it in houses if it[0] - 11.5 < z_end]
     items = [it for it in items if it[0] < z_end]
     for z, fn in sorted(houses, key=lambda it: -it[0]) + sorted(items, key=lambda it: -it[0]):
         fn()
+
+
+def draw_rail_scene(ride, c, app, x1, y1, x2, y2):
+    """Strecke für S-Bahn, U-Bahn, Regio und ICE. Jede Station hat ihren Abschnitt (±30 m), der im Tunnel,
+    ebenerdig oder auf dem Viadukt liegt; an den Übergängen gibt es Tunnelportale bzw. Rampen."""
+    kind = ride.kind
+    st = app.data["stations"]
+    stops = ride.stops
+    n = len(stops)
+    levels = ride.levels
+    cam = ride.pos * SEG
+    sc = Scene(c, x1, y1, x2, y2)
+    hy = sc.hy
+
+    def level(k):
+        return levels[max(0, min(n - 1, k))]
+
+    # Himmel, Wiese und Hügel – im Tunnel verdecken Wände und Decke alles davon
+    sky = ["#6FB6EA", "#82C0EE", "#96CAF1", "#AAD4F4", "#BFDFF6", "#D4EAF9"]
+    band = (hy - y1) / len(sky)
+    for i, col in enumerate(sky):
+        c.create_rectangle(x1, y1 + i * band, x2, y1 + (i + 1) * band + 1, fill=col, outline="")
+    c.create_rectangle(x1, hy, x2, y2, fill="#86B86A", outline="")
+    pts = [(x1, hy)]
+    for k in range(13):
+        pts.append((x1 + (x2 - x1) * k / 12, hy - (0.02 + 0.05 * rnd(k, 5)) * (y2 - y1)))
+    pts.append((x2, hy))
+    c.create_polygon([v for p in pts for v in p], fill="#6FA35C", outline="", smooth=True)
+
+    z_end = Z_FAR + 100
+    zd = n * SEG - cam
+    if ride.depot:
+        z_end = zd + 30                    # dahinter verdecken Prellbock und Erdwall bzw. Tunnelende alles
+
+    # Abschnitte von hinten nach vorn
+    regions = []
+    k = math.floor((cam + Z_NEAR + SEG / 2) / SEG)
+    while True:
+        za = k * SEG - SEG / 2 - cam
+        if za > min(Z_FAR, z_end):
+            break
+        regions.append((k, za, min(za + SEG, Z_FAR, z_end), level(k)))
+        k += 1
+    for idx in range(len(regions) - 1, -1, -1):
+        k, za, zb, lv = regions[idx]
+        has_end = ride.depot and zb >= z_end - 0.01
+        draw_rail_region(ride, c, app, sc, k, max(za, Z_NEAR), zb, lv, st, stops,
+                         (lambda lv=lv: draw_siding(c, app, sc, zd, z_end, kind, lv)) if has_end else None)
+        if idx > 0 and za > Z_NEAR:
+            draw_transition(sc, za, lv, regions[idx - 1][3])
+
+
+def draw_transition(sc, z, far, near):
+    """Übergang zwischen zwei Abschnitten bei Entfernung z (vom näheren aus gesehen)."""
+    if far == near or near == "tunnel":
+        return                                              # aus dem Tunnel heraus sieht man keine Kante
+    concrete = "#8F8A80"
+    if far == "tunnel":
+        low = ELEV if near == "elevated" else 0.0
+        grass = "#6E8F57"
+        # begrünter Erdwall, in dem der Tunnel verschwindet, mit Betonrahmen um die Öffnung
+        sc.front(-60, -3.0, low, 4.0, z + 0.5, grass)
+        sc.front(3.0, 60, low, 4.0, z + 0.5, grass)
+        sc.front(-9.0, 9.0, 4.0, 6.0, z + 0.5, grass)
+        sc.front(-4.6, -3.0, low, 6.2, z, concrete)
+        sc.front(3.0, 4.6, low, 6.2, z, concrete)
+        sc.front(-3.0, 3.0, 4.6, 6.2, z, concrete)
+        if low < 0:
+            sc.front(-3.0, 3.0, low, 0, z, concrete)
+    else:
+        sc.front(-300, 300, ELEV, 0, z, "#9C8B73")          # Rampe zwischen Viadukt und ebenem Gleis
+
+
+def draw_rail_region(ride, c, app, sc, k, za, zb, lv, st, stops, after_ground=None):
+    s = app.s
+    kind = ride.kind
+    n = len(stops)
+    cam = ride.pos * SEG
+    tunnel = lv == "tunnel"
+
+    def periodic(spacing, offset=0.0):
+        """Positionen (Index, Entfernung) von Dingen alle ``spacing`` Meter, nur in diesem Abschnitt."""
+        j = math.floor((cam + za - offset) / spacing)
+        while True:
+            z = j * spacing + offset - cam
+            if z > zb:
+                return
+            if z >= za - 0.01:
+                yield j, z
+            j += 1
+
+    # --- Boden, Tunnel bzw. Viadukt ---
+    background = []
+    if tunnel:
+        if zb >= Z_FAR - 0.01:
+            sc.front(-3.0, 3.0, 0, 4.6, Z_FAR - 0.1, "#0E1013")       # der Tunnel geht im Dunkeln weiter
+        sc.wall(-3.0, 0, 4.6, za, zb, "#2A2B2E")
+        sc.wall(3.0, 0, 4.6, za, zb, "#2A2B2E")
+        sc.ground(-3.0, 3.0, za, zb, "#1E1F22", y=4.6)
+        sc.ground(-3.0, 3.0, za, zb, "#3A3632")
+    elif lv == "ground":
+        sc.ground(-300, 300, za, zb, "#86B86A")
+        sc.ground(-5.6, 2.2, za, zb, "#8E8578")
+    else:
+        # unten die Stadt mit Straße und Häusern, oben das Viadukt mit Geländer
+        sc.ground(-300, 300, za, zb, "#A9A39A", y=ELEV)
+        sc.ground(-4.0, 1.0, za, zb, "#6C6E73", y=ELEV + 0.01)
+        colors = ["#D9B38C", "#C98D7A", "#E6D3A3", "#B7C3C9", "#D7A9A0", "#C2B59B"]
+        for j, z in periodic(14.0):
+            for X in (-14.0, 11.0):
+                height = 14 + 8 * rnd(j, 7 + X)
+                col = colors[int(rnd(j, 9 + X) * len(colors))]
+                background.append((z + 12, lambda z=z, X=X, height=height, col=col:
+                                   sc.wall(X, ELEV, ELEV + height, z, min(z + 12, zb), col)))
+        for j, z in periodic(15.0, 5.0):
+            background.append((z, lambda z=z: (sc.front(-6.0, -5.3, ELEV, 0, z, "#8A847A"),
+                                               sc.front(2.0, 2.7, ELEV, 0, z, "#8A847A"))))
+    for z, fn in sorted(background, key=lambda it: -it[0]):
+        fn()
+    if lv == "elevated":
+        sc.ground(-5.9, 2.7, za, zb, "#8C8780")
+        sc.ground(-5.6, 2.2, za, zb, "#8E8578", y=0.01)
+
+    # --- Gleise ---
+    wood = "#3D3B39" if tunnel else "#6B5444"
+    for j, z in periodic(2.0):
+        sc.ground(-1.25, 1.25, z, min(z + 0.35, zb), wood, y=0.02)
+        if not tunnel:
+            sc.ground(-5.05, -2.55, z, min(z + 0.35, zb), wood, y=0.02)    # Nachbargleis
+    for X in (-0.75, 0.75):
+        sc.ground(X - 0.05, X + 0.05, za, zb, "#D6D6D6", y=0.06)
+    if not tunnel:
+        for X in (-4.55, -3.05):
+            sc.ground(X - 0.05, X + 0.05, za, zb, "#C8C8C8", y=0.06)
+    if kind in ("sbahn", "ubahn"):
+        sc.ground(1.45, 1.6, za, zb, "#7C7C7C", y=0.15)                     # Stromschiene
+    if lv == "elevated":
+        sc.wall(2.75, 0, 1.1, za, zb, "#5F646B")                           # Geländer
+        sc.wall(-5.95, 0, 1.1, za, zb, "#5F646B")
+    if after_ground:
+        after_ground()
+
+    # --- Dinge am Rand ---
+    items = []
+    if kind in ("regio", "ice") and not tunnel:
+        c.create_line(*sc.p(0, 5.6, za), *sc.p(0, 5.6, zb), fill="#2E2E2E", width=max(1, 2 * s))
+        for j, z in periodic(30.0, 7.0):
+            items.append((z, lambda z=z: (sc.front(-2.92, -2.68, 0, 6.3, z, "#5A5F66"),
+                                          sc.front(-2.8, 0.2, 5.75, 5.95, z, "#5A5F66"))))
+    zs = k * SEG - cam
+    in_station = 0 <= k < n
+    if tunnel:
+        for j, z in periodic(8.0):
+            if in_station and abs(z - zs) < 40:
+                continue                    # in der Bahnhofshalle ist es ohnehin hell
+            items.append((z, lambda z=z: (sc.wall(-2.98, 3.5, 3.8, z, z + 1.4, "#FFE9A8"),
+                                          sc.wall(2.98, 3.5, 3.8, z, z + 1.4, "#FFE9A8"))))
+    elif lv == "ground":
+        for j, z in periodic(13.0, 4.0):
+            if rnd(j, 1) < 0.35:
+                continue
+            X = (-1 if rnd(j, 2) < 0.5 else 1) * (10.0 + 6 * rnd(j, 4))
+
+            def tree(z=z, X=X, j=j):
+                sc.front(X - 0.18, X + 0.18, 0, 2.4, z, "#6B4A2E")
+                cx, cy = sc.p(X, 4.0, z)
+                r = sc.size(1.9 + 0.6 * rnd(j, 6), z)
+                c.create_oval(cx - r, cy - r, cx + r, cy + r, fill=["#4F8F3F", "#5E9C46", "#477F38"][j % 3],
+                              outline="")
+            items.append((z, tree))
+    if in_station:
+        pa, pb = max(zs - 12, za), min(zs + 28, zb)
+        if pb > pa:
+            items.append((pb, lambda: draw_platform(c, app, sc, ride, k, zs, pa, pb, lv, st[stops[k]])))
+    for z, fn in sorted(items, key=lambda it: -it[0]):
+        fn()
+
+
+def draw_platform(c, app, sc, ride, i, zs, za, zb, lv, name):
+    """Bahnsteig rechts neben dem Gleis – in der Bahnhofshalle, ebenerdig oder oben auf dem Viadukt."""
+    if lv == "tunnel":
+        # helle, gekachelte Bahnhofshalle statt Tunnel
+        tiles = ["#D8E2D0", "#E3D9C6", "#CFDDE6", "#E6D0CF"][i % 4]
+        sc.wall(8.0, 0, 4.8, za, zb, tiles)
+        sc.wall(-3.0, 0, 4.6, za, zb, tiles)
+        sc.ground(-3.0, 8.0, za, zb, "#EFEDE6", y=4.7)
+        for lz in range(int(za), int(zb), 6):
+            sc.ground(-1.0, 6.0, lz, lz + 1.2, "#FFF6D8", y=4.68)
+    if lv == "elevated":
+        sc.ground(2.7, 8.4, za, zb, "#8C8780")                 # Viadukt ist am Bahnhof breiter
+        sc.wall(8.4, 0, 1.1, za, zb, "#5F646B")
+    sc.ground(2.0, 8.0, za, zb, "#B9B2A6", y=1.0)
+    sc.wall(2.0, 0, 1.0, za, zb, "#8C857A")
+    sc.ground(2.0, 2.4, za, zb, "#F4F4F4", y=1.01)
+    sc.front(2.0, 8.0, 0, 1.0, za, "#8C857A")                     # Stirnseite am Bahnsteiganfang
+    if lv != "tunnel":
+        for pz in range(int(za) + 4, int(zb), 9):
+            sc.front(5.0, 5.18, 1.0, 4.3, pz, "#6F7378")
+        sc.ground(2.8, 8.0, za, zb, "#7A8088", y=4.3)
+    station_sign(c, app, sc, 2.7, 7.0, 2.4, 3.4, zs + 14, name, MODE[ride.kind][2])
 
 
 def draw_depot_hall(c, app, sc, z, color, kind):
@@ -1749,20 +1936,20 @@ def draw_depot_hall(c, app, sc, z, color, kind):
     station_sign(c, app, sc, -6.5, 6.5, 7.0, 8.9, z, "Betriebshof", color)
 
 
-def draw_siding(c, app, sc, zd, z_end, kind):
-    """Abstellgleis: Prellbock am Gleisende, daneben abgestellte Züge (bei der U-Bahn im Tunnel)."""
-    tunnel = kind == "ubahn"
-    if tunnel:
+def draw_siding(c, app, sc, zd, z_end, kind, level="ground"):
+    """Abstellgleis: Prellbock am Gleisende, daneben abgestellte Züge (im Tunnel nur das Tunnelende)."""
+    if level == "tunnel":
         sc.front(-3.0, 3.0, 0, 4.6, z_end, "#3A3B3E")                     # Tunnelende
     else:
-        sc.front(-40, 40, 0, 3.2, z_end, "#5E8B4C")                       # Erdwall mit Büschen
+        low = ELEV if level == "elevated" else 0.0
+        sc.front(-40, 40, low, 3.2, z_end, "#5E8B4C")                     # Erdwall mit Büschen
         for k in range(-6, 7):
             cx, cy = sc.p(k * 3.2, 3.2, z_end)
             r = sc.size(1.8, z_end)
             c.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#4F7F3F", outline="")
-        # abgestellte Züge auf den Nachbargleisen
+        # abgestellte Züge auf den Nachbargleisen (auf dem Viadukt ist dafür kein Platz)
         body, accent = MODE[kind][3]
-        for x1, x2 in ((4.4, 7.0), (-8.0, -5.4)):
+        for x1, x2 in ((4.4, 7.0), (-8.0, -5.4)) if level != "elevated" else ():
             sc.ground(x1 + 0.3, x1 + 0.4, zd - 30, z_end, "#C8C8C8", y=0.06)
             sc.ground(x2 - 0.4, x2 - 0.3, zd - 30, z_end, "#C8C8C8", y=0.06)
             near_x = x1 if x1 > 0 else x2
