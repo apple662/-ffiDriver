@@ -981,6 +981,7 @@ class RideScreen(Screen):
         self.last_tick = 0.0
         self.depot = False       # steht auf dem Betriebshof bzw. Abstellgleis hinter der Endstation
         self.full_line = self.line   # Taste E kürzt die Linie nur für diese Fahrt (self.line), nicht dauerhaft
+        self.wash_start = None       # Zeitpunkt, seit dem das Fahrzeug durch die Waschanlage fährt
         self.speed = 0.0        # 0…1 für den Tacho
 
     @property
@@ -1088,6 +1089,15 @@ class RideScreen(Screen):
 
         # Fahrzeug
         draw_vehicle(c, kind, veh_x, row_y(self.pos) + 4 * s, veh_len, flip=self.backwards)
+        if self.washing:
+            # Seifenblasen steigen auf
+            t, vy = self.wash_time, row_y(self.pos)
+            for i in range(14):
+                rise = (t * 0.6 + rnd(i, 31)) % 1.0
+                bx = veh_x + (rnd(i, 32) - 0.5) * veh_len
+                by = vy + 20 * s - rise * 90 * s
+                r = (4 + 7 * rnd(i, 33)) * s
+                c.create_oval(bx - r, by - r, bx + r, by + r, fill="#EAF6FF", outline="#8CC4EE", width=max(1, 1.5 * s))
 
         # Kopfzeile zuletzt, damit die Liste darunter verschwindet
         hh, left = header(app, c, w, color, self.back)
@@ -1183,6 +1193,8 @@ class RideScreen(Screen):
         text, until = self.message
         if not (text and time.monotonic() < until):
             text = ""
+        if self.washing:
+            text = wash_phase(self.wash_time)
         box_y1, box_y2 = y + 14 * s + 16 * s, btn_y - 14 * s
         if box_y2 - box_y1 >= 40 * s:
             round_rect(c, ix, box_y1, ix + pw, box_y2, 14 * s, fill="#11181F", outline="#3A4A5C", width=2 * s)
@@ -1191,8 +1203,10 @@ class RideScreen(Screen):
             if text:
                 lines, font, fill = wrap_text(mf, text, pw - 24 * s, 2), mf, "#FFB000"
             elif self.depot:
-                lines, font, fill = wrap_text(mf, f"Pause · Taste {depot_key}: zurück", pw - 24 * s, 2), mf, "#C8B6F0"
-                app.hit(ix, box_y1, ix + pw, box_y2, self.toggle_depot)
+                lines, font, fill = [f"Taste {depot_key}: zurück", "Taste W: waschen"], mf, "#C8B6F0"
+                mid = (box_y1 + box_y2) / 2
+                app.hit(ix, box_y1, ix + pw, mid, self.toggle_depot)
+                app.hit(ix, mid, ix + pw, box_y2, self.wash)
             elif last and not self.ring:
                 # an der Endstation: Betriebshof bzw. Abstellgleis anbieten
                 lines, font, fill = wrap_text(mf, f"Taste {depot_key}: {depot_name}", pw - 24 * s, 2), mf, "#C8B6F0"
@@ -1218,6 +1232,13 @@ class RideScreen(Screen):
             c.create_text(mx, my, text=text, font=mf, fill="#FFB000")
 
     def tick(self):
+        if self.washing:
+            self.speed = 5 / VMAX[self.kind]            # Schrittgeschwindigkeit am Tacho
+            if self.wash_time >= WASH_TIME:
+                self.wash_start = None
+                self.speed = 0.0
+                self.say("Blitzblank! Fertig gewaschen.", 3)
+            return True
         moving = False
         d = self.target - self.pos
         if abs(d) > 0.003:
@@ -1294,6 +1315,26 @@ class RideScreen(Screen):
         self.say(f"Pause auf dem {name}. Zurück auf die Strecke: Taste {key}", 2.5)
         self.app.animate()
 
+    @property
+    def washing(self):
+        return self.wash_start is not None
+
+    @property
+    def wash_time(self):
+        return time.monotonic() - self.wash_start
+
+    def wash(self):
+        """Taste W: auf dem Abstellgleis bzw. Betriebshof einmal durch die Waschanlage."""
+        if self.washing:
+            return
+        if not self.depot:
+            name, key, _ = depot_info(self.kind)
+            self.say(f"Gewaschen wird auf dem {name}: an der Endstation Taste {key}", 3)
+        else:
+            self.wash_start = time.monotonic()
+            self.app.sound.play(SOUND_DIR / "bus.wav")         # Rauschen und Zischen wie in der Waschanlage
+        self.app.animate()
+
     def toggle_end(self):
         """Taste E: die Linie endet hier – oder fährt wieder bis zur echten Endstation (nur für diese Fahrt)."""
         if self.depot:
@@ -1330,6 +1371,8 @@ class RideScreen(Screen):
     def toggle_depot(self, key=None):
         """Taste B/A: an der Endhaltestelle auf den Betriebshof bzw. aufs Abstellgleis – und wieder zurück."""
         name, wanted, where = depot_info(self.kind)
+        if self.washing:
+            return                      # erst fertig waschen
         if key and key.upper() != wanted:
             self.say("Bahnen fahren aufs Abstellgleis: Taste A" if wanted == "A"
                      else f"{MODE[self.kind][1]} fährt auf den Betriebshof: Taste B", 2.5)
@@ -1477,6 +1520,8 @@ class RideScreen(Screen):
             self.announce()
         elif char in ("u", "U"):
             self.change()
+        elif char in ("w", "W"):
+            self.wash()
         elif char in ("e", "E"):
             self.toggle_end()
         elif char in ("a", "A", "b", "B"):
@@ -2069,6 +2114,124 @@ def draw_gauge(app, c, cx, cy, radius, speed, vmax):
                   fill=LED)
 
 
+# --------------------------------------------------------------------------
+# Waschanlage (Taste W auf dem Abstellgleis bzw. Betriebshof)
+# --------------------------------------------------------------------------
+
+WASH_TIME = 10.0        # Sekunden für eine Runde durch die Waschanlage
+WASH_START = -14.0      # so viele Meter vor dem Tor geht es los (das Schild ist dann gut zu sehen)
+# Ende jedes Schritts in Sekunden – passend dazu, wann man an Wasserbogen, Bürsten usw. vorbeifährt
+WASH_PHASES = [(2.2, "Einfahrt in die Waschanlage"), (4.3, "Wasser marsch!"), (6.9, "Die Bürsten schrubben …"),
+               (8.1, "Abspülen"), (WASH_TIME, "Trocknen")]
+# Stationen in der Halle (Meter hinter dem Tor): Wasserbogen, zwei Bürstenpaare, Spülbogen, Gebläse
+WASH_SPRAY, WASH_BRUSHES, WASH_RINSE, WASH_BLOWER, WASH_EXIT = 9.0, (18.0, 22.0), 30.0, 37.0, 44.0
+
+
+def wash_phase(t):
+    """Text zum Waschschritt nach t Sekunden."""
+    return next(text for end, text in WASH_PHASES if t < end or end == WASH_TIME)
+
+
+def wash_phase_start(text):
+    return ([0.0] + [end for end, _ in WASH_PHASES])[[t for _, t in WASH_PHASES].index(text)]
+
+
+def draw_wash(ride, c, app, x1, y1, x2, y2, t):
+    """Fahrt durch die Waschanlage: Halle mit Wasserbögen und drehenden Bürsten, Schaum und Tropfen auf der Scheibe."""
+    s = app.s
+    sc = Scene(c, x1, y1, x2, y2)
+    cam = WASH_START + (WASH_EXIT - WASH_START) * min(1.0, t / WASH_TIME)
+    phase = wash_phase(t)
+
+    # draußen: Himmel und Hof, dann die Halle
+    sky = ["#9CC8EA", "#B4D5EF", "#CCE3F4"]
+    band = (sc.hy - y1) / len(sky)
+    for i, col in enumerate(sky):
+        c.create_rectangle(x1, y1 + i * band, x2, y1 + (i + 1) * band + 1, fill=col, outline="")
+    c.create_rectangle(x1, sc.hy, x2, y2, fill="#9A968E", outline="")
+    za, zb = max(-cam, Z_NEAR), WASH_EXIT - cam                     # hinten durch die Ausfahrt sieht man nach draußen
+    sc.wall(-3.2, 0, 4.8, za, zb, "#B9C4CC")
+    sc.wall(3.2, 0, 4.8, za, zb, "#B9C4CC")
+    sc.ground(-3.2, 3.2, za, zb, "#8F9BA5", y=4.8)
+    sc.ground(-3.2, 3.2, za, zb, "#5E666E")
+    for k in range(0, int(WASH_EXIT), 3):                           # nasse Rinnen im Boden
+        sc.ground(-3.2, 3.2, k - cam, k - cam + 0.25, "#4C545C", y=0.01)
+    for k in range(2, int(WASH_EXIT), 6):                           # Lampen an der Decke
+        sc.ground(-0.6, 0.6, k - cam, k - cam + 1.5, "#E8F4FF", y=4.78)
+    if ride.kind != "bus":
+        for X in (-0.75, 0.75):
+            sc.ground(X - 0.05, X + 0.05, za, zb, "#C8C8C8", y=0.06)
+
+    items = []
+
+    def arch(z, color):
+        sc.front(-3.0, -2.75, 0, 4.4, z, color)
+        sc.front(2.75, 3.0, 0, 4.4, z, color)
+        sc.front(-3.0, 3.0, 4.15, 4.4, z, color)
+
+    def spray(z, active):
+        arch(z, "#3D7FC1")
+        if active and Z_NEAR < z < 20:
+            for i in range(14):                                      # Wasserstrahlen aus den Düsen
+                side = -1 if i % 2 else 1
+                y0 = 0.5 + 3.6 * rnd(i, 3)
+                ax, ay = sc.p(side * 2.8, y0, z)
+                bx, by = sc.p(side * (0.4 + rnd(i + int(t * 8), 4)), y0 - 0.6, z - 1.5)
+                c.create_line(ax, ay, bx, by, fill="#CDEBFF", width=max(1, sc.size(0.06, z)))
+
+    def brushes(z, k):
+        for X in (-2.25, 2.25):
+            base, light = ("#2F6FD6", "#7FB2FF") if (X < 0) == (k == 0) else ("#D63F3F", "#FF9A8A")
+            sc.front(X - 0.75, X + 0.75, 0, 4.2, z, base)
+            for b in range(9):                                       # Streifen laufen nach oben: die Bürste dreht sich
+                y = (b * 0.5 + t * 2.4 * (1 if X < 0 else -1)) % 4.2
+                sc.front(X - 0.75, X + 0.75, y, min(4.2, y + 0.18), z, light)
+            sc.front(X - 0.08, X + 0.08, 4.2, 4.8, z, "#5F646B")
+
+    items.append((WASH_SPRAY - cam, lambda: spray(WASH_SPRAY - cam, phase == "Wasser marsch!")))
+    for k, bz in enumerate(WASH_BRUSHES):
+        items.append((bz - cam, lambda bz=bz, k=k: brushes(bz - cam, k)))
+    items.append((WASH_RINSE - cam, lambda: spray(WASH_RINSE - cam, phase == "Abspülen")))
+    items.append((WASH_BLOWER - cam, lambda: (sc.front(-3.0, 3.0, 3.9, 4.5, WASH_BLOWER - cam, "#9AA4AD"),
+                                              sc.front(-2.2, 2.2, 3.95, 4.05, WASH_BLOWER - cam, "#2A3138"))))
+    for z, fn in sorted(items, key=lambda it: -it[0]):
+        if Z_NEAR < z < Z_FAR:
+            fn()
+    ze = -cam                                                        # Tor mit Schild, solange es vor uns ist
+    if Z_NEAR < ze:
+        sc.front(-14, -3.2, 0, 7.5, ze, "#7C8A96")
+        sc.front(3.2, 14, 0, 7.5, ze, "#7C8A96")
+        sc.front(-3.2, 3.2, 4.8, 7.5, ze, "#7C8A96")
+        station_sign(c, app, sc, -3.0, 3.0, 5.3, 6.9, ze, "Waschanlage", "#2B7BB9")
+
+    # --- auf der Scheibe: Tropfen und Schaum ---
+    w, h = x2 - x1, y2 - y1
+    wet = phase in ("Wasser marsch!", "Die Bürsten schrubben …", "Abspülen")
+    if wet or phase == "Trocknen":
+        n = 45 if wet else 12
+        frame = int(t * 6)                                           # Tropfen wechseln ein paar Mal pro Sekunde
+        for i in range(n):
+            dx, dy = x1 + w * rnd(i, frame), y1 + h * rnd(i, frame + 1000)
+            r = (3 + 6 * rnd(i, 7)) * s
+            c.create_oval(dx - r, dy - r, dx + r, dy + r * 1.4, fill="#D6EEFF", outline="#9CC7E8")
+    foam = 0.0
+    if phase == "Die Bürsten schrubben …":
+        foam = min(1.0, (t - wash_phase_start(phase)) / 2.0)
+    elif phase == "Abspülen":
+        foam = max(0.0, 1.0 - (t - wash_phase_start(phase)) / 1.0)
+    for i in range(int(34 * foam)):
+        fx, fy = x1 + w * (0.05 + 0.9 * rnd(i, 21)), y1 + h * (0.25 + 0.75 * rnd(i, 22))
+        r = (18 + 30 * rnd(i, 23)) * s
+        c.create_oval(fx - r, fy - r * 0.8, fx + r, fy + r * 0.8, fill="#FAFCFF", outline="#DCE6EE")
+    if phase == "Trocknen":
+        # der Scheibenwischer wischt hin und her
+        px, py = x1 + w * 0.32, y2 - 6 * s
+        a = math.radians(-160 + 120 * (0.5 + 0.5 * math.sin((t - wash_phase_start(phase)) * 5)))
+        length = w * 0.36
+        c.create_line(px, py, px + math.cos(a) * length, py + math.sin(a) * length, fill="#1B1E23",
+                      width=max(3, 7 * s), capstyle="round")
+
+
 def draw_cockpit(ride, c, w, h):
     """Führerstand: Fenster mit Strecke, Zielanzeige oben, Armaturenbrett mit Knöpfen unten."""
     app, s = ride.app, ride.app.s
@@ -2083,7 +2246,10 @@ def draw_cockpit(ride, c, w, h):
     dash_top = h * 0.6
     pillar = 30 * s
     wx1, wy1, wx2, wy2 = pillar, top_h, w - pillar, dash_top + 30 * s
-    draw_scene(ride, c, app, wx1, wy1, wx2, wy2)
+    if ride.washing:
+        draw_wash(ride, c, app, wx1, wy1, wx2, wy2, ride.wash_time)
+    else:
+        draw_scene(ride, c, app, wx1, wy1, wx2, wy2)
 
     # Fensterrahmen (deckt alles ab, was über das Fenster hinausragt)
     c.create_rectangle(0, 0, w, wy1, fill=frame, outline="")
@@ -2091,9 +2257,10 @@ def draw_cockpit(ride, c, w, h):
     c.create_rectangle(wx2, 0, w, h, fill=frame, outline="")
     round_rect(c, wx1 - 10 * s, wy1 - 10 * s, wx2 + 10 * s, wy2 + 10 * s, 30 * s, fill="", outline=frame, width=22 * s)
     c.create_rectangle(0, top_h - 8 * s, w, top_h - 2 * s, fill=accent, outline="")
-    # Scheibenwischer
-    c.create_line(wx1 + (wx2 - wx1) * 0.32, wy2 - 6 * s, wx1 + (wx2 - wx1) * 0.12, wy2 - 70 * s, fill="#1B1E23",
-                  width=max(2, 5 * s), capstyle="round")
+    # Scheibenwischer (beim Trocknen in der Waschanlage bewegt er sich)
+    if not (ride.washing and wash_phase(ride.wash_time) == "Trocknen"):
+        c.create_line(wx1 + (wx2 - wx1) * 0.32, wy2 - 6 * s, wx1 + (wx2 - wx1) * 0.12, wy2 - 70 * s, fill="#1B1E23",
+                      width=max(2, 5 * s), capstyle="round")
 
     # --- Zielanzeige an der Decke ---
     dx1, dx2 = 220 * s, w - 220 * s
@@ -2109,10 +2276,12 @@ def draw_cockpit(ride, c, w, h):
     c.create_text(tx, dy1 + 24 * s, text=fit_text(led_big, dest, tw), anchor="w", font=led_big, fill=LED)
     text, until = ride.message
     depot_name, depot_key, _ = depot_info(kind)
-    if text and time.monotonic() < until:
+    if ride.washing:
+        second = wash_phase(ride.wash_time)
+    elif text and time.monotonic() < until:
         second = text
     elif ride.depot:
-        second = f"{depot_name} – Pause. Zurück: Taste {depot_key}"
+        second = f"{depot_name} – Pause. Zurück: Taste {depot_key} · Waschen: W"
     elif last:
         second = "Einmal rund um die Stadt!" if ride.ring else "Endstation – bitte alle aussteigen"
     else:
@@ -2166,9 +2335,16 @@ def draw_cockpit(ride, c, w, h):
     rows = [i for i in range(ride.index - 1, ride.index + 4) if 0 <= i < len(stops)]
     if ride.depot:
         rows = []
-        c.create_text(x + list_w / 2, py1 + ph * 0.45, text=depot_name.upper(), font=app.font(22, "bold"), fill=LED)
-        c.create_text(x + list_w / 2, py1 + ph * 0.62, text=f"Pause · Taste {depot_key}: zurück",
+        c.create_text(x + list_w / 2, py1 + ph * 0.4, text=depot_name.upper(), font=app.font(22, "bold"), fill=LED)
+        c.create_text(x + list_w / 2, py1 + ph * 0.6, text=f"Pause · Taste {depot_key}: zurück",
                       font=app.font(14, "bold"), fill="#FFD27A")
+        if not ride.washing:
+            # Knopf für die Waschanlage (auch zum Antippen)
+            bw2, bh2 = min(list_w - 30 * s, 190 * s), 34 * s
+            bx1, by1 = x + (list_w - bw2) / 2, py1 + ph * 0.72
+            round_rect(c, bx1, by1, bx1 + bw2, by1 + bh2, bh2 / 2, fill="#2B7BB9", outline="")
+            c.create_text(bx1 + bw2 / 2, by1 + bh2 / 2, text="W  Waschanlage", font=app.font(14, "bold"), fill="white")
+            app.hit(bx1, by1, bx1 + bw2, by1 + bh2, ride.wash)
     row_h = (ph - 40 * s) / 5
     ry = py1 + 34 * s
     mini = app.font(11, "bold")

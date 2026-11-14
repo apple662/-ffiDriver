@@ -985,6 +985,7 @@ class RideScreen extends Screen {
     this.lastTick = 0;
     this.speed = 0;          // 0…1 für den Tacho
     this.depot = false;      // steht auf dem Betriebshof bzw. Abstellgleis hinter der Endstation
+    this.washStart = null;   // seit wann das Fahrzeug durch die Waschanlage fährt
     this.fullLine = this.line;   // Taste E kürzt die Linie nur für diese Fahrt (this.line), nicht dauerhaft
   }
 
@@ -1010,7 +1011,22 @@ class RideScreen extends Screen {
     this.app.animate();
   }
 
-  /** Taste B/A: an der Endhaltestelle auf den Betriebshof bzw. aufs Abstellgleis – und wieder zurück. */
+  get washing() { return this.washStart !== null; }
+  get washTime() { return now() - this.washStart; }
+
+  /** Taste W: auf dem Abstellgleis bzw. Betriebshof einmal durch die Waschanlage. */
+  wash() {
+    if (this.washing) return;
+    if (!this.depot) {
+      const [name, key] = depotInfo(this.kind);
+      this.say(`Gewaschen wird auf dem ${name}: an der Endstation Taste ${key}`, 3);
+    } else {
+      this.washStart = now();
+      this.app.sound.play("bus");          // Rauschen und Zischen wie in der Waschanlage
+    }
+    this.app.animate();
+  }
+
   /** Taste E: die Linie endet hier – oder fährt wieder bis zur echten Endstation (nur für diese Fahrt). */
   toggleEnd() {
     if (this.depot) return this.depotHint();
@@ -1045,8 +1061,10 @@ class RideScreen extends Screen {
     this.app.animate();
   }
 
+  /** Taste B/A: an der Endhaltestelle auf den Betriebshof bzw. aufs Abstellgleis – und wieder zurück. */
   toggleDepot(key = null) {
     const [name, wanted, where] = depotInfo(this.kind);
+    if (this.washing) return;            // erst fertig waschen
     if (key && key.toUpperCase() !== wanted) {
       this.say(wanted === "A" ? "Bahnen fahren aufs Abstellgleis: Taste A" : `${MODE[this.kind][1]} fährt auf den Betriebshof: Taste B`, 2.5);
     } else if (this.depot) {
@@ -1179,6 +1197,16 @@ class RideScreen extends Screen {
 
     // Fahrzeug
     drawVehicle(c, kind, vehX, rowY(this.pos) + 4 * s, vehLen, this.backwards);
+    if (this.washing) {
+      // Seifenblasen steigen auf
+      const t = this.washTime, vy = rowY(this.pos);
+      for (let i = 0; i < 14; i++) {
+        const rise = (t * 0.6 + rnd(i, 31)) % 1.0;
+        const bx = vehX + (rnd(i, 32) - 0.5) * vehLen, by = vy + 20 * s - rise * 90 * s;
+        const r = (4 + 7 * rnd(i, 33)) * s;
+        c.oval(bx - r, by - r, bx + r, by + r, { fill: "#EAF6FF", outline: "#8CC4EE", width: Math.max(1, 1.5 * s) });
+      }
+    }
 
     // Kopfzeile zuletzt, damit die Liste darunter verschwindet
     const [hh, left] = header(app, c, w, color, () => this.back());
@@ -1266,6 +1294,7 @@ class RideScreen extends Screen {
     // Durchsage als Leuchtanzeige zwischen Fortschritt und Knöpfen
     let [text, until] = this.message;
     if (!(text && now() < until)) text = "";
+    if (this.washing) text = washPhase(this.washTime);
     const boxY1 = y + 14 * s + 16 * s, boxY2 = btnY - 14 * s;
     if (boxY2 - boxY1 >= 40 * s) {
       c.roundRect(ix, boxY1, ix + pw, boxY2, 14 * s, { fill: "#11181F", outline: "#3A4A5C", width: 2 * s });
@@ -1274,8 +1303,10 @@ class RideScreen extends Screen {
       if (text) {
         [lines, font, fill] = [wrapText(mf, text, pw - 24 * s, 2), mf, "#FFB000"];
       } else if (this.depot) {
-        [lines, font, fill] = [wrapText(mf, `Pause · Taste ${depotKey}: zurück`, pw - 24 * s, 2), mf, "#C8B6F0"];
-        app.hit(ix, boxY1, ix + pw, boxY2, () => this.toggleDepot());
+        [lines, font, fill] = [[`Taste ${depotKey}: zurück`, "Taste W: waschen"], mf, "#C8B6F0"];
+        const mid = (boxY1 + boxY2) / 2;
+        app.hit(ix, boxY1, ix + pw, mid, () => this.toggleDepot());
+        app.hit(ix, mid, ix + pw, boxY2, () => this.wash());
       } else if (last && !this.ring) {
         // an der Endstation: Betriebshof bzw. Abstellgleis anbieten
         [lines, font, fill] = [wrapText(mf, `Taste ${depotKey}: ${depotName}`, pw - 24 * s, 2), mf, "#C8B6F0"];
@@ -1303,6 +1334,15 @@ class RideScreen extends Screen {
   }
 
   tick() {
+    if (this.washing) {
+      this.speed = 5 / VMAX[this.kind];           // Schrittgeschwindigkeit am Tacho
+      if (this.washTime >= WASH_TIME) {
+        this.washStart = null;
+        this.speed = 0;
+        this.say("Blitzblank! Fertig gewaschen.", 3);
+      }
+      return true;
+    }
     let moving = false;
     const d = this.target - this.pos;
     if (Math.abs(d) > 0.003) {
@@ -1465,6 +1505,7 @@ class RideScreen extends Screen {
     else if (c === "u") this.change();
     else if (c === "e") this.toggleEnd();
     else if (c === "a" || c === "b") this.toggleDepot(c);
+    else if (c === "w") this.wash();
     else if (c === "f") this.toggleCockpit();
     else if (k === PARENT_KEY) this.setHome();
   }
@@ -1998,6 +2039,121 @@ function drawGauge(app, c, cx, cy, radius, speed, vmax) {
 }
 
 /** Führerstand: Fenster mit Strecke, Zielanzeige oben, Armaturenbrett mit Knöpfen unten. */
+// --- Waschanlage (Taste W auf dem Abstellgleis bzw. Betriebshof) ---------
+
+const WASH_TIME = 10.0;     // Sekunden für eine Runde durch die Waschanlage
+const WASH_START = -14.0;   // so viele Meter vor dem Tor geht es los (das Schild ist dann gut zu sehen)
+// Ende jedes Schritts in Sekunden – passend dazu, wann man an Wasserbogen, Bürsten usw. vorbeifährt
+const WASH_PHASES = [[2.2, "Einfahrt in die Waschanlage"], [4.3, "Wasser marsch!"], [6.9, "Die Bürsten schrubben …"],
+  [8.1, "Abspülen"], [WASH_TIME, "Trocknen"]];
+// Stationen in der Halle (Meter hinter dem Tor): Wasserbogen, zwei Bürstenpaare, Spülbogen, Gebläse
+const WASH_SPRAY = 9.0, WASH_BRUSHES = [18.0, 22.0], WASH_RINSE = 30.0, WASH_BLOWER = 37.0, WASH_EXIT = 44.0;
+
+/** Text zum Waschschritt nach t Sekunden. */
+function washPhase(t) {
+  return WASH_PHASES.find(([end]) => t < end || end === WASH_TIME)[1];
+}
+
+function washPhaseStart(text) {
+  const i = WASH_PHASES.findIndex(([, name]) => name === text);
+  return i > 0 ? WASH_PHASES[i - 1][0] : 0;
+}
+
+/** Fahrt durch die Waschanlage: Halle mit Wasserbögen und drehenden Bürsten, Schaum und Tropfen auf der Scheibe. */
+function drawWash(ride, c, app, x1, y1, x2, y2, t) {
+  const s = app.s;
+  const sc = new Scene(c, x1, y1, x2, y2);
+  const cam = WASH_START + (WASH_EXIT - WASH_START) * Math.min(1, t / WASH_TIME);
+  const phase = washPhase(t);
+
+  // draußen: Himmel und Hof, dann die Halle
+  const sky = ["#9CC8EA", "#B4D5EF", "#CCE3F4"];
+  const band = (sc.hy - y1) / sky.length;
+  sky.forEach((col, i) => c.rect(x1, y1 + i * band, x2, y1 + (i + 1) * band + 1, col));
+  c.rect(x1, sc.hy, x2, y2, "#9A968E");
+  const za = Math.max(-cam, Z_NEAR), zb = WASH_EXIT - cam;          // hinten durch die Ausfahrt sieht man nach draußen
+  sc.wall(-3.2, 0, 4.8, za, zb, "#B9C4CC");
+  sc.wall(3.2, 0, 4.8, za, zb, "#B9C4CC");
+  sc.ground(-3.2, 3.2, za, zb, "#8F9BA5", 4.8);
+  sc.ground(-3.2, 3.2, za, zb, "#5E666E");
+  for (let k = 0; k < WASH_EXIT; k += 3) sc.ground(-3.2, 3.2, k - cam, k - cam + 0.25, "#4C545C", 0.01);  // nasse Rinnen
+  for (let k = 2; k < WASH_EXIT; k += 6) sc.ground(-0.6, 0.6, k - cam, k - cam + 1.5, "#E8F4FF", 4.78);   // Lampen
+  if (ride.kind !== "bus") for (const X of [-0.75, 0.75]) sc.ground(X - 0.05, X + 0.05, za, zb, "#C8C8C8", 0.06);
+
+  const arch = (z, color) => {
+    sc.front(-3.0, -2.75, 0, 4.4, z, color);
+    sc.front(2.75, 3.0, 0, 4.4, z, color);
+    sc.front(-3.0, 3.0, 4.15, 4.4, z, color);
+  };
+  const spray = (z, active) => {
+    arch(z, "#3D7FC1");
+    if (active && Z_NEAR < z && z < 20) {
+      for (let i = 0; i < 14; i++) {                                 // Wasserstrahlen aus den Düsen
+        const side = i % 2 ? -1 : 1;
+        const y0 = 0.5 + 3.6 * rnd(i, 3);
+        const a = sc.p(side * 2.8, y0, z);
+        const b = sc.p(side * (0.4 + rnd(i + Math.floor(t * 8), 4)), y0 - 0.6, z - 1.5);
+        c.line([a, b], { fill: "#CDEBFF", width: Math.max(1, sc.size(0.06, z)) });
+      }
+    }
+  };
+  const brushes = (z, k) => {
+    for (const X of [-2.25, 2.25]) {
+      const [base, light] = (X < 0) === (k === 0) ? ["#2F6FD6", "#7FB2FF"] : ["#D63F3F", "#FF9A8A"];
+      sc.front(X - 0.75, X + 0.75, 0, 4.2, z, base);
+      for (let b = 0; b < 9; b++) {                                  // Streifen laufen: die Bürste dreht sich
+        const y = (((b * 0.5 + t * 2.4 * (X < 0 ? 1 : -1)) % 4.2) + 4.2) % 4.2;
+        sc.front(X - 0.75, X + 0.75, y, Math.min(4.2, y + 0.18), z, light);
+      }
+      sc.front(X - 0.08, X + 0.08, 4.2, 4.8, z, "#5F646B");
+    }
+  };
+  const items = [];
+  items.push([WASH_SPRAY - cam, () => spray(WASH_SPRAY - cam, phase === "Wasser marsch!")]);
+  WASH_BRUSHES.forEach((bz, k) => items.push([bz - cam, () => brushes(bz - cam, k)]));
+  items.push([WASH_RINSE - cam, () => spray(WASH_RINSE - cam, phase === "Abspülen")]);
+  items.push([WASH_BLOWER - cam, () => {
+    sc.front(-3.0, 3.0, 3.9, 4.5, WASH_BLOWER - cam, "#9AA4AD");
+    sc.front(-2.2, 2.2, 3.95, 4.05, WASH_BLOWER - cam, "#2A3138");
+  }]);
+  items.sort((a, b) => b[0] - a[0]);
+  for (const [z, fn] of items) if (Z_NEAR < z && z < Z_FAR) fn();
+  const ze = -cam;                                                   // Tor mit Schild, solange es vor uns ist
+  if (Z_NEAR < ze) {
+    sc.front(-14, -3.2, 0, 7.5, ze, "#7C8A96");
+    sc.front(3.2, 14, 0, 7.5, ze, "#7C8A96");
+    sc.front(-3.2, 3.2, 4.8, 7.5, ze, "#7C8A96");
+    stationSign(c, app, sc, -3.0, 3.0, 5.3, 6.9, ze, "Waschanlage", "#2B7BB9");
+  }
+
+  // --- auf der Scheibe: Tropfen und Schaum ---
+  const w = x2 - x1, h = y2 - y1;
+  const wet = ["Wasser marsch!", "Die Bürsten schrubben …", "Abspülen"].includes(phase);
+  if (wet || phase === "Trocknen") {
+    const n = wet ? 45 : 12, frame = Math.floor(t * 6);             // Tropfen wechseln ein paar Mal pro Sekunde
+    for (let i = 0; i < n; i++) {
+      const dx = x1 + w * rnd(i, frame), dy = y1 + h * rnd(i, frame + 1000);
+      const r = (3 + 6 * rnd(i, 7)) * s;
+      c.oval(dx - r, dy - r, dx + r, dy + r * 1.4, { fill: "#D6EEFF", outline: "#9CC7E8" });
+    }
+  }
+  let foam = 0;
+  if (phase === "Die Bürsten schrubben …") foam = Math.min(1, (t - washPhaseStart(phase)) / 2.0);
+  else if (phase === "Abspülen") foam = Math.max(0, 1 - (t - washPhaseStart(phase)) / 1.0);
+  for (let i = 0; i < Math.floor(34 * foam); i++) {
+    const fx = x1 + w * (0.05 + 0.9 * rnd(i, 21)), fy = y1 + h * (0.25 + 0.75 * rnd(i, 22));
+    const r = (18 + 30 * rnd(i, 23)) * s;
+    c.oval(fx - r, fy - r * 0.8, fx + r, fy + r * 0.8, { fill: "#FAFCFF", outline: "#DCE6EE" });
+  }
+  if (phase === "Trocknen") {
+    // der Scheibenwischer wischt hin und her
+    const px = x1 + w * 0.32, py = y2 - 6 * s;
+    const a = (-160 + 120 * (0.5 + 0.5 * Math.sin((t - washPhaseStart(phase)) * 5))) * Math.PI / 180;
+    const len = w * 0.36;
+    c.line([[px, py], [px + Math.cos(a) * len, py + Math.sin(a) * len]], { fill: "#1B1E23", width: Math.max(3, 7 * s), cap: "round" });
+  }
+}
+
 function drawCockpit(ride, c, w, h) {
   const app = ride.app, s = app.s, st = app.data.stations;
   const line = ride.line, kind = ride.kind, stops = ride.stops;
@@ -2006,7 +2162,8 @@ function drawCockpit(ride, c, w, h) {
 
   const topH = 112 * s, dashTop = h * 0.6, pillar = 30 * s;
   const wx1 = pillar, wy1 = topH, wx2 = w - pillar, wy2 = dashTop + 30 * s;
-  drawScene(ride, c, app, wx1, wy1, wx2, wy2);
+  if (ride.washing) drawWash(ride, c, app, wx1, wy1, wx2, wy2, ride.washTime);
+  else drawScene(ride, c, app, wx1, wy1, wx2, wy2);
 
   // Fensterrahmen (deckt alles ab, was über das Fenster hinausragt)
   c.rect(0, 0, w, wy1, frame);
@@ -2014,8 +2171,8 @@ function drawCockpit(ride, c, w, h) {
   c.rect(wx2, 0, w, h, frame);
   c.roundRect(wx1 - 10 * s, wy1 - 10 * s, wx2 + 10 * s, wy2 + 10 * s, 30 * s, { outline: frame, width: 22 * s });
   c.rect(0, topH - 8 * s, w, topH - 2 * s, accent);
-  // Scheibenwischer
-  c.line([[wx1 + (wx2 - wx1) * 0.32, wy2 - 6 * s], [wx1 + (wx2 - wx1) * 0.12, wy2 - 70 * s]], { fill: "#1B1E23", width: Math.max(2, 5 * s), cap: "round" });
+  // Scheibenwischer (beim Trocknen in der Waschanlage bewegt er sich)
+  if (!(ride.washing && washPhase(ride.washTime) === "Trocknen")) c.line([[wx1 + (wx2 - wx1) * 0.32, wy2 - 6 * s], [wx1 + (wx2 - wx1) * 0.12, wy2 - 70 * s]], { fill: "#1B1E23", width: Math.max(2, 5 * s), cap: "round" });
 
   // --- Zielanzeige an der Decke ---
   const dx1 = 220 * s, dx2 = w - 220 * s, dy1 = 12 * s, dy2 = topH - 20 * s;
@@ -2028,8 +2185,9 @@ function drawCockpit(ride, c, w, h) {
   const [text, until] = ride.message;
   const [depotName, depotKey] = depotInfo(kind);
   let second;
-  if (text && now() < until) second = text;
-  else if (ride.depot) second = `${depotName} – Pause. Zurück: Taste ${depotKey}`;
+  if (ride.washing) second = washPhase(ride.washTime);
+  else if (text && now() < until) second = text;
+  else if (ride.depot) second = `${depotName} – Pause. Zurück: Taste ${depotKey} · Waschen: W`;
   else if (last) second = ride.ring ? "Einmal rund um die Stadt!" : "Endstation – bitte alle aussteigen";
   else second = "Nächster Halt: " + st[stops[ride.index + 1]];
   c.text(tx, dy2 - 20 * s, fitText(ledSmall, second, tw), ledSmall, "#FFD27A", "w");
@@ -2074,8 +2232,16 @@ function drawCockpit(ride, c, w, h) {
   let ry = py1 + 34 * s;
   const mini = app.font(11, "bold");
   if (ride.depot) {
-    c.text(x + listW / 2, py1 + ph * 0.45, depotName.toUpperCase(), app.font(22, "bold"), LED);
-    c.text(x + listW / 2, py1 + ph * 0.62, `Pause · Taste ${depotKey}: zurück`, app.font(14, "bold"), "#FFD27A");
+    c.text(x + listW / 2, py1 + ph * 0.4, depotName.toUpperCase(), app.font(22, "bold"), LED);
+    c.text(x + listW / 2, py1 + ph * 0.6, `Pause · Taste ${depotKey}: zurück`, app.font(14, "bold"), "#FFD27A");
+    if (!ride.washing) {
+      // Knopf für die Waschanlage (auch zum Antippen)
+      const bw2 = Math.min(listW - 30 * s, 190 * s), bh2 = 34 * s;
+      const bx1 = x + (listW - bw2) / 2, by1 = py1 + ph * 0.72;
+      c.roundRect(bx1, by1, bx1 + bw2, by1 + bh2, bh2 / 2, { fill: "#2B7BB9" });
+      c.text(bx1 + bw2 / 2, by1 + bh2 / 2, "W  Waschanlage", app.font(14, "bold"), "white");
+      app.hit(bx1, by1, bx1 + bw2, by1 + bh2, () => ride.wash());
+    }
   }
   for (let i = ride.index - 1; i < ride.index + 4; i++) {
     if (ride.depot || i < 0 || i >= stops.length) continue;

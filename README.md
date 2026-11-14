@@ -50,7 +50,7 @@ python3 tools/build_web.py
 |---|---|
 | **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Regionalbahn oder ICE, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–6 gehen auch) |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
-| **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht, an der Endhaltestelle `B`: Betriebshof (Bus, Tram) bzw. `A`: Abstellgleis (Bahnen), `E`: Linie endet hier |
+| **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht, an der Endhaltestelle `B`: Betriebshof (Bus, Tram) bzw. `A`: Abstellgleis (Bahnen), dort `W`: Waschanlage, `E`: Linie endet hier |
 
 `Esc` oder der Knopf „Zurück“ führt immer einen Schritt zurück. `F11`
 schaltet auf Vollbild. Auf der Ringbahn (S41/S42) kann man endlos im Kreis
@@ -72,6 +72,19 @@ Ein erneuter Druck auf `B` bzw. `A` führt zurück auf die Strecke, und zwar
 gewendet, wie im echten Betrieb: Man fährt wieder an derselben
 Endhaltestelle ein, jetzt in Gegenrichtung. Drückt man die falsche Taste,
 mitten auf der Strecke oder auf der Ringbahn, gibt es einen Hinweis.
+
+### Waschanlage (Taste `W`)
+
+Steht das Fahrzeug auf dem Betriebshof oder Abstellgleis, fährt es mit `W`
+(oder dem blauen Knopf „Waschanlage“ im Cockpit bzw. der unteren Hälfte der
+Leuchtanzeige) einmal durch die Waschanlage. Im Cockpit sieht man das Tor
+mit dem Schild „Waschanlage“, dann Wasserbogen, drehende Bürsten, Schaum und
+Tropfen auf der Scheibe, Abspülen und zum Schluss Trocknen mit dem
+Scheibenwischer. Die Anzeige oben sagt den jeweiligen Schritt an. In der
+normalen Ansicht steigen Seifenblasen auf. Nach etwa 10 Sekunden heißt es
+„Blitzblank!“, und das Fahrzeug steht wieder auf dem Betriebshof bzw.
+Abstellgleis. Während der Wäsche kann man nicht losfahren. Mitten auf der
+Strecke gibt `W` nur einen Hinweis.
 
 ### Eigene Endstation (Taste `E`)
 
