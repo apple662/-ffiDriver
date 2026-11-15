@@ -2935,7 +2935,8 @@ class FlightScreen extends Screen {
     const cam = Math.max(0, A - CAM_LIMIT);
     const gy0 = y1 + 0.8 * H;
     const gy = gy0 + cam * H;                 // Boden (wandert beim Steigen nach unten aus dem Bild)
-    const night = this.night();
+    let night = this.night();
+    if (gs.night && this.phase !== "cruise") night = Math.max(night, 0.9);   // z. B. Polarlichter in Rovaniemi
 
     // Himmel: oben dunkler, in großer Höhe tiefblau, auf langen Flügen nachts
     const hi = Math.min(1, A / CRUISE_A);

@@ -3060,6 +3060,8 @@ class FlightScreen(Screen):
         gy0 = y1 + 0.8 * H
         gy = gy0 + cam * H                       # Boden (wandert beim Steigen nach unten aus dem Bild)
         night = self.night()
+        if ground_scene.get("night") and self.phase != "cruise":
+            night = max(night, 0.9)              # z. B. Polarlichter in Rovaniemi
 
         # Himmel: oben dunkler, in großer Höhe tiefblau, auf langen Flügen nachts
         hi = min(1.0, A / CRUISE_A)

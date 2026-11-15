@@ -6,7 +6,7 @@ dann Station für Station mit den Pfeiltasten durch Berlin fahren.
 Enthalten sind alle S-Bahn-, U-Bahn-, Straßenbahn- und Buslinien von BVG und
 S-Bahn Berlin sowie alle Regional- und ICE-Züge, die durch Berlin fahren
 (16 S-Bahn-, 9 U-Bahn-, 22 Tram-, 204 Bus-, 22 Regional- und 8 ICE-Linien).
-Dazu kommen 14 Flüge vom Flughafen BER in die ganze Welt. Das Programm läuft
+Dazu kommen 25 Flüge vom Flughafen BER in die ganze Welt. Das Programm läuft
 komplett **offline**.
 
 ## Browser-Version (ohne Installation)
@@ -181,22 +181,33 @@ getrennt“ zur Gruppe von S-Bahn, U-Bahn und Regionalbahn.
 
 ## Flugzeug
 
-Vom Flughafen BER geht es zu 14 bekannten Zielen auf allen Kontinenten:
+Vom Flughafen BER geht es zu 25 bekannten Zielen auf allen Kontinenten:
 
 | Ziel | Wahrzeichen |
 |---|---|
 | Palma de Mallorca (PMI) | Kathedrale La Seu am Meer, Palmen |
+| Kreta (HER) | Palast von Knossos mit roten Säulen und Stierfresko, Windmühle, Olivenbäume |
+| Barcelona (BCN) | Sagrada Família, Strand |
+| Teneriffa (TFS) | Vulkan Teide, Drachenbaum, schwarzer Lavastrand |
 | Paris (CDG) | Eiffelturm |
+| Amsterdam (AMS) | Grachtenhäuser, Windmühle, Tulpenfeld |
 | London (LHR) | Big Ben, Parlament, London Eye, roter Doppeldeckerbus |
 | Rom (FCO) | Kolosseum, Zypressen und Pinien |
 | Athen (ATH) | Akropolis mit dem Parthenon |
 | Istanbul (IST) | Moschee mit Kuppeln und Minaretten am Bosporus |
+| Reykjavík (KEF) | Hallgrímskirkja, rauchender Vulkan, bunte Häuser |
+| Rovaniemi (RVN) | Haus des Weihnachtsmanns, Rentierschlitten, Polarlichter bei Nacht |
 | Kairo (CAI) | Pyramiden von Gizeh, Sphinx, Kamel |
+| Nairobi (NBO) | Savanne mit Giraffen, Elefant, Zebras, Akazien |
+| Kapstadt (CPT) | Tafelberg, Leuchtturm, Pinguine |
 | Dubai (DXB) | Burj Khalifa, Burj al Arab, Wüste |
+| Delhi (DEL) | Taj Mahal, Elefant |
+| Bangkok (BKK) | Tempel Wat Arun, Tuk-Tuk |
 | New York (JFK) | Freiheitsstatue, Skyline mit Empire State Building |
+| San Francisco (SFO) | Golden Gate Bridge im Nebel |
+| Cancún (CUN) | Maya-Pyramide, Dschungel, türkises Meer |
 | Tokio (HND) | Fuji, Pagode, Kirschblüten |
 | Peking (PEK) | Chinesische Mauer |
-| Kapstadt (CPT) | Tafelberg, Leuchtturm, Pinguine |
 | Sydney (SYD) | Opernhaus, Harbour Bridge |
 | Rio de Janeiro (GIG) | Zuckerhut mit Seilbahn, Christusstatue |
 
@@ -233,7 +244,9 @@ S-Bahn (S9, S85), dem FEX oder einem Regionalzug zum **Flughafen BER**
 fährt, kann dort mit `U` in ein Flugzeug umsteigen. Nach dem Rückflug geht es
 am BER mit `U` wieder in Bahn oder Bus. Die Flugzeiten sind ungefähre Werte;
 nach Tokio, Peking, Kapstadt, Sydney und Rio gibt es vom BER in Wirklichkeit
-keine Direktflüge, dort steigt man unterwegs um.
+keine Direktflüge, dort steigt man unterwegs um. Das gilt auch für Rovaniemi,
+Nairobi, Delhi, Bangkok, San Francisco und Cancún. In Rovaniemi landet man
+immer nachts, damit man die Polarlichter sieht.
 
 ## Startbahnhof
 
