@@ -57,6 +57,7 @@ MODES = [
     ("bus", "Bus", "#A5027D", ("#F7D117", "#3A3A3A")),
     ("regio", "Regionalbahn", "#4B5563", ("#D7001D", "#FFFFFF")),
     ("ice", "ICE", "#EC0016", ("#F4F4F4", "#EC0016")),
+    ("flug", "Flugzeug", "#1C6DD0", ("#FFFFFF", "#1C6DD0")),
 ]
 MODE = {m[0]: m for m in MODES}
 
@@ -106,6 +107,8 @@ def darker(color, f=0.7):
 
 def draw_vehicle(c, kind, cx, cy, length, flip=False):
     """Zeichnet ein Fahrzeug in Seitenansicht; Fahrtrichtung rechts (``flip``: links)."""
+    if kind == "flug":
+        return draw_plane(c, cx, cy + length * 0.02, length * 1.05, flip=flip)
     body, accent = MODE[kind][3]
     mx = -1 if flip else 1
 
@@ -185,6 +188,9 @@ def draw_mode_sign(c, app, kind, cx, cy, size):
     elif kind == "ice":
         round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
         c.create_text(cx, cy, text="ICE", fill="white", font=app.font(size / app.s * 0.36, "bold"))
+    elif kind == "flug":
+        round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
+        c.create_polygon(plane_top_points(cx, cy, size * 0.78, math.pi / 4), fill="white", outline="")
     elif kind == "regio":
         # wie die roten Zugschilder der Bahn: „RE“ in Rot auf Weiß
         round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
@@ -340,9 +346,9 @@ class SoundPlayer:
 # Umsteigen
 # --------------------------------------------------------------------------
 
-MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "tram", "bus"]     # Reihenfolge beim Umsteigen
+MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "flug", "tram", "bus"]     # Reihenfolge beim Umsteigen
 # Bei „Umsteigen getrennt“ sieht man nur Umstiege innerhalb der eigenen Gruppe
-MODE_GROUPS = [("sbahn", "ubahn", "regio", "ice"), ("tram", "bus")]
+MODE_GROUPS = [("sbahn", "ubahn", "regio", "ice", "flug"), ("tram", "bus")]
 NEAR_M = 200          # Haltestellen in diesem Umkreis gehören zusammen
 SAME_NAME_M = 400     # gleichnamige Stationen (z. B. "S+U" und "U Alexanderplatz") auch etwas weiter
 
@@ -634,7 +640,7 @@ class HomeScreen(Screen):
                       font=app.font(20), fill=MUTED)
 
         n = len(MODES)
-        cols = n if w > h * 1.25 else math.ceil(n / 2)
+        cols = n if w > h * 1.25 and n <= 6 else math.ceil(n / 2)
         rows = math.ceil(n / cols)
         gap = 30 * s
         area_top = 165 * s
@@ -693,7 +699,7 @@ class HomeScreen(Screen):
         app.hit(bx1, by1, bx2, by2, self.start)
 
         # Ankreuzfelder für Eltern
-        checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE / Tram, Bus",
+        checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug / Tram, Bus",
                  app.separate_modes(), lambda: self.toggle("separate_modes", app.separate_modes()))
         checkbox(app, c, 24 * s, h - 22 * s, "Zeige ICE-Umstiege", app.show_ice(),
                  lambda: self.toggle("show_ice", app.show_ice()))
@@ -770,7 +776,7 @@ class HomeScreen(Screen):
         elif k == PARENT_KEY:
             self.reset_home()
             return
-        elif char and char in "123456"[:len(MODES)]:
+        elif char and char in "1234567"[:len(MODES)]:
             self.open(int(char) - 1)
             return
         if self.selected < self.START:
@@ -878,7 +884,8 @@ class LinesScreen(Screen):
         c.create_rectangle(0, hh, w, top - 4 * s, fill=BG, outline="")
         hh, left = header(app, c, w, color, self.back)
         draw_mode_sign(c, app, kind, left + 60 * s, hh / 2, 62 * s)
-        c.create_text(left + 105 * s, hh / 2, text=f"{label}: Welche Linie nimmst du?", anchor="w",
+        question = "Wohin fliegst du?" if kind == "flug" else "Welche Linie nimmst du?"
+        c.create_text(left + 105 * s, hh / 2, text=f"{label}: {question}", anchor="w",
                       font=app.font(30, "bold"), fill="white")
         if max_scroll > 0:
             bar_h = max(40 * s, view_h * view_h / content_h)
@@ -906,7 +913,10 @@ class LinesScreen(Screen):
 
     def open(self, i):
         self.selected = i
-        self.app.show(RideScreen(self.app, self.kind, i, self))
+        if self.kind == "flug":
+            self.app.show(FlightScreen(self.app, i, 0, self))
+        else:
+            self.app.show(RideScreen(self.app, self.kind, i, self))
 
     def key(self, k, char):
         n = len(self.lines)
@@ -1457,7 +1467,7 @@ class RideScreen(Screen):
         text = spoken_name(name) + "."
         others = self.transfer_options()
         if others:
-            prefix = {"tram": "Tram ", "bus": "Bus "}
+            prefix = {"tram": "Tram ", "bus": "Bus ", "flug": "Flug nach "}
             names = [prefix.get(o["kind"], "") + spoken_line(o["name"]) for o in others[:8]]
             text += " Umsteigen zu " + ", ".join(names) + (" und weiteren Linien." if len(others) > 8 else ".")
         if self.index == len(stops) - 1 and not self.ring:
@@ -2395,6 +2405,13 @@ def draw_cockpit(ride, c, w, h):
 def board(app, opt, message):
     """In die Linie ``opt`` (aus Transfers.options) einsteigen, an der passenden Haltestelle."""
     lines_screen = LinesScreen(app, opt["kind"], opt["index"])
+    if opt["kind"] == "flug":
+        flight = FlightScreen(app, opt["index"], opt["direction"], lines_screen)
+        flight.say(message, 2.5)
+        app.sound.stop()
+        app.show(flight)
+        app.animate()
+        return
     ride = RideScreen(app, opt["kind"], opt["index"], lines_screen)
     ride.direction = opt["direction"]
     ride.index = opt["stop"]
@@ -2564,9 +2581,691 @@ class ConfirmScreen(Screen):
 # Anwendung
 # --------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# Fliegen ab dem BER
+# --------------------------------------------------------------------------
+
+FLIGHTS_FILE = BASE / "data" / "flights.json"
+TAKEOFF_T = 9.0         # Sekunden vom Losrollen bis zur Reiseflughöhe
+LANDING_T = 10.0        # Sekunden vom Sinkflug bis zum Stillstand
+TOUCHDOWN_T = 6.5       # nach so vielen Sekunden setzt das Flugzeug auf
+FLY_V = 1.4             # Tempo in der Luft (Fensterbreiten pro Sekunde)
+CRUISE_A = 1.9          # Reiseflughöhe (in Bildhöhen)
+CLOUDS_A = (1.0, 1.6)   # Wolkendecke (in Bildhöhen)
+PLANE_X = 0.3           # hier steht das Flugzeug im Bild (Anteil der Breite)
+SCENE_X = 0.64          # hier steht das Wahrzeichen, wenn das Flugzeug am Boden ist
+FAR = 0.06              # so langsam zieht der weit entfernte Hintergrund vorbei
+CAM_LIMIT = 0.36        # höher steigt das Flugzeug im Bild nicht – dann sinkt stattdessen der Boden
+LANDING_X = FLY_V * TOUCHDOWN_T + FLY_V * (LANDING_T - TOUCHDOWN_T) / 2
+SCENE_SCALE = 0.0042    # Wahrzeichen: Bildhöhen pro Einheit (100 Einheiten ≈ 42 % der Bildhöhe)
+PLANE_COLORS = ("#FFFFFF", "#1C6DD0")
+
+
+def add_flights(data):
+    """Flüge aus ``data/flights.json`` als Linien „BER → Ziel“ und zurück eintragen."""
+    if "flug" in data["lines"]:
+        return
+    try:
+        flights = json.loads(FLIGHTS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        flights = {"home": None, "flights": [], "land": []}
+    data["flights"] = flights
+    stations = data["stations"]
+    ber = next((k for k, n in stations.items() if n == "Flughafen BER"), "BER")
+    stations.setdefault(ber, "Flughafen BER")
+    data["airport"] = ber
+    lines = []
+    for f in flights["flights"]:
+        key = "AP:" + f["code"]
+        stations[key] = f["name"]
+        lines.append({"name": f["code"], "color": f["color"], "directions": [[ber, key], [key, ber]]})
+    data["lines"]["flug"] = lines
+
+
+def smooth(u):
+    u = max(0.0, min(1.0, u))
+    return u * u * (3 - 2 * u)
+
+
+def mix(c1, c2, t):
+    """Farbe zwischen ``c1`` (t = 0) und ``c2`` (t = 1)."""
+    a = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
+    t = max(0.0, min(1.0, t))
+    return "#%02X%02X%02X" % tuple(round(x + (y - x) * t) for x, y in zip(a, b))
+
+
+def takeoff_x(t):
+    tr = FLY_V / 0.32
+    return 0.16 * t * t if t < tr else 0.16 * tr * tr + FLY_V * (t - tr)
+
+
+def flight_state(phase, t):
+    """(Weg, Höhe, Neigung in Grad, Tempo) – Weg in Fensterbreiten, Höhe in Bildhöhen."""
+    if phase == "takeoff":
+        def alt(u):
+            return 0.0 if u < 4 else CRUISE_A * smooth((u - 4) / 5)
+        x, a, v = takeoff_x(t), alt(t), min(FLY_V, 0.32 * t)
+        pitch = math.degrees(math.atan2((alt(t + 0.05) - a) / 0.05 * 0.6, max(v, 0.1)))
+        if 3.4 <= t < 4.6:
+            pitch = max(pitch, 7 * min(1.0, (t - 3.4) / 0.6))       # Bug hebt sich: „Rotieren“
+        return x, a, min(15.0, pitch), v
+    if phase == "cruise":
+        return takeoff_x(TAKEOFF_T) + FLY_V * t, CRUISE_A + 0.015 * math.sin(1.3 * t), 0.0, FLY_V
+    if phase == "landing":
+        if t < TOUCHDOWN_T:
+            def alt(u):
+                return CRUISE_A * (1 - smooth(u / TOUCHDOWN_T))
+            a = alt(t)
+            pitch = max(-4.0, 0.5 * math.degrees(math.atan2((alt(t + 0.05) - a) / 0.05 * 0.6, FLY_V)))
+            if t > TOUCHDOWN_T - 0.9:
+                pitch = max(pitch, 3 * (t - TOUCHDOWN_T + 0.9) / 0.9)   # abfangen kurz vor dem Aufsetzen
+            return FLY_V * t, a, pitch, FLY_V
+        b = LANDING_T - TOUCHDOWN_T
+        d = min(t, LANDING_T) - TOUCHDOWN_T
+        return FLY_V * TOUCHDOWN_T + FLY_V * (d - d * d / (2 * b)), 0.0, max(0.0, 3 * (1 - d / 0.6)), FLY_V * (1 - d / b)
+    if phase == "arrived":
+        return LANDING_X, 0.0, 0.0, 0.0
+    return 0.0, 0.0, 0.0, 0.0
+
+
+def hours_text(hours, spoken=False):
+    h = int(hours)
+    m = int(round((hours - h) * 60 / 5) * 5)
+    if m == 60:
+        h, m = h + 1, 0
+    unit_h, unit_m = ("Stunde" if h == 1 else "Stunden", "Minuten") if spoken else ("Std.", "Min.")
+    parts = ([f"{h} {unit_h}"] if h else []) + ([f"{m} {unit_m}"] if m or not h else [])
+    return " ".join(parts)
+
+
+def great_circle(a, b, n=48):
+    """Punkte (Breite, Länge) auf dem kürzesten Weg über die Erdkugel."""
+    la1, lo1, la2, lo2 = map(math.radians, (a[0], a[1], b[0], b[1]))
+    p1 = (math.cos(la1) * math.cos(lo1), math.cos(la1) * math.sin(lo1), math.sin(la1))
+    p2 = (math.cos(la2) * math.cos(lo2), math.cos(la2) * math.sin(lo2), math.sin(la2))
+    om = math.acos(max(-1.0, min(1.0, sum(x * y for x, y in zip(p1, p2)))))
+    out = []
+    for i in range(n + 1):
+        f = i / n
+        if om < 1e-9:
+            q = p1
+        else:
+            k1, k2 = math.sin((1 - f) * om) / math.sin(om), math.sin(f * om) / math.sin(om)
+            q = tuple(k1 * x + k2 * y for x, y in zip(p1, p2))
+        out.append((math.degrees(math.atan2(q[2], math.hypot(q[0], q[1]))), math.degrees(math.atan2(q[1], q[0]))))
+    return out
+
+
+def earth_km(a, b):
+    la1, lo1, la2, lo2 = map(math.radians, (a[0], a[1], b[0], b[1]))
+    h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
+    return 2 * 6371 * math.asin(math.sqrt(h))
+
+
+def clip_polygon(pts, x1, y1, x2, y2):
+    """Schneidet ein Vieleck auf ein Rechteck zu (Sutherland-Hodgman)."""
+    def clip(points, inside, cut):
+        out = []
+        for i, p in enumerate(points):
+            q = points[i - 1]
+            if inside(p):
+                if not inside(q):
+                    out.append(cut(q, p))
+                out.append(p)
+            elif inside(q):
+                out.append(cut(q, p))
+        return out
+
+    def at_x(x):
+        return lambda q, p: (x, q[1] + (p[1] - q[1]) * (x - q[0]) / (p[0] - q[0]))
+
+    def at_y(y):
+        return lambda q, p: (q[0] + (p[0] - q[0]) * (y - q[1]) / (p[1] - q[1]), y)
+
+    for inside, cut in ((lambda p: p[0] >= x1, at_x(x1)), (lambda p: p[0] <= x2, at_x(x2)),
+                        (lambda p: p[1] >= y1, at_y(y1)), (lambda p: p[1] <= y2, at_y(y2))):
+        pts = clip(pts, inside, cut)
+        if not pts:
+            break
+    return pts
+
+
+def plane_top_points(cx, cy, size, angle):
+    """Flugzeug von oben (für Schilder und die Karte); ``angle`` im Uhrzeigersinn ab „nach oben“."""
+    half = [(0, -0.5), (0.05, -0.44), (0.055, -0.12), (0.46, 0.08), (0.46, 0.15), (0.055, 0.05), (0.045, 0.3),
+            (0.17, 0.4), (0.17, 0.46), (0.0, 0.42)]
+    pts = half + [(-x, y) for x, y in reversed(half[1:-1])]
+    ca, sa = math.cos(angle), math.sin(angle)
+    return [(cx + (x * ca - y * sa) * size, cy + (x * sa + y * ca) * size) for x, y in pts]
+
+
+def draw_plane(c, cx, cy, length, pitch=0.0, flip=False, gear=True, colors=PLANE_COLORS):
+    """Verkehrsflugzeug von der Seite, Nase rechts (``flip``: links); ``pitch`` > 0 = Nase hoch."""
+    body, accent = colors
+    a = math.radians(pitch)
+    ca, sa = math.cos(a), math.sin(a)
+    mx = -1 if flip else 1
+
+    def T(pts):
+        out = []
+        for x, y in pts:
+            out += [cx + mx * (x * ca + y * sa) * length, cy + (-x * sa + y * ca) * length]
+        return out
+
+    def poly(pts, fill, outline=""):
+        c.create_polygon(T(pts), fill=fill, outline=outline, width=max(1, length / 160))
+
+    line_w = max(1, length / 70)
+    if gear:
+        for x in (0.37, -0.06):
+            c.create_line(T([(x, 0.05), (x, 0.1)]), fill="#5A6370", width=line_w)
+        for x in (0.37, -0.075, -0.045):
+            poly(circle_points(x, 0.105, 0.016, 10), "#2B2F36")
+    poly([(-0.36, -0.04), (-0.45, -0.21), (-0.5, -0.21), (-0.49, -0.03)], accent)                 # Seitenleitwerk
+    poly([(-0.5, -0.045), (0.34, -0.055), (0.44, -0.045), (0.495, -0.015), (0.51, 0.01), (0.49, 0.035),
+          (0.43, 0.055), (-0.28, 0.055), (-0.44, 0.025), (-0.51, -0.02)], body, "#9AA4AD")       # Rumpf
+    poly([(-0.47, 0.004), (0.5, 0.004), (0.5, 0.016), (-0.45, 0.016)], accent)                    # Zierstreifen
+    for i in range(20):
+        poly(circle_points(-0.34 + i * 0.034, -0.018, 0.0085, 8), "#2B3A4A")                      # Fenster
+    poly([(0.43, -0.034), (0.468, -0.034), (0.492, -0.012), (0.44, -0.012)], "#2B3A4A")           # Cockpit
+    poly([(0.35, -0.042), (0.38, -0.042), (0.38, 0.032), (0.35, 0.032)], body, "#9AA4AD")          # Tür
+    poly([(-0.38, -0.005), (-0.49, -0.035), (-0.52, -0.03), (-0.44, 0.006)], darker(accent, 0.8))  # Höhenleitwerk
+    poly([(0.1, 0.03), (-0.1, 0.075), (-0.16, 0.075), (0.0, 0.03)], "#B8C2CC")                    # Flügel
+    poly(round_rect_points(-0.04, 0.055, 0.11, 0.105, 0.02), "#D5DBE1", "#9AA4AD")                # Triebwerk
+    poly([(0.1, 0.06), (0.115, 0.06), (0.115, 0.1), (0.1, 0.1)], "#3A4450")
+
+
+def draw_shapes(c, shapes, ox, oy, k):
+    """Wahrzeichen aus flights.json zeichnen: Ursprung (ox, oy) am Boden, k Pixel pro Einheit."""
+    for sh in shapes:
+        kind, fill = sh[0], sh[1]
+        if kind == "p":
+            pts = sh[2]
+            c.create_polygon([ox + v * k if i % 2 == 0 else oy - v * k for i, v in enumerate(pts)],
+                             fill=fill, outline="")
+        elif kind == "r":
+            _, _, x1, y1, x2, y2 = sh
+            c.create_rectangle(ox + x1 * k, oy - y2 * k, ox + x2 * k, oy - y1 * k, fill=fill, outline="")
+        elif kind == "o":
+            _, _, cx, cy, rx, ry = sh
+            c.create_oval(ox + (cx - rx) * k, oy - (cy + ry) * k, ox + (cx + rx) * k, oy - (cy - ry) * k,
+                          fill=fill, outline="")
+        elif kind == "l":
+            pts = sh[3]
+            c.create_line([ox + v * k if i % 2 == 0 else oy - v * k for i, v in enumerate(pts)], fill=fill,
+                          width=max(1, sh[2] * k), capstyle="round", joinstyle="round")
+
+
+def draw_cloud(c, x, y, r, top, bottom):
+    c.create_oval(x - r * 1.6, y - r * 0.55, x + r * 1.6, y + r * 0.55, fill=bottom, outline="")
+    c.create_oval(x - r * 1.1, y - r * 0.9, x + r * 0.3, y + r * 0.3, fill=top, outline="")
+    c.create_oval(x - r * 0.3, y - r * 1.15, x + r * 1.1, y + r * 0.25, fill=top, outline="")
+
+
+class WorldMap:
+    """Ausschnitt der Weltkarte mit der Flugroute; zugeschnittene Landflächen werden gemerkt."""
+
+    def __init__(self, land):
+        self.land = [[(r[i], r[i + 1]) for i in range(0, len(r), 2)] for r in land]
+        self.cache = {}
+
+    def frame(self, a, b, x1, y1, x2, y2):
+        route = great_circle(a, b)
+        lats = [p[0] for p in route]
+        lons = [p[1] for p in route]
+        pad = max(8.0, 0.2 * max(max(lats) - min(lats), max(lons) - min(lons)))
+        la1, la2, lo1, lo2 = min(lats) - pad, max(lats) + pad, min(lons) - pad, max(lons) + pad
+        cos_m = math.cos(math.radians((la1 + la2) / 2))
+        scale = min((x2 - x1) / ((lo2 - lo1) * cos_m), (y2 - y1) / (la2 - la1))
+        lat_c, lon_c = (la1 + la2) / 2, (lo1 + lo2) / 2
+        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+
+        def proj(lat, lon):
+            return cx + (lon - lon_c) * cos_m * scale, cy - (lat - lat_c) * scale
+        return route, proj
+
+    def draw(self, c, a, b, x1, y1, x2, y2, s, progress, labels, font):
+        route, proj = self.frame(a, b, x1, y1, x2, y2)
+        key = (a, b, round(x1), round(y1), round(x2), round(y2))
+        if key not in self.cache:
+            polys = []
+            for ring in self.land:
+                pts = clip_polygon([proj(lat, lon) for lon, lat in ring], x1, y1, x2, y2)
+                if len(pts) >= 3:
+                    polys.append([v for p in pts for v in p])
+            self.cache = {key: polys}
+        c.create_rectangle(x1, y1, x2, y2, fill="#AFD7EE", outline="")
+        for poly in self.cache[key]:
+            c.create_polygon(poly, fill="#F1E9D2", outline="#D2C6A5", width=1)
+        pts = [proj(lat, lon) for lat, lon in route]
+        n = len(pts) - 1
+        done = progress * n
+        for i in range(n):                                          # Route: geflogen durchgezogen, sonst Punkte
+            (ax, ay), (bx, by) = pts[i], pts[i + 1]
+            if i + 1 <= done:
+                c.create_line(ax, ay, bx, by, fill="#1C6DD0", width=max(2, 3 * s), capstyle="round")
+            elif i % 2 == 0:
+                c.create_oval(ax - 1.8 * s, ay - 1.8 * s, ax + 1.8 * s, ay + 1.8 * s, fill="#1C6DD0", outline="")
+        for (x, y), label in ((pts[0], labels[0]), (pts[-1], labels[1])):
+            c.create_oval(x - 5 * s, y - 5 * s, x + 5 * s, y + 5 * s, fill="#E8483B", outline="white", width=2 * s)
+            tw = font.measure(label)
+            lx = min(max(x, x1 + tw / 2 + 4 * s), x2 - tw / 2 - 4 * s)
+            ly = y - 16 * s if y - 24 * s > y1 else y + 16 * s
+            c.create_text(lx, ly, text=label, font=font, fill="#1E2A38")
+        i = min(n - 1, int(done))
+        f = done - i
+        (ax, ay), (bx, by) = pts[i], pts[i + 1]
+        px, py = ax + (bx - ax) * f, ay + (by - ay) * f
+        angle = math.atan2(bx - ax, -(by - ay))
+        c.create_polygon(plane_top_points(px + 1.5 * s, py + 2 * s, 30 * s, angle), fill="#5E7A93", outline="")
+        c.create_polygon(plane_top_points(px, py, 30 * s, angle), fill="white", outline="#1C6DD0", width=max(1, 1.5 * s))
+
+
+class FlightScreen(Screen):
+    """Ein Flug vom BER zum Ziel (Richtung 0) oder zurück (Richtung 1): Boarding, Start, Reiseflug, Landung."""
+
+    def __init__(self, app, index, direction=0, lines_screen=None):
+        super().__init__(app)
+        self.kind = "flug"
+        self.index = index
+        self.direction = direction
+        self.lines_screen = lines_screen
+        self.line = app.data["lines"]["flug"][index]
+        self.flight = app.data["flights"]["flights"][index]
+        self.home = app.data["flights"]["home"]
+        self.start_gate()
+
+    def start_gate(self):
+        self.phase = "gate"
+        self.t0 = time.monotonic()
+        self.boost = 0.0
+        self.message = (f"Boarding nach {self.target['name']}! Drücke ▼ zum Abflug.", time.monotonic() + 4)
+
+    # --- Zustand ---
+    @property
+    def origin(self):
+        return self.home if self.direction == 0 else self.flight
+
+    @property
+    def target(self):
+        return self.flight if self.direction == 0 else self.home
+
+    @property
+    def t(self):
+        return time.monotonic() - self.t0 + (self.boost if self.phase == "cruise" else 0.0)
+
+    def cruise_len(self):
+        return max(6.0, min(18.0, 5 + 0.6 * self.flight["hours"]))
+
+    def progress(self):
+        """Anteil der Strecke für die Karte (0 … 1)."""
+        t = self.t
+        if self.phase == "takeoff":
+            return 0.05 * min(1.0, t / TAKEOFF_T)
+        if self.phase == "cruise":
+            return 0.05 + 0.9 * min(1.0, t / self.cruise_len())
+        if self.phase == "landing":
+            return 0.95 + 0.05 * min(1.0, t / LANDING_T)
+        return 1.0 if self.phase == "arrived" else 0.0
+
+    def night(self):
+        """Lange Flüge gehen durch die Nacht."""
+        if self.phase != "cruise" or self.flight["hours"] < 8:
+            return 0.0
+        return 0.85 * math.sin(math.pi * min(1.0, self.t / self.cruise_len())) ** 2
+
+    def at_airport(self):
+        """Steht das Flugzeug am BER (dann kann man in Bahn und Bus umsteigen)?"""
+        return (self.phase == "gate" and self.direction == 0) or (self.phase == "arrived" and self.direction == 1)
+
+    def say(self, text, seconds=2.5):
+        self.message = (text, time.monotonic() + seconds)
+
+    def set_phase(self, phase):
+        self.phase = phase
+        self.t0 = time.monotonic()
+        self.boost = 0.0
+
+    # --- Aktionen ---
+    def go(self):
+        """▼ / Leertaste: abfliegen; im Reiseflug schneller fliegen."""
+        app = self.app
+        if self.phase == "gate":
+            self.set_phase("takeoff")
+            self.say("Startfreigabe! Volle Kraft voraus!", 3)
+            app.sound.play(SOUND_DIR / "jet.wav")
+        elif self.phase == "cruise":
+            self.boost += 0.15 * self.cruise_len()
+            self.say("Schneller! Rückenwind!", 1.5)
+        elif self.phase == "arrived":
+            self.say("Rückflug? Drücke R." if self.direction == 0 else "Umsteigen in Bahn und Bus? Drücke U.", 2.5)
+        app.animate()
+
+    def doors(self):
+        text = "Boarding abgeschlossen. Bitte anschnallen!" if self.phase == "gate" else "Bitte anschnallen!"
+        self.app.sound.play(SOUND_DIR / "flug.wav", text)
+        self.say("Ding-Dong! " + text, 2.5)
+        self.app.animate()
+
+    def announce(self):
+        name = self.target["name"]
+        if self.phase == "gate":
+            text = f"Willkommen an Bord! Flug nach {name}. Flugzeit etwa {hours_text(self.flight['hours'], True)}."
+            show = f"Flug nach {name}"
+        elif self.phase == "takeoff":
+            text = show = "Wir starten! Bitte bleiben Sie angeschnallt."
+        elif self.phase == "cruise":
+            rest = self.flight["hours"] * (1 - min(1.0, self.t / self.cruise_len()))
+            text = (f"Hier spricht Ihr Kapitän. Wir fliegen in elftausend Metern Höhe. "
+                    f"Noch etwa {hours_text(max(rest, 1 / 12), True)} bis {name}.")
+            show = f"Noch {hours_text(max(rest, 1 / 12))} bis {name}"
+        elif self.phase == "landing":
+            text = show = f"Wir landen gleich in {name}. Bitte anschnallen!"
+        else:
+            text = self.welcome_text()
+            show = f"Willkommen in {name}!"
+        self.app.sound.speak(text)
+        self.say(show, 3)
+        self.app.animate()
+
+    def welcome_text(self):
+        tg = self.target
+        if self.direction == 1:
+            return "Willkommen zurück in Berlin! " + tg["fact"]
+        return f"Willkommen in {tg['name']}! {tg['hello']} {tg['fact']}"
+
+    def return_flight(self):
+        """Taste R: am Ziel wieder zurück (bzw. in Berlin noch einmal hin)."""
+        if self.phase != "arrived":
+            self.say("Erst landen – dann geht es zurück.", 2)
+            self.app.animate()
+            return
+        self.app.sound.stop()
+        self.direction = 1 - self.direction
+        self.start_gate()
+        self.app.redraw()
+        self.app.animate()
+
+    def change(self):
+        """Taste U: am BER in Bahn oder Bus umsteigen."""
+        app = self.app
+        if not self.at_airport():
+            self.say("Umsteigen geht nur am Boden am BER.", 2)
+            app.animate()
+            return
+        kinds = app.transfer_kinds("flug") or MODE_ORDER
+        options = app.transfers.options(app.data["airport"], kinds=[k for k in kinds if k != "flug"])
+        if options:
+            app.sound.stop()
+            app.show(ChangeScreen(app, "Am Flughafen BER umsteigen", options, lambda: app.show(self)))
+
+    def back(self):
+        self.app.sound.stop()
+        self.app.show(self.lines_screen or LinesScreen(self.app, "flug", self.index))
+
+    def key(self, k, char):
+        ch = (char or "").lower()
+        if k in KEYS_NEXT or k in KEYS_OK:
+            self.go()
+        elif k in KEYS_BACK:
+            self.back()
+        elif ch == "t":
+            self.doors()
+        elif ch == "v":
+            self.announce()
+        elif ch == "r":
+            self.return_flight()
+        elif ch == "u":
+            self.change()
+
+    def tick(self):
+        t = self.t
+        if self.phase == "takeoff" and t >= TAKEOFF_T:
+            self.set_phase("cruise")
+            self.say("Reiseflughöhe erreicht. Gute Reise!", 3)
+        elif self.phase == "cruise" and t >= self.cruise_len():
+            self.set_phase("landing")
+            self.say(f"Landeanflug auf {self.target['name']}!", 3)
+        elif self.phase == "landing" and t >= LANDING_T:
+            self.set_phase("arrived")
+            self.say(f"Willkommen in {self.target['name']}!", 4)
+            self.app.sound.speak(self.welcome_text())
+        return self.phase in ("takeoff", "cruise", "landing") or time.monotonic() < self.message[1]
+
+    # --- Zeichnen ---
+    def draw(self, c, w, h):
+        app, s = self.app, self.app.s
+        hh = HEADER_H * s
+        panel_w = min(430 * s, w * 0.38)
+        self.draw_scene(c, 0, hh, w - panel_w, h, w)
+
+        # Kopfzeile
+        color = self.line["color"]
+        hh, left = header(app, c, w, color, self.back)
+        bx = left + 30 * s
+        bw = draw_badge(c, bx, hh / 2, self.target["code"], color, "flug", 64 * s, app.font(34, "bold"), border=5 * s)
+        tf = app.font(28, "bold")
+        dest = f"{self.origin['name']} → {self.target['name']}"
+        c.create_text(bx + bw + 30 * s, hh / 2, text=fit_text(tf, dest, w - (bx + bw + 60 * s)), anchor="w",
+                      font=tf, fill=text_color_for(color))
+        self.draw_panel(c, w, h, w - panel_w, hh)
+
+    def draw_scene(self, c, x1, y1, x2, y2, full_x2):
+        app, s = self.app, self.app.s
+        W, H = x2 - x1, y2 - y1
+        X, A, pitch, v = flight_state(self.phase, self.t)
+        ground_scene = self.origin if self.phase in ("gate", "takeoff", "cruise") else self.target
+        cam = max(0.0, A - CAM_LIMIT)
+        gy0 = y1 + 0.8 * H
+        gy = gy0 + cam * H                       # Boden (wandert beim Steigen nach unten aus dem Bild)
+        night = self.night()
+
+        # Himmel: oben dunkler, in großer Höhe tiefblau, auf langen Flügen nachts
+        hi = min(1.0, A / CRUISE_A)
+        top = mix(mix(ground_scene["sky"][0], "#2F6FC4", hi), "#0B1633", night)
+        bottom = mix(mix(ground_scene["sky"][1], "#9CCBF0", hi), "#3B3F6E", night)
+        bands = 10
+        for i in range(bands):
+            c.create_rectangle(x1, y1 + H * i / bands, full_x2, y1 + H * (i + 1) / bands + 1,
+                               fill=mix(top, bottom, i / (bands - 1)), outline="")
+        if night > 0.35:
+            for i in range(50):
+                sx, sy = x1 + (full_x2 - x1) * rnd(i, 41), y1 + H * 0.6 * rnd(i, 42)
+                r = (1 + 1.5 * rnd(i, 43)) * s
+                c.create_oval(sx - r, sy - r, sx + r, sy + r, fill="#FFF7D6", outline="")
+            mx_, my_ = x1 + W * 0.82, y1 + H * 0.16
+            c.create_oval(mx_ - 26 * s, my_ - 26 * s, mx_ + 26 * s, my_ + 26 * s, fill="#F4EFD2", outline="")
+            c.create_oval(mx_ - 12 * s, my_ - 30 * s, mx_ + 36 * s, my_ + 18 * s, fill=mix(top, bottom, 0.15),
+                          outline="")
+        else:
+            sx, sy = x1 + W * 0.86, y1 + H * 0.14 + cam * H * 0.05
+            c.create_oval(sx - 30 * s, sy - 30 * s, sx + 30 * s, sy + 30 * s, fill="#FFE27A", outline="")
+
+        # Boden: weiter Hintergrund mit Wahrzeichen, davor Wiese und Startbahn
+        far_y = gy - 0.07 * H
+        if far_y < y2:
+            c.create_rectangle(x1, far_y, full_x2, y2, fill=ground_scene["far"], outline="")
+            if self.phase in ("gate", "takeoff", "cruise"):
+                sx = SCENE_X - X * FAR
+            else:
+                sx = SCENE_X + (LANDING_X - X) * FAR
+            draw_shapes(c, ground_scene["scene"], x1 + sx * W, far_y, SCENE_SCALE * H)
+            c.create_rectangle(x1, gy - 0.012 * H, full_x2, y2, fill=ground_scene["ground"], outline="")
+            c.create_rectangle(x1, gy - 0.012 * H, full_x2, gy + 0.03 * H, fill="#4E555C", outline="")
+            first = math.floor((X - PLANE_X) / 0.25) - 1
+            for i in range(first, first + int((full_x2 - x1) / W / 0.25) + 3):
+                dx = x1 + (PLANE_X + i * 0.25 - X) * W
+                c.create_rectangle(dx, gy + 0.006 * H, dx + 0.1 * W, gy + 0.013 * H, fill="#F2F2F2", outline="")
+                c.create_oval(dx - 2 * s, gy - 0.012 * H - 2 * s, dx + 2 * s, gy - 0.012 * H + 2 * s,
+                              fill="#FFE27A", outline="")
+            if self.phase in ("gate", "arrived"):
+                self.draw_stairs(c, x1 + PLANE_X * W, gy, min(0.36 * W, 0.7 * H))
+
+        # Wolken: einzelne Wolken und die Wolkendecke, durch die man beim Steigen fliegt
+        cl_top, cl_bottom = mix("#FFFFFF", "#6B7398", night), mix("#E2E9F0", "#4E5679", night)
+        first = math.floor((X * 0.7 - PLANE_X - 0.4) / 0.3)
+        for i in range(first, first + int((full_x2 - x1) / W / 0.3) + 4):
+            if rnd(i, 7) < 0.35:
+                continue
+            ca = 0.55 + 0.4 * rnd(i, 5)
+            cy = gy - ca * H
+            if y1 - 0.1 * H < cy < y2 + 0.1 * H:
+                draw_cloud(c, x1 + (PLANE_X + i * 0.3 - X * 0.7) * W, cy, (0.035 + 0.03 * rnd(i, 6)) * H,
+                           cl_top, cl_bottom)
+        deck_top, deck_bottom = gy - CLOUDS_A[1] * H, gy - CLOUDS_A[0] * H
+        if deck_bottom > y1 and deck_top < y2:
+            c.create_rectangle(x1, deck_top, full_x2, deck_bottom, fill=mix("#F4F7FA", "#5D6588", night), outline="")
+            r = 0.06 * H
+            first = math.floor((X * 0.85) / 0.12) - 2
+            for i in range(first, first + int((full_x2 - x1) / W / 0.12) + 4):
+                px = x1 + (i * 0.12 - X * 0.85) * W
+                c.create_oval(px - r * 1.3, deck_top - r * (0.6 + 0.4 * rnd(i, 9)), px + r * 1.3, deck_top + r * 0.6,
+                              fill=cl_top, outline="")
+                c.create_oval(px - r * 1.3, deck_bottom - r * 0.6, px + r * 1.3, deck_bottom + r * (0.5 + 0.4 * rnd(i, 8)),
+                              fill=cl_bottom, outline="")
+
+        # Flugzeug
+        length = min(0.36 * W, 0.7 * H)
+        py = gy0 - min(A, CAM_LIMIT) * H - 0.121 * length
+        if A > 1.2:
+            # Kondensstreifen hinter den Triebwerken
+            trail = mix(bottom, "#FFFFFF", 0.75)
+            ex, ey = x1 + PLANE_X * W - 0.06 * length, py + 0.08 * length
+            for dy in (-3 * s, 3 * s):
+                c.create_line(x1, ey + dy, ex, ey + dy, fill=trail, width=max(2, 4 * s))
+        draw_plane(c, x1 + PLANE_X * W, py, length, pitch, gear=A < 0.6)
+
+        # Höhe und Tempo
+        if self.phase in ("takeoff", "cruise", "landing"):
+            alt_m = int(round(A / CRUISE_A * 11000, -2))
+            kmh = int(round(v / FLY_V * (280 + 590 * min(1.0, A / CRUISE_A)), -1))
+            text = f"Höhe {alt_m:,} m   ·   {kmh} km/h".replace(",", ".")
+            f = app.font(17, "bold")
+            tw = f.measure(text) + 30 * s
+            round_rect(c, x1 + 20 * s, y1 + 18 * s, x1 + 20 * s + tw, y1 + 58 * s, 20 * s, fill="#1E2A38", outline="")
+            c.create_text(x1 + 20 * s + tw / 2, y1 + 38 * s, text=text, font=f, fill=LED)
+
+    def draw_stairs(self, c, plane_x, gy, length):
+        """Fluggasttreppe an der vorderen Tür."""
+        s = self.app.s
+        x_top = plane_x + 0.365 * length
+        y_top = gy - 0.121 * length + 0.03 * length
+        x_bot = x_top + 0.16 * length
+        c.create_polygon(x_top, y_top, x_top + 0.03 * length, y_top, x_bot + 0.03 * length, gy, x_bot, gy,
+                         fill="#C9CED6", outline="#7D8794")
+        for k in range(1, 6):
+            f = k / 6
+            yy = y_top + (gy - y_top) * f
+            xx = x_top + (x_bot - x_top) * f
+            c.create_line(xx, yy, xx + 0.03 * length, yy, fill="#7D8794", width=max(1, 2 * s))
+        c.create_line(x_top + 0.03 * length, y_top - 0.04 * length, x_bot + 0.03 * length, gy - 0.04 * length,
+                      fill="#7D8794", width=max(1, 2 * s))
+        c.create_rectangle(x_bot - 0.02 * length, gy - 0.05 * length, x_bot + 0.14 * length, gy, fill="#F2B233",
+                           outline="")
+
+    def draw_panel(self, c, w, h, px1, top):
+        app, s = self.app, self.app.s
+        px2 = w - 24 * s
+        py = top + 24 * s
+        pw = px2 - px1 - 48 * s
+        round_rect(c, px1 + 5 * s, py + 7 * s, px2 + 5 * s, h - 24 * s + 7 * s, 26 * s, fill=SHADOW, outline="")
+        round_rect(c, px1, py, px2, h - 24 * s, 26 * s, fill=PANEL, outline="")
+        ix = px1 + 24 * s
+        label_font = app.font(14, "bold")
+        big_font = app.font(26, "bold")
+        mid_font = app.font(17, "bold")
+
+        # Weltkarte mit der Route
+        if not hasattr(app, "world_map"):
+            app.world_map = WorldMap(app.data["flights"]["land"])
+        og, tg = self.origin, self.target
+        map_h = min(pw * 0.68, (h - top) * 0.3)
+        mx1, my1, mx2, my2 = ix - 8 * s, py + 16 * s, ix + pw + 8 * s, py + 16 * s + map_h
+        app.world_map.draw(c, (og["lat"], og["lon"]), (tg["lat"], tg["lon"]), mx1, my1, mx2, my2, s,
+                           self.progress(), (og["code"], tg["code"]), app.font(11, "bold"))
+        y = my2 + 24 * s
+
+        c.create_text(ix, y, text="FLUG NACH", anchor="w", font=label_font, fill="#F7D117")
+        c.create_text(ix + pw, y, text=f"{og['code']} → {tg['code']}", anchor="e", font=app.font(14), fill="#B8C4D0")
+        y += 22 * s
+        c.create_text(ix, y, text=fit_text(big_font, tg["name"], pw), anchor="nw", font=big_font, fill="white")
+        y += big_font.metrics("linespace")
+        km = earth_km((og["lat"], og["lon"]), (tg["lat"], tg["lon"]))
+        info = f"{tg['country']} · {int(round(km, -2)):,} km".replace(",", ".")
+        c.create_text(ix, y, text=fit_text(mid_font, info, pw), anchor="nw", font=mid_font, fill="#CFE8FF")
+        y += mid_font.metrics("linespace")
+        c.create_text(ix, y, text=f"Flugzeit ca. {hours_text(self.flight['hours'])}", anchor="nw", font=mid_font,
+                      fill="#9FE3B0")
+        y += mid_font.metrics("linespace") + 10 * s
+        bar_w = px2 - px1 - 48 * s
+        round_rect(c, ix, y, ix + bar_w, y + 14 * s, 7 * s, fill="#3A4A5C", outline="")
+        frac = self.progress()
+        if frac > 0:
+            round_rect(c, ix, y, ix + max(14 * s, bar_w * frac), y + 14 * s, 7 * s, fill=self.line["color"],
+                       outline="")
+
+        # Knöpfe
+        go_label = {"gate": "▼", "cruise": "▶▶"}.get(self.phase, "▼")
+        buttons = [(go_label, self.go, self.phase in ("gate", "cruise"), "#F7D117", PANEL, 30),
+                   ("Ding", self.doors, True, "#E8483B", "white", 18),
+                   ("Ansage", self.announce, True, "#3D8BD4", "white", 17),
+                   ("R", self.return_flight, self.phase == "arrived", "#8E6BBF", "white", 30),
+                   ("U", self.change, self.at_airport(), "#2F855A", "white", 30)]
+        bgap = 12 * s
+        bsize = min(84 * s, (pw - (len(buttons) - 1) * bgap) / len(buttons))
+        by2 = h - 50 * s
+        btn_y = by2 - bsize - 76 * s
+        bx1 = (px1 + px2) / 2 - (len(buttons) * bsize + (len(buttons) - 1) * bgap) / 2
+        for sym, cb, enabled, bg, fg, size in buttons:
+            round_rect(c, bx1, btn_y, bx1 + bsize, btn_y + bsize, 24 * s, fill=bg if enabled else "#3A4A5C",
+                       outline="")
+            c.create_text(bx1 + bsize / 2, btn_y + bsize / 2, text=sym, font=app.font(size, "bold"),
+                          fill=fg if enabled else "#5A6A7C")
+            if enabled:
+                app.hit(bx1, btn_y, bx1 + bsize, btn_y + bsize, cb)
+            bx1 += bsize + bgap
+        # großer Knopf unten
+        if self.phase == "gate":
+            label, cb, on = "✈  Abflug!", self.go, True
+        elif self.phase == "arrived":
+            label, cb, on = ("⟲  Rückflug nach Berlin" if self.direction == 0 else f"✈  Nochmal nach {self.flight['name']}",
+                             self.return_flight, True)
+        else:
+            label, cb, on = "Guten Flug!", None, False
+        rbw, rbh = px2 - px1 - 48 * s, 56 * s
+        rby = by2 - rbh
+        round_rect(c, ix, rby, ix + rbw, rby + rbh, 28 * s, fill="white" if on else "#3A4A5C", outline="")
+        bf = app.font(20, "bold")
+        c.create_text(ix + rbw / 2, rby + rbh / 2, text=fit_text(bf, label, rbw - 20 * s), font=bf,
+                      fill=PANEL if on else "#8A9AAC")
+        if on:
+            app.hit(ix, rby, ix + rbw, rby + rbh, cb)
+
+        # Leuchtanzeige
+        text, until = self.message
+        if not (text and time.monotonic() < until):
+            text = {"gate": "Bereit zum Abflug – drücke ▼",
+                    "takeoff": "Start!",
+                    "cruise": "Reiseflug – ▼ fliegt schneller",
+                    "landing": "Landeanflug",
+                    "arrived": f"{self.target['hello']} Willkommen in {self.target['name']}!"}[self.phase]
+        box_y1, box_y2 = y + 30 * s, btn_y - 14 * s
+        if box_y2 - box_y1 >= 40 * s:
+            round_rect(c, ix, box_y1, ix + pw, box_y2, 14 * s, fill="#11181F", outline="#3A4A5C", width=2 * s)
+            mf = app.font(22 if box_y2 - box_y1 > 70 * s else 19, "bold")
+            lines = wrap_text(mf, text, pw - 24 * s, 2)
+            lh = mf.metrics("linespace")
+            ty = (box_y1 + box_y2) / 2 - lh * (len(lines) - 1) / 2
+            for ln in lines:
+                c.create_text((px1 + px2) / 2, ty, text=ln, font=mf, fill="#FFB000")
+                ty += lh
+
+
 class App:
     def __init__(self, root, data):
         self.root = root
+        add_flights(data)
         self.data = data
         self.canvas = tk.Canvas(root, bg=BG, highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)

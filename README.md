@@ -5,8 +5,9 @@ dann Station für Station mit den Pfeiltasten durch Berlin fahren.
 
 Enthalten sind alle S-Bahn-, U-Bahn-, Straßenbahn- und Buslinien von BVG und
 S-Bahn Berlin sowie alle Regional- und ICE-Züge, die durch Berlin fahren
-(16 S-Bahn-, 9 U-Bahn-, 22 Tram-, 204 Bus-, 22 Regional- und 8 ICE-Linien). Das
-Programm läuft komplett **offline**.
+(16 S-Bahn-, 9 U-Bahn-, 22 Tram-, 204 Bus-, 22 Regional- und 8 ICE-Linien).
+Dazu kommen 14 Flüge vom Flughafen BER in die ganze Welt. Das Programm läuft
+komplett **offline**.
 
 ## Browser-Version (ohne Installation)
 
@@ -48,7 +49,7 @@ python3 tools/build_web.py
 
 | Bildschirm | Bedienung |
 |---|---|
-| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Regionalbahn oder ICE, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–6 gehen auch) |
+| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Regionalbahn, ICE oder Flugzeug, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–7 gehen auch) |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
 | **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht, an der Endhaltestelle `B`: Betriebshof (Bus, Tram) bzw. `A`: Abstellgleis (Bahnen), dort `W`: Waschanlage, `E`: Linie endet hier |
 
@@ -178,6 +179,62 @@ standardmäßig angehakt): Ohne Haken werden ICE-Linien nie als Umstieg
 gezeigt, angeboten oder angesagt. Mit Haken gehört der ICE beim „Umsteigen
 getrennt“ zur Gruppe von S-Bahn, U-Bahn und Regionalbahn.
 
+## Flugzeug
+
+Vom Flughafen BER geht es zu 14 bekannten Zielen auf allen Kontinenten:
+
+| Ziel | Wahrzeichen |
+|---|---|
+| Palma de Mallorca (PMI) | Kathedrale La Seu am Meer, Palmen |
+| Paris (CDG) | Eiffelturm |
+| London (LHR) | Big Ben, Parlament, London Eye, roter Doppeldeckerbus |
+| Rom (FCO) | Kolosseum, Zypressen und Pinien |
+| Athen (ATH) | Akropolis mit dem Parthenon |
+| Istanbul (IST) | Moschee mit Kuppeln und Minaretten am Bosporus |
+| Kairo (CAI) | Pyramiden von Gizeh, Sphinx, Kamel |
+| Dubai (DXB) | Burj Khalifa, Burj al Arab, Wüste |
+| New York (JFK) | Freiheitsstatue, Skyline mit Empire State Building |
+| Tokio (HND) | Fuji, Pagode, Kirschblüten |
+| Peking (PEK) | Chinesische Mauer |
+| Kapstadt (CPT) | Tafelberg, Leuchtturm, Pinguine |
+| Sydney (SYD) | Opernhaus, Harbour Bridge |
+| Rio de Janeiro (GIG) | Zuckerhut mit Seilbahn, Christusstatue |
+
+So läuft ein Flug:
+
+1. **Boarding** am BER: Das Flugzeug steht mit Treppe an der Startbahn, im
+   Hintergrund Fernsehturm und Brandenburger Tor.
+2. **Start** mit `▼`, Leertaste oder dem Knopf „Abflug!“: Die Triebwerke
+   heulen auf, das Flugzeug rollt an, hebt die Nase und steigt durch die
+   Wolkendecke.
+3. **Reiseflug** über den Wolken, mit Höhe und Tempo oben links und
+   Kondensstreifen. Auf langen Flügen (ab 8 Stunden) wird es unterwegs Nacht
+   mit Mond und Sternen. `▼` fliegt schneller.
+4. **Landung**: Das Flugzeug sinkt, das Wahrzeichen des Ziels kommt in Sicht,
+   das Fahrwerk fährt aus, dann setzt es auf und bremst.
+5. **Angekommen**: Gruß in der Landessprache (z. B. „¡Hola!“, „Konnichiwa!“)
+   und etwas Wissenswertes zum Ort, auch zum Vorlesen.
+
+Rechts zeigt eine **Weltkarte** die Route auf dem kürzesten Weg über die
+Erdkugel, deshalb fliegt man nach New York im Bogen über den Norden. Das
+kleine Flugzeug wandert mit. Dazu stehen Land, Entfernung und die ungefähre
+echte Flugzeit da. Die Flüge im Spiel dauern nur 25 bis 40 Sekunden.
+
+| Taste | Knopf | |
+|---|---|---|
+| `▼` / Leertaste | ▼ bzw. ▶▶ | abfliegen, im Reiseflug schneller fliegen |
+| `T` | Ding | „Ding-Dong“ wie in der Kabine, „Bitte anschnallen!“ |
+| `V` | Ansage | Ansage des Kapitäns, z. B. „Noch etwa 2 Stunden bis Tokio“ |
+| `R` | R / großer Knopf | nach der Landung zurückfliegen (bzw. noch einmal hin) |
+| `U` | U | am BER am Boden: in S-Bahn, Regionalbahn oder Bus umsteigen |
+
+Die Flüge sind auch mit den anderen Verkehrsmitteln verbunden: Wer mit der
+S-Bahn (S9, S85), dem FEX oder einem Regionalzug zum **Flughafen BER**
+fährt, kann dort mit `U` in ein Flugzeug umsteigen. Nach dem Rückflug geht es
+am BER mit `U` wieder in Bahn oder Bus. Die Flugzeiten sind ungefähre Werte;
+nach Tokio, Peking, Kapstadt, Sydney und Rio gibt es vom BER in Wirklichkeit
+keine Direktflüge, dort steigt man unterwegs um.
+
 ## Startbahnhof
 
 Unter den vier Verkehrsmitteln steht im Hauptmenü der grüne Knopf **„Starte
@@ -244,7 +301,9 @@ Die Töne in `sounds/` sind **nachgebaut**, es sind keine Originalaufnahmen.
 Die Aufnahmen von BVG und S-Bahn sind nicht frei verfügbar.
 `tools/make_sounds.py` erzeugt sie neu. Eigene Aufnahmen kannst du einfach
 als `sounds/sbahn.wav`, `sounds/ubahn.wav`, `sounds/tram.wav`,
-`sounds/bus.wav`, `sounds/regio.wav` oder `sounds/ice.wav` ablegen.
+`sounds/bus.wav`, `sounds/regio.wav` oder `sounds/ice.wav` ablegen. Im
+Flugzeug gibt es den Kabinengong `sounds/flug.wav` und beim Start das
+Triebwerksgeräusch `sounds/jet.wav`.
 
 ## Stationsansage
 
@@ -330,3 +389,13 @@ Fernbahn (sonst fehlte er bei RE3, RE4, RE5, RE8, RE20, RE85, RB10 und FEX)
 und der U2-Bahnsteig von Stadtmitte.
 
 Fahrplandaten: © VBB Verkehrsverbund Berlin-Brandenburg GmbH, CC BY 4.0.
+
+**Flüge:** Ziele, Flugzeiten und die gezeichneten Wahrzeichen stehen in
+`tools/make_flights.py`. Das Skript schreibt `data/flights.json`. Die
+Weltkarte stammt aus [Natural Earth](https://www.naturalearthdata.com/)
+(gemeinfrei, über das npm-Paket `world-atlas`) und ist stark vereinfacht. Neu
+bauen:
+
+```sh
+python3 tools/make_flights.py
+```

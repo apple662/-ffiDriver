@@ -29,6 +29,7 @@ const MODES = [
   ["bus", "Bus", "#A5027D", ["#F7D117", "#3A3A3A"]],
   ["regio", "Regionalbahn", "#4B5563", ["#D7001D", "#FFFFFF"]],
   ["ice", "ICE", "#EC0016", ["#F4F4F4", "#EC0016"]],
+  ["flug", "Flugzeug", "#1C6DD0", ["#FFFFFF", "#1C6DD0"]],
 ];
 const MODE = Object.fromEntries(MODES.map(m => [m[0], m]));
 
@@ -179,6 +180,7 @@ class Painter {
 }
 
 function drawVehicle(c, kind, cx, cy, length, flip = false) {
+  if (kind === "flug") return drawPlane(c, cx, cy + length * 0.02, length * 1.05, 0, flip);
   const [body, accent] = MODE[kind][3];
   const mx = flip ? -1 : 1;
   const T = pts => pts.map(([x, y]) => [cx + mx * x * length, cy + y * length]);
@@ -250,6 +252,9 @@ function drawModeSign(c, app, kind, cx, cy, size) {
   } else if (kind === "ice") {
     c.roundRect(cx - r, cy - r, cx + r, cy + r, size * 0.22, { fill: color });
     c.text(cx, cy, "ICE", app.font(size / s * 0.36, "bold"), "white");
+  } else if (kind === "flug") {
+    c.roundRect(cx - r, cy - r, cx + r, cy + r, size * 0.22, { fill: color });
+    c.polygon(planeTopPoints(cx, cy, size * 0.78, Math.PI / 4), { fill: "white" });
   } else if (kind === "regio") {
     // wie die roten Zugschilder der Bahn: „RE“ in Rot auf Weiß
     c.roundRect(cx - r, cy - r, cx + r, cy + r, size * 0.22, { fill: color });
@@ -391,9 +396,9 @@ class SoundPlayer {
 // Umsteigen
 // --------------------------------------------------------------------------
 
-const MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "tram", "bus"];     // Reihenfolge beim Umsteigen
+const MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "flug", "tram", "bus"];     // Reihenfolge beim Umsteigen
 // Bei „Umsteigen getrennt“ sieht man nur Umstiege innerhalb der eigenen Gruppe
-const MODE_GROUPS = [["sbahn", "ubahn", "regio", "ice"], ["tram", "bus"]];
+const MODE_GROUPS = [["sbahn", "ubahn", "regio", "ice", "flug"], ["tram", "bus"]];
 const NEAR_M = 200;          // Haltestellen in diesem Umkreis gehören zusammen
 const SAME_NAME_M = 400;     // gleichnamige Stationen (z. B. "S+U" und "U Alexanderplatz") auch etwas weiter
 
@@ -658,7 +663,7 @@ class HomeScreen extends Screen {
     c.text(w / 2, 125 * s, "Wähle mit den Pfeiltasten und drücke Enter – oder klicke einfach!", app.font(20), MUTED);
 
     const n = MODES.length;
-    const cols = w > h * 1.25 ? n : Math.ceil(n / 2);
+    const cols = w > h * 1.25 && n <= 6 ? n : Math.ceil(n / 2);
     const rows = Math.ceil(n / cols);
     const gap = 30 * s;
     const areaTop = 165 * s;
@@ -713,7 +718,7 @@ class HomeScreen extends Screen {
     app.hit(bx1, by1, bx2, by2, () => this.start());
 
     // Ankreuzfelder für Eltern
-    checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE / Tram, Bus",
+    checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug / Tram, Bus",
       app.separateModes(), () => this.toggle("separate_modes", app.separateModes()));
     checkbox(app, c, 24 * s, h - 22 * s, "Zeige ICE-Umstiege", app.showIce(),
       () => this.toggle("show_ice", app.showIce()));
@@ -782,7 +787,7 @@ class HomeScreen extends Screen {
       return this.open(this.selected);
     } else if (k === PARENT_KEY) {
       return this.resetHome();
-    } else if (char && "123456".slice(0, n).includes(char)) {
+    } else if (char && "1234567".slice(0, n).includes(char)) {
       return this.open(+char - 1);
     }
     if (this.selected < HomeScreen.START) this.lastTile = this.selected;
@@ -875,7 +880,8 @@ class LinesScreen extends Screen {
     let left;
     [hh, left] = header(app, c, w, color, () => this.back());
     drawModeSign(c, app, kind, left + 60 * s, hh / 2, 62 * s);
-    c.text(left + 105 * s, hh / 2, `${label}: Welche Linie nimmst du?`, app.font(30, "bold"), "white", "w");
+    const question = this.kind === "flug" ? "Wohin fliegst du?" : "Welche Linie nimmst du?";
+    c.text(left + 105 * s, hh / 2, `${label}: ${question}`, app.font(30, "bold"), "white", "w");
     if (maxScroll > 0) {
       const barH = Math.max(40 * s, viewH * viewH / contentH);
       const barY = top + (viewH - barH) * (this.scroll / maxScroll);
@@ -906,7 +912,8 @@ class LinesScreen extends Screen {
 
   open(i) {
     this.selected = i;
-    this.app.show(new RideScreen(this.app, this.kind, i, this));
+    if (this.kind === "flug") this.app.show(new FlightScreen(this.app, i, 0, this));
+    else this.app.show(new RideScreen(this.app, this.kind, i, this));
   }
 
   key(k, char) {
@@ -1448,7 +1455,7 @@ class RideScreen extends Screen {
     let text = spokenName(name) + ".";
     const others = this.transferOptions();
     if (others.length) {
-      const prefix = { tram: "Tram ", bus: "Bus " };
+      const prefix = { tram: "Tram ", bus: "Bus ", flug: "Flug nach " };
       const names = others.slice(0, 8).map(o => (prefix[o.kind] || "") + spokenLine(o.name));
       text += " Umsteigen zu " + names.join(", ") + (others.length > 8 ? " und weiteren Linien." : ".");
     }
@@ -2289,6 +2296,14 @@ function drawCockpit(ride, c, w, h) {
 /** In die Linie opt (aus Transfers.options) einsteigen, an der passenden Haltestelle. */
 function board(app, opt, message) {
   const linesScreen = new LinesScreen(app, opt.kind, opt.index);
+  if (opt.kind === "flug") {
+    const flight = new FlightScreen(app, opt.index, opt.direction, linesScreen);
+    flight.say(message, 2.5);
+    app.sound.stop();
+    app.show(flight);
+    app.animate();
+    return;
+  }
   const ride = new RideScreen(app, opt.kind, opt.index, linesScreen);
   ride.direction = opt.direction;
   ride.index = opt.stop;
@@ -2480,11 +2495,630 @@ const KEY_NAMES = {
   Tab: "Tab", F10: "F10",
 };
 
+// --------------------------------------------------------------------------
+// Fliegen ab dem BER
+// --------------------------------------------------------------------------
+
+const TAKEOFF_T = 9.0;        // Sekunden vom Losrollen bis zur Reiseflughöhe
+const LANDING_T = 10.0;       // Sekunden vom Sinkflug bis zum Stillstand
+const TOUCHDOWN_T = 6.5;      // nach so vielen Sekunden setzt das Flugzeug auf
+const FLY_V = 1.4;            // Tempo in der Luft (Fensterbreiten pro Sekunde)
+const CRUISE_A = 1.9;         // Reiseflughöhe (in Bildhöhen)
+const CLOUDS_A = [1.0, 1.6];  // Wolkendecke (in Bildhöhen)
+const PLANE_X = 0.3;          // hier steht das Flugzeug im Bild (Anteil der Breite)
+const SCENE_X = 0.64;         // hier steht das Wahrzeichen, wenn das Flugzeug am Boden ist
+const FAR = 0.06;             // so langsam zieht der weit entfernte Hintergrund vorbei
+const CAM_LIMIT = 0.36;       // höher steigt das Flugzeug im Bild nicht – dann sinkt stattdessen der Boden
+const LANDING_X = FLY_V * TOUCHDOWN_T + FLY_V * (LANDING_T - TOUCHDOWN_T) / 2;
+const SCENE_SCALE = 0.0042;   // Wahrzeichen: Bildhöhen pro Einheit
+const PLANE_COLORS = ["#FFFFFF", "#1C6DD0"];
+
+/** Flüge aus data.flights als Linien „BER → Ziel“ und zurück eintragen. */
+function addFlights(data) {
+  if (data.lines.flug) return;
+  const flights = data.flights || { home: null, flights: [], land: [] };
+  data.flights = flights;
+  const stations = data.stations;
+  let ber = Object.keys(stations).find(k => stations[k] === "Flughafen BER");
+  if (!ber) { ber = "BER"; stations[ber] = "Flughafen BER"; }
+  data.airport = ber;
+  data.lines.flug = flights.flights.map(f => {
+    const key = "AP:" + f.code;
+    stations[key] = f.name;
+    return { name: f.code, color: f.color, directions: [[ber, key], [key, ber]] };
+  });
+}
+
+function smooth(u) {
+  u = Math.max(0, Math.min(1, u));
+  return u * u * (3 - 2 * u);
+}
+
+/** Farbe zwischen c1 (t = 0) und c2 (t = 1). */
+function mix(c1, c2, t) {
+  t = Math.max(0, Math.min(1, t));
+  const a = [1, 3, 5].map(i => parseInt(c1.slice(i, i + 2), 16));
+  const b = [1, 3, 5].map(i => parseInt(c2.slice(i, i + 2), 16));
+  return "#" + a.map((x, i) => Math.round(x + (b[i] - x) * t).toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+
+function takeoffX(t) {
+  const tr = FLY_V / 0.32;
+  return t < tr ? 0.16 * t * t : 0.16 * tr * tr + FLY_V * (t - tr);
+}
+
+const deg = r => r * 180 / Math.PI;
+
+/** [Weg, Höhe, Neigung in Grad, Tempo] – Weg in Fensterbreiten, Höhe in Bildhöhen. */
+function flightState(phase, t) {
+  if (phase === "takeoff") {
+    const alt = u => (u < 4 ? 0 : CRUISE_A * smooth((u - 4) / 5));
+    const x = takeoffX(t), a = alt(t), v = Math.min(FLY_V, 0.32 * t);
+    let pitch = deg(Math.atan2((alt(t + 0.05) - a) / 0.05 * 0.6, Math.max(v, 0.1)));
+    if (t >= 3.4 && t < 4.6) pitch = Math.max(pitch, 7 * Math.min(1, (t - 3.4) / 0.6));   // „Rotieren“
+    return [x, a, Math.min(15, pitch), v];
+  }
+  if (phase === "cruise") return [takeoffX(TAKEOFF_T) + FLY_V * t, CRUISE_A + 0.015 * Math.sin(1.3 * t), 0, FLY_V];
+  if (phase === "landing") {
+    if (t < TOUCHDOWN_T) {
+      const alt = u => CRUISE_A * (1 - smooth(u / TOUCHDOWN_T));
+      const a = alt(t);
+      let pitch = Math.max(-4, 0.5 * deg(Math.atan2((alt(t + 0.05) - a) / 0.05 * 0.6, FLY_V)));
+      if (t > TOUCHDOWN_T - 0.9) pitch = Math.max(pitch, 3 * (t - TOUCHDOWN_T + 0.9) / 0.9);   // abfangen
+      return [FLY_V * t, a, pitch, FLY_V];
+    }
+    const b = LANDING_T - TOUCHDOWN_T, d = Math.min(t, LANDING_T) - TOUCHDOWN_T;
+    return [FLY_V * TOUCHDOWN_T + FLY_V * (d - d * d / (2 * b)), 0, Math.max(0, 3 * (1 - d / 0.6)), FLY_V * (1 - d / b)];
+  }
+  if (phase === "arrived") return [LANDING_X, 0, 0, 0];
+  return [0, 0, 0, 0];
+}
+
+function hoursText(hours, spoken = false) {
+  let h = Math.floor(hours), m = Math.round((hours - h) * 60 / 5) * 5;
+  if (m === 60) { h += 1; m = 0; }
+  const [uh, um] = spoken ? [h === 1 ? "Stunde" : "Stunden", "Minuten"] : ["Std.", "Min."];
+  const parts = (h ? [`${h} ${uh}`] : []).concat(m || !h ? [`${m} ${um}`] : []);
+  return parts.join(" ");
+}
+
+const rad = d => d * Math.PI / 180;
+
+/** Punkte [Breite, Länge] auf dem kürzesten Weg über die Erdkugel. */
+function greatCircle(a, b, n = 48) {
+  const [la1, lo1, la2, lo2] = [a[0], a[1], b[0], b[1]].map(rad);
+  const p1 = [Math.cos(la1) * Math.cos(lo1), Math.cos(la1) * Math.sin(lo1), Math.sin(la1)];
+  const p2 = [Math.cos(la2) * Math.cos(lo2), Math.cos(la2) * Math.sin(lo2), Math.sin(la2)];
+  const om = Math.acos(Math.max(-1, Math.min(1, p1[0] * p2[0] + p1[1] * p2[1] + p1[2] * p2[2])));
+  const out = [];
+  for (let i = 0; i <= n; i++) {
+    const f = i / n;
+    let q = p1;
+    if (om >= 1e-9) {
+      const k1 = Math.sin((1 - f) * om) / Math.sin(om), k2 = Math.sin(f * om) / Math.sin(om);
+      q = p1.map((x, j) => k1 * x + k2 * p2[j]);
+    }
+    out.push([deg(Math.atan2(q[2], Math.hypot(q[0], q[1]))), deg(Math.atan2(q[1], q[0]))]);
+  }
+  return out;
+}
+
+function earthKm(a, b) {
+  const [la1, lo1, la2, lo2] = [a[0], a[1], b[0], b[1]].map(rad);
+  const h = Math.sin((la2 - la1) / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin((lo2 - lo1) / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+
+/** Schneidet ein Vieleck auf ein Rechteck zu (Sutherland-Hodgman). */
+function clipPolygon(pts, x1, y1, x2, y2) {
+  const clip = (points, inside, cut) => {
+    const out = [];
+    points.forEach((p, i) => {
+      const q = points[(i + points.length - 1) % points.length];
+      if (inside(p)) {
+        if (!inside(q)) out.push(cut(q, p));
+        out.push(p);
+      } else if (inside(q)) out.push(cut(q, p));
+    });
+    return out;
+  };
+  const atX = x => (q, p) => [x, q[1] + (p[1] - q[1]) * (x - q[0]) / (p[0] - q[0])];
+  const atY = y => (q, p) => [q[0] + (p[0] - q[0]) * (y - q[1]) / (p[1] - q[1]), y];
+  for (const [inside, cut] of [[p => p[0] >= x1, atX(x1)], [p => p[0] <= x2, atX(x2)],
+    [p => p[1] >= y1, atY(y1)], [p => p[1] <= y2, atY(y2)]]) {
+    pts = clip(pts, inside, cut);
+    if (!pts.length) break;
+  }
+  return pts;
+}
+
+/** Flugzeug von oben (für Schilder und die Karte); angle im Uhrzeigersinn ab „nach oben“. */
+function planeTopPoints(cx, cy, size, angle) {
+  const half = [[0, -0.5], [0.05, -0.44], [0.055, -0.12], [0.46, 0.08], [0.46, 0.15], [0.055, 0.05], [0.045, 0.3],
+    [0.17, 0.4], [0.17, 0.46], [0, 0.42]];
+  const pts = half.concat(half.slice(1, -1).reverse().map(([x, y]) => [-x, y]));
+  const ca = Math.cos(angle), sa = Math.sin(angle);
+  return pts.map(([x, y]) => [cx + (x * ca - y * sa) * size, cy + (x * sa + y * ca) * size]);
+}
+
+/** Verkehrsflugzeug von der Seite, Nase rechts (flip: links); pitch > 0 = Nase hoch. */
+function drawPlane(c, cx, cy, length, pitch = 0, flip = false, gear = true, colors = PLANE_COLORS) {
+  const [body, accent] = colors;
+  const a = rad(pitch), ca = Math.cos(a), sa = Math.sin(a), mx = flip ? -1 : 1;
+  const T = pts => pts.map(([x, y]) => [cx + mx * (x * ca + y * sa) * length, cy + (-x * sa + y * ca) * length]);
+  const poly = (pts, fill, outline) => c.polygon(T(pts), { fill, outline, width: Math.max(1, length / 160) });
+  const lineW = Math.max(1, length / 70);
+  if (gear) {
+    for (const x of [0.37, -0.06]) c.line(T([[x, 0.05], [x, 0.1]]), { fill: "#5A6370", width: lineW });
+    for (const x of [0.37, -0.075, -0.045]) poly(circlePoints(x, 0.105, 0.016, 10), "#2B2F36");
+  }
+  poly([[-0.36, -0.04], [-0.45, -0.21], [-0.5, -0.21], [-0.49, -0.03]], accent);                    // Seitenleitwerk
+  poly([[-0.5, -0.045], [0.34, -0.055], [0.44, -0.045], [0.495, -0.015], [0.51, 0.01], [0.49, 0.035],
+    [0.43, 0.055], [-0.28, 0.055], [-0.44, 0.025], [-0.51, -0.02]], body, "#9AA4AD");               // Rumpf
+  poly([[-0.47, 0.004], [0.5, 0.004], [0.5, 0.016], [-0.45, 0.016]], accent);                       // Zierstreifen
+  for (let i = 0; i < 20; i++) poly(circlePoints(-0.34 + i * 0.034, -0.018, 0.0085, 8), "#2B3A4A"); // Fenster
+  poly([[0.43, -0.034], [0.468, -0.034], [0.492, -0.012], [0.44, -0.012]], "#2B3A4A");              // Cockpit
+  poly([[0.35, -0.042], [0.38, -0.042], [0.38, 0.032], [0.35, 0.032]], body, "#9AA4AD");             // Tür
+  poly([[-0.38, -0.005], [-0.49, -0.035], [-0.52, -0.03], [-0.44, 0.006]], darker(accent, 0.8));     // Höhenleitwerk
+  poly([[0.1, 0.03], [-0.1, 0.075], [-0.16, 0.075], [0, 0.03]], "#B8C2CC");                         // Flügel
+  poly(roundRectPoints(-0.04, 0.055, 0.11, 0.105, 0.02), "#D5DBE1", "#9AA4AD");                     // Triebwerk
+  poly([[0.1, 0.06], [0.115, 0.06], [0.115, 0.1], [0.1, 0.1]], "#3A4450");
+}
+
+/** Wahrzeichen aus flights.json zeichnen: Ursprung (ox, oy) am Boden, k Pixel pro Einheit. */
+function drawShapes(c, shapes, ox, oy, k) {
+  const P = pts => { const out = []; for (let i = 0; i + 1 < pts.length; i += 2) out.push([ox + pts[i] * k, oy - pts[i + 1] * k]); return out; };
+  for (const sh of shapes) {
+    const [kind, fill] = sh;
+    if (kind === "p") c.polygon(P(sh[2]), { fill });
+    else if (kind === "r") c.rect(ox + sh[2] * k, oy - sh[5] * k, ox + sh[4] * k, oy - sh[3] * k, fill);
+    else if (kind === "o") {
+      const [, , cx, cy, rx, ry] = sh;
+      c.oval(ox + (cx - rx) * k, oy - (cy + ry) * k, ox + (cx + rx) * k, oy - (cy - ry) * k, { fill });
+    } else if (kind === "l") c.line(P(sh[3]), { fill, width: Math.max(1, sh[2] * k), cap: "round", join: "round" });
+  }
+}
+
+function drawCloud(c, x, y, r, top, bottom) {
+  c.oval(x - r * 1.6, y - r * 0.55, x + r * 1.6, y + r * 0.55, { fill: bottom });
+  c.oval(x - r * 1.1, y - r * 0.9, x + r * 0.3, y + r * 0.3, { fill: top });
+  c.oval(x - r * 0.3, y - r * 1.15, x + r * 1.1, y + r * 0.25, { fill: top });
+}
+
+/** Ausschnitt der Weltkarte mit der Flugroute; zugeschnittene Landflächen werden gemerkt. */
+class WorldMap {
+  constructor(land) {
+    this.land = land.map(r => { const out = []; for (let i = 0; i + 1 < r.length; i += 2) out.push([r[i], r[i + 1]]); return out; });
+    this.key = null;
+    this.polys = [];
+  }
+
+  frame(a, b, x1, y1, x2, y2) {
+    const route = greatCircle(a, b);
+    const lats = route.map(p => p[0]), lons = route.map(p => p[1]);
+    const span = Math.max(Math.max(...lats) - Math.min(...lats), Math.max(...lons) - Math.min(...lons));
+    const pad = Math.max(8, 0.2 * span);
+    const la1 = Math.min(...lats) - pad, la2 = Math.max(...lats) + pad;
+    const lo1 = Math.min(...lons) - pad, lo2 = Math.max(...lons) + pad;
+    const cosM = Math.cos(rad((la1 + la2) / 2));
+    const scale = Math.min((x2 - x1) / ((lo2 - lo1) * cosM), (y2 - y1) / (la2 - la1));
+    const latC = (la1 + la2) / 2, lonC = (lo1 + lo2) / 2, cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+    return [route, (lat, lon) => [cx + (lon - lonC) * cosM * scale, cy - (lat - latC) * scale]];
+  }
+
+  draw(c, a, b, x1, y1, x2, y2, s, progress, labels, font) {
+    const [route, proj] = this.frame(a, b, x1, y1, x2, y2);
+    const key = [a, b, x1, y1, x2, y2].map(v => (Array.isArray(v) ? v.join(",") : Math.round(v))).join("|");
+    if (key !== this.key) {
+      this.polys = this.land.map(ring => clipPolygon(ring.map(([lon, lat]) => proj(lat, lon)), x1, y1, x2, y2))
+        .filter(p => p.length >= 3);
+      this.key = key;
+    }
+    c.rect(x1, y1, x2, y2, "#AFD7EE");
+    for (const p of this.polys) c.polygon(p, { fill: "#F1E9D2", outline: "#D2C6A5", width: 1 });
+    const pts = route.map(([lat, lon]) => proj(lat, lon));
+    const n = pts.length - 1, done = progress * n;
+    for (let i = 0; i < n; i++) {                      // Route: geflogen durchgezogen, sonst Punkte
+      const [ax, ay] = pts[i], [bx, by] = pts[i + 1];
+      if (i + 1 <= done) c.line([[ax, ay], [bx, by]], { fill: "#1C6DD0", width: Math.max(2, 3 * s), cap: "round" });
+      else if (i % 2 === 0) c.oval(ax - 1.8 * s, ay - 1.8 * s, ax + 1.8 * s, ay + 1.8 * s, { fill: "#1C6DD0" });
+    }
+    [[pts[0], labels[0]], [pts[n], labels[1]]].forEach(([[x, y], label]) => {
+      c.oval(x - 5 * s, y - 5 * s, x + 5 * s, y + 5 * s, { fill: "#E8483B", outline: "white", width: 2 * s });
+      const tw = font.measure(label);
+      const lx = Math.min(Math.max(x, x1 + tw / 2 + 4 * s), x2 - tw / 2 - 4 * s);
+      const ly = y - 24 * s > y1 ? y - 16 * s : y + 16 * s;
+      c.text(lx, ly, label, font, "#1E2A38");
+    });
+    const i = Math.min(n - 1, Math.floor(done)), f = done - i;
+    const [ax, ay] = pts[i], [bx, by] = pts[i + 1];
+    const px = ax + (bx - ax) * f, py = ay + (by - ay) * f;
+    const angle = Math.atan2(bx - ax, -(by - ay));
+    c.polygon(planeTopPoints(px + 1.5 * s, py + 2 * s, 30 * s, angle), { fill: "#5E7A93" });
+    c.polygon(planeTopPoints(px, py, 30 * s, angle), { fill: "white", outline: "#1C6DD0", width: Math.max(1, 1.5 * s) });
+  }
+}
+
+/** Ein Flug vom BER zum Ziel (Richtung 0) oder zurück (Richtung 1): Boarding, Start, Reiseflug, Landung. */
+class FlightScreen extends Screen {
+  constructor(app, index, direction = 0, linesScreen = null) {
+    super(app);
+    this.kind = "flug";
+    this.index = index;
+    this.direction = direction;
+    this.linesScreen = linesScreen;
+    this.line = app.data.lines.flug[index];
+    this.flight = app.data.flights.flights[index];
+    this.home = app.data.flights.home;
+    this.startGate();
+  }
+
+  startGate() {
+    this.phase = "gate";
+    this.t0 = now();
+    this.boost = 0;
+    this.message = [`Boarding nach ${this.target.name}! Drücke ▼ zum Abflug.`, now() + 4];
+  }
+
+  // --- Zustand ---
+  get origin() { return this.direction === 0 ? this.home : this.flight; }
+  get target() { return this.direction === 0 ? this.flight : this.home; }
+  get t() { return now() - this.t0 + (this.phase === "cruise" ? this.boost : 0); }
+  cruiseLen() { return Math.max(6, Math.min(18, 5 + 0.6 * this.flight.hours)); }
+
+  /** Anteil der Strecke für die Karte (0 … 1). */
+  progress() {
+    const t = this.t;
+    if (this.phase === "takeoff") return 0.05 * Math.min(1, t / TAKEOFF_T);
+    if (this.phase === "cruise") return 0.05 + 0.9 * Math.min(1, t / this.cruiseLen());
+    if (this.phase === "landing") return 0.95 + 0.05 * Math.min(1, t / LANDING_T);
+    return this.phase === "arrived" ? 1 : 0;
+  }
+
+  /** Lange Flüge gehen durch die Nacht. */
+  night() {
+    if (this.phase !== "cruise" || this.flight.hours < 8) return 0;
+    return 0.85 * Math.sin(Math.PI * Math.min(1, this.t / this.cruiseLen())) ** 2;
+  }
+
+  /** Steht das Flugzeug am BER (dann kann man in Bahn und Bus umsteigen)? */
+  atAirport() {
+    return (this.phase === "gate" && this.direction === 0) || (this.phase === "arrived" && this.direction === 1);
+  }
+
+  say(text, seconds = 2.5) { this.message = [text, now() + seconds]; }
+
+  setPhase(phase) {
+    this.phase = phase;
+    this.t0 = now();
+    this.boost = 0;
+  }
+
+  // --- Aktionen ---
+  /** ▼ / Leertaste: abfliegen; im Reiseflug schneller fliegen. */
+  go() {
+    const app = this.app;
+    if (this.phase === "gate") {
+      this.setPhase("takeoff");
+      this.say("Startfreigabe! Volle Kraft voraus!", 3);
+      app.sound.play("jet");
+    } else if (this.phase === "cruise") {
+      this.boost += 0.15 * this.cruiseLen();
+      this.say("Schneller! Rückenwind!", 1.5);
+    } else if (this.phase === "arrived") {
+      this.say(this.direction === 0 ? "Rückflug? Drücke R." : "Umsteigen in Bahn und Bus? Drücke U.", 2.5);
+    }
+    app.animate();
+  }
+
+  doors() {
+    const text = this.phase === "gate" ? "Boarding abgeschlossen. Bitte anschnallen!" : "Bitte anschnallen!";
+    this.app.sound.play("flug", text);
+    this.say("Ding-Dong! " + text, 2.5);
+    this.app.animate();
+  }
+
+  announce() {
+    const name = this.target.name;
+    let text, show;
+    if (this.phase === "gate") {
+      text = `Willkommen an Bord! Flug nach ${name}. Flugzeit etwa ${hoursText(this.flight.hours, true)}.`;
+      show = `Flug nach ${name}`;
+    } else if (this.phase === "takeoff") {
+      text = show = "Wir starten! Bitte bleiben Sie angeschnallt.";
+    } else if (this.phase === "cruise") {
+      const rest = Math.max(1 / 12, this.flight.hours * (1 - Math.min(1, this.t / this.cruiseLen())));
+      text = `Hier spricht Ihr Kapitän. Wir fliegen in elftausend Metern Höhe. Noch etwa ${hoursText(rest, true)} bis ${name}.`;
+      show = `Noch ${hoursText(rest)} bis ${name}`;
+    } else if (this.phase === "landing") {
+      text = show = `Wir landen gleich in ${name}. Bitte anschnallen!`;
+    } else {
+      text = this.welcomeText();
+      show = `Willkommen in ${name}!`;
+    }
+    this.app.sound.speak(text);
+    this.say(show, 3);
+    this.app.animate();
+  }
+
+  welcomeText() {
+    const tg = this.target;
+    if (this.direction === 1) return "Willkommen zurück in Berlin! " + tg.fact;
+    return `Willkommen in ${tg.name}! ${tg.hello} ${tg.fact}`;
+  }
+
+  /** Taste R: am Ziel wieder zurück (bzw. in Berlin noch einmal hin). */
+  returnFlight() {
+    if (this.phase !== "arrived") {
+      this.say("Erst landen – dann geht es zurück.", 2);
+      this.app.animate();
+      return;
+    }
+    this.app.sound.stop();
+    this.direction = 1 - this.direction;
+    this.startGate();
+    this.app.redraw();
+    this.app.animate();
+  }
+
+  /** Taste U: am BER in Bahn oder Bus umsteigen. */
+  change() {
+    const app = this.app;
+    if (!this.atAirport()) {
+      this.say("Umsteigen geht nur am Boden am BER.", 2);
+      app.animate();
+      return;
+    }
+    const kinds = (app.transferKinds("flug") || MODE_ORDER).filter(k => k !== "flug");
+    const options = app.transfers.options(app.data.airport, null, kinds);
+    if (options.length) {
+      app.sound.stop();
+      app.show(new ChangeScreen(app, "Am Flughafen BER umsteigen", options, () => app.show(this)));
+    }
+  }
+
+  back() {
+    this.app.sound.stop();
+    this.app.show(this.linesScreen || new LinesScreen(this.app, "flug", this.index));
+  }
+
+  key(k, char) {
+    const ch = (char || "").toLowerCase();
+    if (KEYS_NEXT.has(k) || KEYS_OK.has(k)) this.go();
+    else if (KEYS_BACK.has(k)) this.back();
+    else if (ch === "t") this.doors();
+    else if (ch === "v") this.announce();
+    else if (ch === "r") this.returnFlight();
+    else if (ch === "u") this.change();
+  }
+
+  tick() {
+    const t = this.t;
+    if (this.phase === "takeoff" && t >= TAKEOFF_T) {
+      this.setPhase("cruise");
+      this.say("Reiseflughöhe erreicht. Gute Reise!", 3);
+    } else if (this.phase === "cruise" && t >= this.cruiseLen()) {
+      this.setPhase("landing");
+      this.say(`Landeanflug auf ${this.target.name}!`, 3);
+    } else if (this.phase === "landing" && t >= LANDING_T) {
+      this.setPhase("arrived");
+      this.say(`Willkommen in ${this.target.name}!`, 4);
+      this.app.sound.speak(this.welcomeText());
+    }
+    return ["takeoff", "cruise", "landing"].includes(this.phase) || now() < this.message[1];
+  }
+
+  // --- Zeichnen ---
+  draw(c, w, h) {
+    const app = this.app, s = app.s;
+    const hh0 = HEADER_H * s;
+    const panelW = Math.min(430 * s, w * 0.38);
+    this.drawScene(c, 0, hh0, w - panelW, h, w);
+
+    // Kopfzeile
+    const color = this.line.color;
+    const [hh, left] = header(app, c, w, color, () => this.back());
+    const bx = left + 30 * s;
+    const bw = drawBadge(c, bx, hh / 2, this.target.code, color, "flug", 64 * s, app.font(34, "bold"), 5 * s);
+    const tf = app.font(28, "bold");
+    c.text(bx + bw + 30 * s, hh / 2, fitText(tf, `${this.origin.name} → ${this.target.name}`, w - (bx + bw + 60 * s)),
+      tf, textColorFor(color), "w");
+    this.drawPanel(c, w, h, w - panelW, hh);
+  }
+
+  drawScene(c, x1, y1, x2, y2, fullX2) {
+    const app = this.app, s = app.s;
+    const W = x2 - x1, H = y2 - y1;
+    const [X, A, pitch] = flightState(this.phase, this.t);
+    const v = flightState(this.phase, this.t)[3];
+    const gs = ["gate", "takeoff", "cruise"].includes(this.phase) ? this.origin : this.target;
+    const cam = Math.max(0, A - CAM_LIMIT);
+    const gy0 = y1 + 0.8 * H;
+    const gy = gy0 + cam * H;                 // Boden (wandert beim Steigen nach unten aus dem Bild)
+    const night = this.night();
+
+    // Himmel: oben dunkler, in großer Höhe tiefblau, auf langen Flügen nachts
+    const hi = Math.min(1, A / CRUISE_A);
+    const top = mix(mix(gs.sky[0], "#2F6FC4", hi), "#0B1633", night);
+    const bottom = mix(mix(gs.sky[1], "#9CCBF0", hi), "#3B3F6E", night);
+    const bands = 10;
+    for (let i = 0; i < bands; i++) c.rect(x1, y1 + H * i / bands, fullX2, y1 + H * (i + 1) / bands + 1, mix(top, bottom, i / (bands - 1)));
+    if (night > 0.35) {
+      for (let i = 0; i < 50; i++) {
+        const sx = x1 + (fullX2 - x1) * rnd(i, 41), sy = y1 + H * 0.6 * rnd(i, 42), r = (1 + 1.5 * rnd(i, 43)) * s;
+        c.oval(sx - r, sy - r, sx + r, sy + r, { fill: "#FFF7D6" });
+      }
+      const mx = x1 + W * 0.82, my = y1 + H * 0.16;
+      c.oval(mx - 26 * s, my - 26 * s, mx + 26 * s, my + 26 * s, { fill: "#F4EFD2" });
+      c.oval(mx - 12 * s, my - 30 * s, mx + 36 * s, my + 18 * s, { fill: mix(top, bottom, 0.15) });
+    } else {
+      const sx = x1 + W * 0.86, sy = y1 + H * 0.14 + cam * H * 0.05;
+      c.oval(sx - 30 * s, sy - 30 * s, sx + 30 * s, sy + 30 * s, { fill: "#FFE27A" });
+    }
+
+    // Boden: weiter Hintergrund mit Wahrzeichen, davor Wiese und Startbahn
+    const farY = gy - 0.07 * H;
+    const length = Math.min(0.36 * W, 0.7 * H);
+    if (farY < y2) {
+      c.rect(x1, farY, fullX2, y2, gs.far);
+      const sx = ["gate", "takeoff", "cruise"].includes(this.phase) ? SCENE_X - X * FAR : SCENE_X + (LANDING_X - X) * FAR;
+      drawShapes(c, gs.scene, x1 + sx * W, farY, SCENE_SCALE * H);
+      c.rect(x1, gy - 0.012 * H, fullX2, y2, gs.ground);
+      c.rect(x1, gy - 0.012 * H, fullX2, gy + 0.03 * H, "#4E555C");
+      const first = Math.floor((X - PLANE_X) / 0.25) - 1;
+      const count = Math.floor((fullX2 - x1) / W / 0.25) + 3;
+      for (let i = first; i < first + count; i++) {
+        const dx = x1 + (PLANE_X + i * 0.25 - X) * W;
+        c.rect(dx, gy + 0.006 * H, dx + 0.1 * W, gy + 0.013 * H, "#F2F2F2");
+        c.oval(dx - 2 * s, gy - 0.012 * H - 2 * s, dx + 2 * s, gy - 0.012 * H + 2 * s, { fill: "#FFE27A" });
+      }
+      if (this.phase === "gate" || this.phase === "arrived") this.drawStairs(c, x1 + PLANE_X * W, gy, length);
+    }
+
+    // Wolken: einzelne Wolken und die Wolkendecke, durch die man beim Steigen fliegt
+    const clTop = mix("#FFFFFF", "#6B7398", night), clBottom = mix("#E2E9F0", "#4E5679", night);
+    let first = Math.floor((X * 0.7 - PLANE_X - 0.4) / 0.3);
+    for (let i = first; i < first + Math.floor((fullX2 - x1) / W / 0.3) + 4; i++) {
+      if (rnd(i, 7) < 0.35) continue;
+      const cy = gy - (0.55 + 0.4 * rnd(i, 5)) * H;
+      if (cy > y1 - 0.1 * H && cy < y2 + 0.1 * H) {
+        drawCloud(c, x1 + (PLANE_X + i * 0.3 - X * 0.7) * W, cy, (0.035 + 0.03 * rnd(i, 6)) * H, clTop, clBottom);
+      }
+    }
+    const deckTop = gy - CLOUDS_A[1] * H, deckBottom = gy - CLOUDS_A[0] * H;
+    if (deckBottom > y1 && deckTop < y2) {
+      c.rect(x1, deckTop, fullX2, deckBottom, mix("#F4F7FA", "#5D6588", night));
+      const r = 0.06 * H;
+      first = Math.floor(X * 0.85 / 0.12) - 2;
+      for (let i = first; i < first + Math.floor((fullX2 - x1) / W / 0.12) + 4; i++) {
+        const px = x1 + (i * 0.12 - X * 0.85) * W;
+        c.oval(px - r * 1.3, deckTop - r * (0.6 + 0.4 * rnd(i, 9)), px + r * 1.3, deckTop + r * 0.6, { fill: clTop });
+        c.oval(px - r * 1.3, deckBottom - r * 0.6, px + r * 1.3, deckBottom + r * (0.5 + 0.4 * rnd(i, 8)), { fill: clBottom });
+      }
+    }
+
+    // Flugzeug
+    const py = gy0 - Math.min(A, CAM_LIMIT) * H - 0.121 * length;
+    if (A > 1.2) {
+      // Kondensstreifen hinter den Triebwerken
+      const trail = mix(bottom, "#FFFFFF", 0.75);
+      const ex = x1 + PLANE_X * W - 0.06 * length, ey = py + 0.08 * length;
+      for (const dy of [-3 * s, 3 * s]) c.line([[x1, ey + dy], [ex, ey + dy]], { fill: trail, width: Math.max(2, 4 * s) });
+    }
+    drawPlane(c, x1 + PLANE_X * W, py, length, pitch, false, A < 0.6);
+
+    // Höhe und Tempo
+    if (["takeoff", "cruise", "landing"].includes(this.phase)) {
+      const altM = Math.round(A / CRUISE_A * 110) * 100;
+      const kmh = Math.round(v / FLY_V * (280 + 590 * Math.min(1, A / CRUISE_A)) / 10) * 10;
+      const text = `Höhe ${altM.toLocaleString("de-DE")} m   ·   ${kmh} km/h`;
+      const f = app.font(17, "bold");
+      const tw = f.measure(text) + 30 * s;
+      c.roundRect(x1 + 20 * s, y1 + 18 * s, x1 + 20 * s + tw, y1 + 58 * s, 20 * s, { fill: "#1E2A38" });
+      c.text(x1 + 20 * s + tw / 2, y1 + 38 * s, text, f, LED);
+    }
+  }
+
+  /** Fluggasttreppe an der vorderen Tür. */
+  drawStairs(c, planeX, gy, length) {
+    const s = this.app.s;
+    const xTop = planeX + 0.365 * length, yTop = gy - 0.121 * length + 0.03 * length;
+    const xBot = xTop + 0.16 * length;
+    c.polygon([[xTop, yTop], [xTop + 0.03 * length, yTop], [xBot + 0.03 * length, gy], [xBot, gy]], { fill: "#C9CED6", outline: "#7D8794" });
+    for (let k = 1; k < 6; k++) {
+      const f = k / 6, yy = yTop + (gy - yTop) * f, xx = xTop + (xBot - xTop) * f;
+      c.line([[xx, yy], [xx + 0.03 * length, yy]], { fill: "#7D8794", width: Math.max(1, 2 * s) });
+    }
+    c.line([[xTop + 0.03 * length, yTop - 0.04 * length], [xBot + 0.03 * length, gy - 0.04 * length]], { fill: "#7D8794", width: Math.max(1, 2 * s) });
+    c.rect(xBot - 0.02 * length, gy - 0.05 * length, xBot + 0.14 * length, gy, "#F2B233");
+  }
+
+  drawPanel(c, w, h, px1, top) {
+    const app = this.app, s = app.s;
+    const px2 = w - 24 * s, py = top + 24 * s, pw = px2 - px1 - 48 * s;
+    c.roundRect(px1 + 5 * s, py + 7 * s, px2 + 5 * s, h - 24 * s + 7 * s, 26 * s, { fill: SHADOW });
+    c.roundRect(px1, py, px2, h - 24 * s, 26 * s, { fill: PANEL });
+    const ix = px1 + 24 * s;
+    const labelFont = app.font(14, "bold"), bigFont = app.font(26, "bold"), midFont = app.font(17, "bold");
+
+    // Weltkarte mit der Route
+    if (!app.worldMap) app.worldMap = new WorldMap(app.data.flights.land);
+    const og = this.origin, tg = this.target;
+    const mapH = Math.min(pw * 0.68, (h - top) * 0.3);
+    const mx1 = ix - 8 * s, my1 = py + 16 * s, mx2 = ix + pw + 8 * s, my2 = py + 16 * s + mapH;
+    app.worldMap.draw(c, [og.lat, og.lon], [tg.lat, tg.lon], mx1, my1, mx2, my2, s, this.progress(), [og.code, tg.code], app.font(11, "bold"));
+    let y = my2 + 24 * s;
+
+    c.text(ix, y, "FLUG NACH", labelFont, "#F7D117", "w");
+    c.text(ix + pw, y, `${og.code} → ${tg.code}`, app.font(14), "#B8C4D0", "e");
+    y += 22 * s;
+    c.text(ix, y, fitText(bigFont, tg.name, pw), bigFont, "white", "nw");
+    y += bigFont.linespace();
+    const km = Math.round(earthKm([og.lat, og.lon], [tg.lat, tg.lon]) / 100) * 100;
+    c.text(ix, y, fitText(midFont, `${tg.country} · ${km.toLocaleString("de-DE")} km`, pw), midFont, "#CFE8FF", "nw");
+    y += midFont.linespace();
+    c.text(ix, y, `Flugzeit ca. ${hoursText(this.flight.hours)}`, midFont, "#9FE3B0", "nw");
+    y += midFont.linespace() + 10 * s;
+    const barW = px2 - px1 - 48 * s;
+    c.roundRect(ix, y, ix + barW, y + 14 * s, 7 * s, { fill: "#3A4A5C" });
+    const frac = this.progress();
+    if (frac > 0) c.roundRect(ix, y, ix + Math.max(14 * s, barW * frac), y + 14 * s, 7 * s, { fill: this.line.color });
+
+    // Knöpfe
+    const buttons = [[this.phase === "cruise" ? "▶▶" : "▼", () => this.go(), this.phase === "gate" || this.phase === "cruise", "#F7D117", PANEL, 30],
+      ["Ding", () => this.doors(), true, "#E8483B", "white", 18],
+      ["Ansage", () => this.announce(), true, "#3D8BD4", "white", 17],
+      ["R", () => this.returnFlight(), this.phase === "arrived", "#8E6BBF", "white", 30],
+      ["U", () => this.change(), this.atAirport(), "#2F855A", "white", 30]];
+    const bgap = 12 * s;
+    const bsize = Math.min(84 * s, (pw - (buttons.length - 1) * bgap) / buttons.length);
+    const by2 = h - 50 * s, btnY = by2 - bsize - 76 * s;
+    let bx1 = (px1 + px2) / 2 - (buttons.length * bsize + (buttons.length - 1) * bgap) / 2;
+    for (const [sym, cb, enabled, bg, fg, size] of buttons) {
+      c.roundRect(bx1, btnY, bx1 + bsize, btnY + bsize, 24 * s, { fill: enabled ? bg : "#3A4A5C" });
+      c.text(bx1 + bsize / 2, btnY + bsize / 2, sym, app.font(size, "bold"), enabled ? fg : "#5A6A7C");
+      if (enabled) app.hit(bx1, btnY, bx1 + bsize, btnY + bsize, cb);
+      bx1 += bsize + bgap;
+    }
+    // großer Knopf unten
+    let label, cb = null;
+    if (this.phase === "gate") [label, cb] = ["✈  Abflug!", () => this.go()];
+    else if (this.phase === "arrived") {
+      label = this.direction === 0 ? "⟲  Rückflug nach Berlin" : `✈  Nochmal nach ${this.flight.name}`;
+      cb = () => this.returnFlight();
+    } else label = "Guten Flug!";
+    const rbw = px2 - px1 - 48 * s, rbh = 56 * s, rby = by2 - rbh;
+    c.roundRect(ix, rby, ix + rbw, rby + rbh, 28 * s, { fill: cb ? "white" : "#3A4A5C" });
+    const bf = app.font(20, "bold");
+    c.text(ix + rbw / 2, rby + rbh / 2, fitText(bf, label, rbw - 20 * s), bf, cb ? PANEL : "#8A9AAC");
+    if (cb) app.hit(ix, rby, ix + rbw, rby + rbh, cb);
+
+    // Leuchtanzeige
+    let [text, until] = this.message;
+    if (!(text && now() < until)) {
+      text = {
+        gate: "Bereit zum Abflug – drücke ▼", takeoff: "Start!", cruise: "Reiseflug – ▼ fliegt schneller",
+        landing: "Landeanflug", arrived: `${this.target.hello} Willkommen in ${this.target.name}!`,
+      }[this.phase];
+    }
+    const boxY1 = y + 30 * s, boxY2 = btnY - 14 * s;
+    if (boxY2 - boxY1 >= 40 * s) {
+      c.roundRect(ix, boxY1, ix + pw, boxY2, 14 * s, { fill: "#11181F", outline: "#3A4A5C", width: 2 * s });
+      const mf = app.font(boxY2 - boxY1 > 70 * s ? 22 : 19, "bold");
+      const lines = wrapText(mf, text, pw - 24 * s, 2);
+      const lh = mf.linespace();
+      let ty = (boxY1 + boxY2) / 2 - lh * (lines.length - 1) / 2;
+      for (const ln of lines) { c.text((px1 + px2) / 2, ty, ln, mf, "#FFB000"); ty += lh; }
+    }
+  }
+}
+
 class App {
   constructor(canvas, data) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
     this.painter = new Painter(this.ctx);
+    addFlights(data);
     this.data = data;
     this.s = 1;
     this.width = 1280;

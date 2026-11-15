@@ -9,6 +9,8 @@ Die Töne sind den Berliner Fahrzeugen nachempfunden, keine Originalaufnahmen:
 - Bus:     Zischen der Druckluft, wenn die Türen aufgehen, mit leisem „Klonk“
 - Regio:   langsamere, hohe Doppelpieptöne wie bei Doppelstockzügen, dann Druckluft
 - ICE:     Dreiklang-Gong wie am Bahnsteig, dann gleichmäßige Warnpieptöne
+- Flug:    „Ding-Dong“ wie in der Kabine (Anschnallzeichen)
+- Jet:     Triebwerke beim Start: anschwellendes Rauschen und Heulen
 
     python3 tools/make_sounds.py
 """
@@ -147,6 +149,33 @@ def ice():
     return s
 
 
+def flug():
+    s = []
+    mix_in(s, bell(988, 1.2, 0.5), 0.0)      # „Ding“
+    mix_in(s, bell(784, 1.4, 0.5), 0.55)     # „Dong“
+    return s
+
+
+def jet(dur=4.0):
+    """Triebwerke laufen hoch: Rauschen wird lauter und heller, dazu ein steigendes Heulen."""
+    rnd = random.Random(5)
+    n = int(RATE * dur)
+    out, low, prev = [], 0.0, 0.0
+    phase = 0.0
+    for i in range(n):
+        t = i / RATE
+        up = min(1.0, t / 2.5)                          # in 2,5 s auf volle Kraft
+        white = rnd.uniform(-1, 1)
+        low += (white - low) * (0.05 + 0.25 * up)       # Tiefpass öffnet sich: das Rauschen wird heller
+        rumble = low - prev * 0.3
+        prev = low
+        phase += 2 * math.pi * (300 + 1500 * up) / RATE  # Heulen der Turbine
+        whine = 0.12 * up * math.sin(phase)
+        fade = min(1.0, t / 0.3, (dur - t) / 0.8)
+        out.append((rumble * (0.4 + 0.8 * up) + whine) * fade)
+    return out
+
+
 def main():
     save("sbahn.wav", sbahn())
     save("ubahn.wav", ubahn())
@@ -154,6 +183,8 @@ def main():
     save("bus.wav", bus())
     save("regio.wav", regio())
     save("ice.wav", ice())
+    save("flug.wav", flug())
+    save("jet.wav", jet())
 
 
 if __name__ == "__main__":
