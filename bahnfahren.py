@@ -11,6 +11,7 @@ python.org). Die Fahrplandaten liegen offline in ``data/berlin_lines.json``.
 import json
 import math
 import os
+import random
 import re
 import shutil
 import signal
@@ -993,6 +994,10 @@ class RideScreen(Screen):
         self.full_line = self.line   # Taste E kürzt die Linie nur für diese Fahrt (self.line), nicht dauerhaft
         self.wash_start = None       # Zeitpunkt, seit dem das Fahrzeug durch die Waschanlage fährt
         self.speed = 0.0        # 0…1 für den Tacho
+        self.door = None        # offene Türen mit Blick in den Innenraum (Taste Ö)
+        self.door_count = 0
+        rng = random.Random(self.line["name"])
+        self.riders = [{"look": random_look(rng), "slot": i} for i in rng.sample(range(len(SLOTS)), 3)]
 
     @property
     def stops(self):
@@ -1013,6 +1018,12 @@ class RideScreen(Screen):
         self.app.animate()
 
     def draw(self, c, w, h):
+        if self.door:
+            self.door.draw(c, w, h)
+        else:
+            self.draw_view(c, w, h)
+
+    def draw_view(self, c, w, h):
         if self.cockpit:
             draw_cockpit(self, c, w, h)
             return
@@ -1176,7 +1187,8 @@ class RideScreen(Screen):
                    ("▼", self.next, not last or self.ring, "#F7D117", PANEL, 36),
                    ("Türen", self.doors, True, "#E8483B", "white", 18),
                    ("Ansage", self.announce, True, "#3D8BD4", "white", 17),
-                   (depot_key, self.toggle_depot, self.depot or self.at_terminus(), "#8E6BBF", "white", 30)]
+                   (depot_key, self.toggle_depot, self.depot or self.at_terminus(), "#8E6BBF", "white", 30),
+                   ("Ö", self.toggle_open, not self.depot and not self.washing, "#2BA59B", "white", 30)]
         bgap = 12 * s
         bsize = min(84 * s, (pw - (len(buttons) - 1) * bgap) / len(buttons))
         by2 = h - 50 * s
@@ -1227,7 +1239,7 @@ class RideScreen(Screen):
                 app.hit(ix, box_y1, ix + pw, box_y2, self.change)
             else:
                 font, fill = app.font(18), "#5A6A7C"
-                lines = wrap_text(font, "↑ ↓ fahren · T Türen · V Ansage", pw - 24 * s, 2)
+                lines = wrap_text(font, "↑ ↓ fahren · Ö Türen auf · V Ansage", pw - 24 * s, 2)
             lh = font.metrics("linespace")
             ty = (box_y1 + box_y2) / 2 - lh * (len(lines) - 1) / 2
             for ln in lines:
@@ -1242,6 +1254,11 @@ class RideScreen(Screen):
             c.create_text(mx, my, text=text, font=mf, fill="#FFB000")
 
     def tick(self):
+        if self.door:
+            if self.door.finished():
+                self.door = None
+                return True
+            return self.door.animating() or time.monotonic() < self.message[1]
         if self.washing:
             self.speed = 5 / VMAX[self.kind]            # Schrittgeschwindigkeit am Tacho
             if self.wash_time >= WASH_TIME:
@@ -1511,7 +1528,47 @@ class RideScreen(Screen):
         self.app.sound.stop()
         self.app.show(self.lines_screen)
 
+    def toggle_open(self):
+        """Taste Ö: Türen auf (Blick in den Innenraum, Leute steigen ein und aus) bzw. wieder zu."""
+        app = self.app
+        if self.door:
+            if self.door.closing_at is not None:
+                return
+            if self.door.busy():
+                self.say("Moment – es steigen noch Leute ein und aus!", 2)
+            else:
+                self.door.close()
+                self.doors()
+                self.say("Türen schließen!", 2)
+        elif self.washing:
+            return
+        elif self.depot:
+            self.say(f"Hier steigt niemand ein – wir sind auf dem {depot_info(self.kind)[0]}.", 2.5)
+        elif abs(self.pos - self.index) > 0.02:
+            self.say("Erst anhalten – dann Türen auf!", 2)
+        else:
+            self.door = Doors(self)
+            if self.kind == "bus":
+                app.sound.play(SOUND_DIR / "bus.wav")
+            self.say("Türen auf – bitte ein- und aussteigen!", 2.5)
+        app.redraw()
+        app.animate()
+
     def key(self, k, char):
+        if char in DOOR_KEYS or k == "odiaeresis":
+            self.toggle_open()
+            return
+        if self.door:
+            if k in KEYS_BACK:
+                self.back()
+            elif char in ("t", "T"):
+                self.doors()
+            elif char in ("v", "V"):
+                self.announce()
+            else:
+                self.say("Die Türen sind offen – schließen mit Ö", 2)
+                self.app.animate()
+            return
         if k in KEYS_NEXT:
             self.next()
         elif k in KEYS_PREV:
@@ -2391,7 +2448,8 @@ def draw_cockpit(ride, c, w, h):
                ("Türen", "Türen", ride.doors, True, "#E8483B"),
                ("V", "Ansage", ride.announce, True, "#3D8BD4"),
                ("⇄", "Richtung", ride.switch, not ride.depot, "#E8E8E8"),
-               (depot_key, depot_name, ride.toggle_depot, ride.depot or ride.at_terminus(), "#8E6BBF")]
+               (depot_key, depot_name, ride.toggle_depot, ride.depot or ride.at_terminus(), "#8E6BBF"),
+               ("Ö", "Türen auf", ride.toggle_open, not ride.depot and not ride.washing, "#2BA59B")]
     cols, rows_n = 4, 2
     cell_w, cell_h = btn_w / cols, ph / rows_n
     r = max(14 * s, min(cell_w * 0.3, cell_h * 0.3))
@@ -2880,6 +2938,7 @@ class FlightScreen(Screen):
         self.phase = "gate"
         self.t0 = time.monotonic()
         self.boost = 0.0
+        self.door = None        # offene Flugzeugtür mit Fluggästen auf der Treppe (Taste Ö)
         self.message = (f"Boarding nach {self.target['name']}! Drücke ▼ zum Abflug.", time.monotonic() + 4)
 
     # --- Zustand ---
@@ -2931,7 +2990,9 @@ class FlightScreen(Screen):
     def go(self):
         """▼ / Leertaste: abfliegen; im Reiseflug schneller fliegen."""
         app = self.app
-        if self.phase == "gate":
+        if self.door:
+            self.say("Erst die Tür schließen: Taste Ö", 2)
+        elif self.phase == "gate":
             self.set_phase("takeoff")
             self.say("Startfreigabe! Volle Kraft voraus!", 3)
             app.sound.play(SOUND_DIR / "jet.wav")
@@ -2941,6 +3002,64 @@ class FlightScreen(Screen):
         elif self.phase == "arrived":
             self.say("Rückflug? Drücke R." if self.direction == 0 else "Umsteigen in Bahn und Bus? Drücke U.", 2.5)
         app.animate()
+
+    def toggle_open(self):
+        """Taste Ö: Flugzeugtür auf – Fluggäste steigen über die Treppe ein (am Start) bzw. aus (am Ziel)."""
+        app, now = self.app, time.monotonic()
+        if self.phase not in ("gate", "arrived"):
+            self.say("In der Luft bleibt die Tür zu!", 2)
+        elif self.door:
+            if self.door["closing"] is not None:
+                return
+            if now < self.door["done"]:
+                self.say("Moment – es steigen noch Leute ein und aus!", 2)
+            else:
+                self.door["closing"] = now
+                self.doors()
+        else:
+            way = "in" if self.phase == "gate" else "out"
+            rng = random.Random(f"{self.flight['code']}-{self.direction}-{way}")
+            people = [(random_look(rng), 0.7 * k) for k in range(6)]
+            self.door = {"t0": now, "closing": None, "way": way, "people": people, "done": now + 0.8 + 0.7 * 5 + 3.4}
+            self.say("Boarding! Die Fluggäste steigen ein." if way == "in" else "Aussteigen! Alle gehen von Bord.", 3)
+        app.animate()
+
+    def zoom(self):
+        """Vergrößerung beim Ein- und Aussteigen (1 = normale Ansicht)."""
+        d = self.door
+        if not d or self.phase not in ("gate", "arrived"):
+            return 1.0
+        now = time.monotonic()
+        if d["closing"] is not None:
+            return 1 + 1.4 * (1 - smooth((now - d["closing"]) / 0.8))
+        return 1 + 1.4 * smooth((now - d["t0"]) / 0.8)
+
+    def draw_boarding(self, c, T, z):
+        """Offene Tür und Fluggäste auf der Treppe; ``T`` rechnet Szene- in Bildschirmpunkte um."""
+        d = self.door
+        px, py, gy, length, W = self.geo
+        if d["closing"] is None:
+            ax, ay = T(px + 0.35 * length, py - 0.042 * length)
+            bx, by = T(px + 0.38 * length, py + 0.032 * length)
+            c.create_rectangle(ax, ay, bx, by, fill="#2B3440", outline="#9AA4AD")
+        x_top, y_top = px + 0.38 * length, gy - 0.091 * length
+        x_bot = x_top + 0.16 * length
+        far = x_bot + 0.3 * W           # von dort kommen die Leute (bzw. gehen sie hin)
+        t_all = time.monotonic() - d["t0"] - 0.8
+        for look, start in d["people"]:
+            t = t_all - start
+            if t < 0:
+                continue
+            if d["way"] == "in":
+                segs = [(2.0, (far, gy, 1), (x_bot + 0.02 * length, gy, 1), "walk"),
+                        (1.0, (x_bot + 0.02 * length, gy, 1), (x_top, y_top, 1), "walk")]
+            else:
+                segs = [(1.0, (x_top, y_top, 1), (x_bot + 0.02 * length, gy, 1), "walk"),
+                        (2.2, (x_bot + 0.02 * length, gy, 1), (far, gy, 1), "walk")]
+            pos = follow(segs, t)
+            if pos:
+                x, y = T(pos[0], pos[1])
+                draw_person(c, x, y, 0.085 * length * z, look, "walk", t * 9 + start)
 
     def doors(self):
         text = "Boarding abgeschlossen. Bitte anschnallen!" if self.phase == "gate" else "Bitte anschnallen!"
@@ -3006,7 +3125,9 @@ class FlightScreen(Screen):
 
     def key(self, k, char):
         ch = (char or "").lower()
-        if k in KEYS_NEXT or k in KEYS_OK:
+        if char in DOOR_KEYS or k == "odiaeresis":
+            self.toggle_open()
+        elif k in KEYS_NEXT or k in KEYS_OK:
             self.go()
         elif k in KEYS_BACK:
             self.back()
@@ -3021,6 +3142,10 @@ class FlightScreen(Screen):
 
     def tick(self):
         t = self.t
+        if self.door:
+            if self.door["closing"] is not None and time.monotonic() - self.door["closing"] > 0.85:
+                self.door = None
+            return True
         if self.phase == "takeoff" and t >= TAKEOFF_T:
             self.set_phase("cruise")
             self.say("Reiseflughöhe erreicht. Gute Reise!", 3)
@@ -3038,7 +3163,21 @@ class FlightScreen(Screen):
         app, s = self.app, self.app.s
         hh = HEADER_H * s
         panel_w = min(430 * s, w * 0.38)
-        self.draw_scene(c, 0, hh, w - panel_w, h, w)
+        z = self.zoom()
+        if z > 1.001:
+            # beim Ein- und Aussteigen rückt die Kamera an die Tür heran
+            c.addtag_all("vorher")
+            self.draw_scene(c, 0, hh, w - panel_w, h, w)
+            c.addtag_all("szene")
+            c.dtag("vorher", "szene")
+            px, py, gy, length, W = self.geo
+            cx, cy = px + 0.45 * length, gy - 0.05 * length
+            c.scale("szene", cx, cy, z, z)
+            c.dtag("all", "vorher")
+            c.dtag("all", "szene")
+            self.draw_boarding(c, lambda x, y: (cx + (x - cx) * z, cy + (y - cy) * z), z)
+        else:
+            self.draw_scene(c, 0, hh, w - panel_w, h, w)
 
         # Kopfzeile
         color = self.line["color"]
@@ -3137,6 +3276,7 @@ class FlightScreen(Screen):
             for dy in (-3 * s, 3 * s):
                 c.create_line(x1, ey + dy, ex, ey + dy, fill=trail, width=max(2, 4 * s))
         draw_plane(c, x1 + PLANE_X * W, py, length, pitch, gear=A < 0.6)
+        self.geo = (x1 + PLANE_X * W, py, gy, length, W)
 
         # Höhe und Tempo
         if self.phase in ("takeoff", "cruise", "landing"):
@@ -3213,7 +3353,8 @@ class FlightScreen(Screen):
                    ("Ding", self.doors, True, "#E8483B", "white", 18),
                    ("Ansage", self.announce, True, "#3D8BD4", "white", 17),
                    ("R", self.return_flight, self.phase == "arrived", "#8E6BBF", "white", 30),
-                   ("U", self.change, self.at_airport(), "#2F855A", "white", 30)]
+                   ("U", self.change, self.at_airport(), "#2F855A", "white", 30),
+                   ("Ö", self.toggle_open, self.phase in ("gate", "arrived"), "#2BA59B", "white", 30)]
         bgap = 12 * s
         bsize = min(84 * s, (pw - (len(buttons) - 1) * bgap) / len(buttons))
         by2 = h - 50 * s
@@ -3247,11 +3388,13 @@ class FlightScreen(Screen):
         # Leuchtanzeige
         text, until = self.message
         if not (text and time.monotonic() < until):
-            text = {"gate": "Bereit zum Abflug – drücke ▼",
+            text = {"gate": "Ö: Fluggäste einsteigen · ▼: Abflug",
                     "takeoff": "Start!",
                     "cruise": "Reiseflug – ▼ fliegt schneller",
                     "landing": "Landeanflug",
                     "arrived": f"{self.target['hello']} Willkommen in {self.target['name']}!"}[self.phase]
+            if self.door:
+                text = "Tür offen – Ö schließt sie"
         box_y1, box_y2 = y + 30 * s, btn_y - 14 * s
         if box_y2 - box_y1 >= 40 * s:
             round_rect(c, ix, box_y1, ix + pw, box_y2, 14 * s, fill="#11181F", outline="#3A4A5C", width=2 * s)
@@ -3262,6 +3405,363 @@ class FlightScreen(Screen):
             for ln in lines:
                 c.create_text((px1 + px2) / 2, ty, text=ln, font=mf, fill="#FFB000")
                 ty += lh
+
+
+# --------------------------------------------------------------------------
+# Türen auf (Taste Ö): Blick in den Innenraum, Fahrgäste steigen ein und aus
+# --------------------------------------------------------------------------
+
+DOOR_KEYS = ("ö", "Ö", "o", "O")
+ROT_T = 0.8             # Sekunden für das Umdrehen in den Innenraum
+DOOR_T = 0.7            # Sekunden zum Öffnen bzw. Schließen der Türen
+DOORS_X = (0.22, 0.70)  # Türmitten (Anteil der Breite)
+DOOR_W = 0.16
+# Plätze im Innenraum: Sitzplätze und zwei Stehplätze an den Haltestangen
+SLOTS = [(0.05, "sit"), (0.38, "sit"), (0.46, "sit"), (0.54, "sit"), (0.86, "sit"), (0.94, "sit"),
+         (0.33, "stand"), (0.59, "stand")]
+IN_Y, OUT_Y, OUT_S = 0.95, 0.80, 0.72    # Fußhöhe drinnen/draußen, Größe draußen (weiter weg)
+SKIN = ["#F2C9A8", "#E0AC85", "#C68B5E", "#8D5A3B", "#F5D6BC"]
+HAIR = ["#2B1E16", "#5A3A22", "#C9A15A", "#8C8C8C", "#B5442A", "#111111"]
+SHIRT = ["#E8483B", "#3D8BD4", "#F2B233", "#2F9E5B", "#8E6BBF", "#F07FA8", "#FFFFFF", "#2BA59B", "#F28C28"]
+PANTS = ["#2F3E5C", "#3A3A3A", "#6B5A4A", "#4F6D8A", "#7A4E8C"]
+INTERIOR = {   # Wand, Sitze, Haltestangen, Türflügel
+    "sbahn": ("#ECE7DC", "#B5121B", "#F2B233", "#C9CED6"),
+    "ubahn": ("#EFEAE0", "#2F5597", "#F7D117", "#F7D117"),
+    "tram": ("#F2EEE6", "#C9302C", "#F7D117", "#D5D9DE"),
+    "bus": ("#EEEEEE", "#2F4E8C", "#F7D117", "#D5D9DE"),
+    "regio": ("#ECECEC", "#2F5A9E", "#A8AEB5", "#D7001D"),
+    "ice": ("#F4F4F4", "#59636F", "#A8AEB5", "#D5D9DE"),
+}
+
+
+def random_look(rng):
+    return {"skin": rng.choice(SKIN), "hair": rng.choice(HAIR), "shirt": rng.choice(SHIRT), "pants": rng.choice(PANTS),
+            "size": rng.choice((0.68, 0.74, 0.95, 1.0, 1.0, 1.05)), "hat": rng.random() < 0.2}
+
+
+def draw_person(c, x, yf, u, look, pose="stand", phase=0.0):
+    """Mensch von vorn; ``yf`` = Füße (beim Sitzen: Sitzfläche), ``u`` = Größe eines Erwachsenen in Pixeln."""
+    u *= look["size"]
+    lw = max(1, u * 0.075)
+    if pose == "sit":
+        hip = yf
+        for dx in (-0.06, 0.06):
+            c.create_line(x + dx * u, hip, x + dx * u, hip + 0.24 * u, fill=look["pants"], width=lw, capstyle="round")
+            c.create_oval(x + dx * u - 0.05 * u, hip + 0.22 * u, x + dx * u + 0.05 * u, hip + 0.27 * u, fill="#2B2B2B",
+                          outline="")
+        top = hip - 0.36 * u
+    else:
+        hip = yf - 0.44 * u
+        swing = math.sin(phase) * 0.07 * u if pose == "walk" else 0.0
+        for dx, sw in ((-0.06, swing), (0.06, -swing)):
+            c.create_line(x + dx * u, hip, x + dx * u + sw, yf - 0.03 * u, fill=look["pants"], width=lw, capstyle="round")
+            c.create_oval(x + dx * u + sw - 0.05 * u, yf - 0.05 * u, x + dx * u + sw + 0.05 * u, yf, fill="#2B2B2B",
+                          outline="")
+        top = hip - 0.36 * u
+    arm = math.sin(phase) * 0.06 * u if pose == "walk" else 0.0
+    for dx, sw in ((-0.15, -arm), (0.15, arm)):
+        c.create_line(x + dx * u, top + 0.06 * u, x + dx * u * 1.1 + sw, top + 0.32 * u, fill=look["shirt"], width=lw,
+                      capstyle="round")
+    round_rect(c, x - 0.14 * u, top, x + 0.14 * u, hip + 0.03 * u, 0.06 * u, fill=look["shirt"], outline="")
+    hy = top - 0.11 * u
+    c.create_oval(x - 0.1 * u, hy - 0.11 * u, x + 0.1 * u, hy + 0.11 * u, fill=look["skin"], outline="")
+    if look["hat"]:
+        c.create_rectangle(x - 0.12 * u, hy - 0.08 * u, x + 0.12 * u, hy - 0.04 * u, fill=look["pants"], outline="")
+        c.create_oval(x - 0.09 * u, hy - 0.17 * u, x + 0.09 * u, hy - 0.04 * u, fill=look["pants"], outline="")
+    else:
+        c.create_oval(x - 0.105 * u, hy - 0.125 * u, x + 0.105 * u, hy - 0.01 * u, fill=look["hair"], outline="")
+    c.create_oval(x - 0.045 * u, hy - 0.01 * u, x - 0.02 * u, hy + 0.015 * u, fill="#2B2B2B", outline="")
+    c.create_oval(x + 0.02 * u, hy - 0.01 * u, x + 0.045 * u, hy + 0.015 * u, fill="#2B2B2B", outline="")
+
+
+def follow(segments, t):
+    """Weg aus Abschnitten (Dauer, von, nach, Haltung): (x, y, Größe, Haltung) zur Zeit t – oder None."""
+    for dur, a, b, pose in segments:
+        if t < dur or dur == float("inf"):
+            f = 0.0 if dur in (0, float("inf")) else max(0.0, t / dur)
+            return tuple(a[i] + (b[i] - a[i]) * f for i in range(3)) + (pose,)
+        t -= dur
+    return None
+
+
+class Doors:
+    """Türen eines Fahrzeugs an einer Station: umdrehen, Türen auf, Leute steigen ein und aus."""
+
+    def __init__(self, ride):
+        self.ride = ride
+        self.t0 = time.monotonic()
+        self.closing_at = None
+        key = ride.stops[ride.index]
+        rng = random.Random(f"{key}-{ride.line['name']}-{ride.door_count}")
+        ride.door_count += 1
+        last = ride.index == len(ride.stops) - 1 and not ride.ring
+        busy = min(3, len(ride.transfer_options()) // 3)
+        # wer aussteigt (an der Endstation alle), wer bleibt
+        leaving = [r for r in ride.riders if last or rng.random() < 0.4]
+        self.stay = [r for r in ride.riders if r not in leaving]
+        free = [i for i in range(len(SLOTS)) if i not in {r["slot"] for r in self.stay}]
+        rng.shuffle(free)
+        n_in = 0 if last else min(len(free), rng.randint(1, 3) + busy)
+        entering = [{"look": random_look(rng), "slot": free[i]} for i in range(n_in)]
+        self.movers = []
+        start = ROT_T + DOOR_T
+        for k, r in enumerate(leaving):
+            self.movers.append(self.path(r, "out", start + 0.7 * k, rng))
+        for k, r in enumerate(entering):
+            self.movers.append(self.path(r, "in", start + 0.6 + 0.8 * k, rng))
+        self.done_at = max([sum(seg[0] for seg in m["segs"] if seg[0] != float("inf")) for m in self.movers] + [start])
+        ride.riders = self.stay + entering
+        # Leute, die auf dem Bahnsteig warten und nicht einsteigen
+        self.crowd = [(rng.uniform(0.02, 0.98), random_look(rng)) for _ in range(rng.randint(1, 3))]
+
+    def path(self, rider, way, start, rng):
+        sx, pose = SLOTS[rider["slot"]]
+        dx = min(DOORS_X, key=lambda d: abs(d - sx))
+        side = rng.choice((-1, 1))
+        outside = (dx + side * 0.09, OUT_Y, OUT_S)
+        door_out, door_in = (dx, OUT_Y, OUT_S), (dx, IN_Y, 1.0)
+        seat = (sx, IN_Y, 1.0)
+        walk_in = 0.3 + abs(sx - dx) * 2.5
+        if way == "in":
+            segs = [(start, outside, outside, "stand"), (0.6, outside, door_out, "walk"), (0.5, door_out, door_in, "walk"),
+                    (walk_in, door_in, seat, "walk"), (float("inf"), seat, seat, pose)]
+        else:
+            away = (dx + side * 0.3, OUT_Y, OUT_S)
+            segs = [(start, seat, seat, pose), (walk_in, seat, door_in, "walk"), (0.5, door_in, door_out, "walk"),
+                    (1.2, door_out, away, "walk")]
+        return {"look": rider["look"], "segs": segs, "start": start, "way": way, "seed": rng.random() * 6}
+
+    @property
+    def t(self):
+        return time.monotonic() - self.t0
+
+    def rotation(self):
+        """0 = Ansicht von vorher, 1 = Innenraum."""
+        if self.closing_at is not None:
+            return 1 - smooth((self.t - self.closing_at - DOOR_T) / ROT_T)
+        return smooth(self.t / ROT_T)
+
+    def opening(self):
+        """0 = Türen zu, 1 = ganz offen."""
+        if self.closing_at is not None:
+            return 1 - min(1.0, (self.t - self.closing_at) / DOOR_T)
+        return min(1.0, max(0.0, (self.t - ROT_T) / DOOR_T))
+
+    def busy(self):
+        return self.closing_at is None and self.t < self.done_at
+
+    def finished(self):
+        return self.closing_at is not None and self.t >= self.closing_at + DOOR_T + ROT_T
+
+    def close(self):
+        self.closing_at = self.t
+
+    def animating(self):
+        return self.closing_at is not None or self.t < self.done_at + 0.2
+
+    # --- Zeichnen ---
+    def draw(self, c, w, h):
+        ride, app, s = self.ride, self.ride.app, self.ride.app.s
+        p = self.rotation()
+        if p < 1:
+            # Umdrehen: die bisherige Ansicht schiebt sich zur Seite, der Innenraum kommt nach
+            ride.draw_view(c, w, h)
+            c.move("all", -p * w, 0)
+            last = (c.find_all() or (0,))[-1]
+            self.draw_inside(c, w, h)
+            for item in c.find_all():
+                if item > last:
+                    c.move(item, (1 - p) * w, 0)
+            app.hits = []
+        else:
+            self.draw_inside(c, w, h)
+
+    def draw_inside(self, c, w, h):
+        ride, app, s = self.ride, self.ride.app, self.ride.app.s
+        kind = ride.kind
+        st = app.data["stations"]
+        name = st[ride.stops[ride.index]]
+        top_h, bottom_h = 112 * s, 120 * s
+        x1, y1, x2, y2 = 0, top_h, w, h - bottom_h
+        W, H = x2 - x1, y2 - y1
+        X = lambda f: x1 + f * W
+        Y = lambda f: y1 + f * H
+        wall, seat_col, pole, leaf = INTERIOR.get(kind, INTERIOR["sbahn"])
+        t = self.t
+
+        self.draw_outside(c, x1, y1, x2, y2, name)
+        u = 0.55 * H
+        # Leute draußen (nur durch Fenster und Türen zu sehen)
+        for fx, look in self.crowd:
+            draw_person(c, X(fx), Y(OUT_Y), u * OUT_S, look)
+        people_in = []
+        for m in self.movers:
+            pos = follow(m["segs"], t)
+            if pos is None:
+                continue
+            fx, fy, sc, pose = pos
+            if sc < 0.86:
+                draw_person(c, X(fx), Y(fy), u * sc, m["look"], pose, t * 9 + m["seed"])
+            else:
+                people_in.append((fx, fy, sc, pose, m["look"], m["seed"]))
+
+        # Wand mit Fenstern und Türöffnungen
+        win_top, win_bot, door_top = 0.16, 0.48, 0.14
+        doors = [(X(d - DOOR_W / 2), X(d + DOOR_W / 2)) for d in DOORS_X]
+        c.create_rectangle(x1, y1, x2, Y(win_top), fill=wall, outline="")
+        cols = [x1] + [v for d in doors for v in d] + [x2]
+        for a, b in zip(cols[0::2], cols[1::2]):                 # Wandstücke zwischen den Türen
+            c.create_rectangle(a, Y(win_bot), b, Y(0.82), fill=wall, outline="")
+            n = 1 if a > x1 and b < x2 else max(1, round((b - a) / (0.13 * W)))   # zwischen den Türen ein großes Fenster
+            for k in range(n + 1):                                # Fensterpfosten
+                px = a + (b - a) * k / n
+                c.create_rectangle(px - 0.008 * W, Y(win_top), px + 0.008 * W, Y(win_bot), fill=wall, outline="")
+            c.create_rectangle(a, Y(win_top) - 2 * s, b, Y(win_top) + 3 * s, fill=darker(wall, 0.85), outline="")
+        for a, b in doors:                                        # Türrahmen
+            c.create_rectangle(a - 0.012 * W, Y(door_top) - 0.012 * W, b + 0.012 * W, Y(door_top), fill="#5F6670",
+                               outline="")
+            c.create_rectangle(a - 0.012 * W, Y(door_top), a, Y(0.82), fill="#5F6670", outline="")
+            c.create_rectangle(b, Y(door_top), b + 0.012 * W, Y(0.82), fill="#5F6670", outline="")
+            # Türflügel gleiten zur Seite
+            o = self.opening()
+            half = (b - a) / 2
+            for lx1, lx2 in ((a - o * half * 0.95, a + half - o * half * 0.95), (a + half + o * half * 0.95, b + o * half * 0.95)):
+                c.create_rectangle(lx1, Y(door_top), lx2, Y(0.82), fill=leaf, outline=darker(leaf, 0.7), width=max(1, 2 * s))
+                c.create_rectangle(lx1 + half * 0.18, Y(door_top + 0.05), lx2 - half * 0.18, Y(0.5), fill="#BFD9EE",
+                                   outline=darker(leaf, 0.7))
+            # Lampe über der Tür: blinkt beim Öffnen und Schließen
+            moving = 0 < o < 1
+            lamp = "#FF9A1F" if moving and int(t * 6) % 2 == 0 else "#7A5A2A"
+            cx = (a + b) / 2
+            c.create_oval(cx - 7 * s, Y(door_top) - 0.012 * W - 14 * s, cx + 7 * s, Y(door_top) - 0.012 * W, fill=lamp,
+                          outline="")
+        # Decke: Haltestange und Griffe, Werbeflächen
+        c.create_line(x1, Y(0.09), x2, Y(0.09), fill=pole, width=max(2, 5 * s))
+        for k in range(14):
+            gx = X((k + 0.5) / 14)
+            c.create_line(gx, Y(0.09), gx, Y(0.13), fill="#6B7079", width=max(1, 2 * s))
+            c.create_oval(gx - 6 * s, Y(0.13), gx + 6 * s, Y(0.13) + 12 * s, fill="", outline="#6B7079", width=max(1, 2 * s))
+        for fx in (0.04, 0.36, 0.84):
+            c.create_rectangle(X(fx), Y(0.015), X(fx + 0.12), Y(0.065), fill="#FFFFFF", outline=darker(wall, 0.8))
+            c.create_rectangle(X(fx + 0.01), Y(0.025), X(fx + 0.05), Y(0.055), fill=MODE[kind][2], outline="")
+        # Boden
+        c.create_rectangle(x1, Y(0.82), x2, y2, fill="#5C5F66", outline="")
+        for k in range(1, 4):
+            c.create_line(x1, Y(0.82 + k * 0.045), x2, Y(0.82 + k * 0.045), fill="#52555C", width=max(1, s))
+        # Sitze
+        for fx, pose in SLOTS:
+            if pose != "sit":
+                continue
+            round_rect(c, X(fx - 0.035), Y(0.5), X(fx + 0.035), Y(0.72), 8 * s, fill=seat_col, outline=darker(seat_col, 0.7))
+            for k in range(3):                                    # Muster im Sitzbezug
+                c.create_oval(X(fx - 0.02 + k * 0.02) - 2 * s, Y(0.58) - 2 * s, X(fx - 0.02 + k * 0.02) + 2 * s,
+                              Y(0.58) + 2 * s, fill=tint(seat_col, 0.5), outline="")
+            round_rect(c, X(fx - 0.04), Y(0.7), X(fx + 0.04), Y(0.75), 6 * s, fill=darker(seat_col, 0.85), outline="")
+        # Haltestangen neben den Türen
+        for a, b in doors:
+            for px in (a - 0.03 * W, b + 0.03 * W):
+                c.create_line(px, Y(0.09), px, y2, fill=pole, width=max(3, 7 * s))
+        # Fahrgäste drinnen: sitzend, stehend, gehend
+        for r in self.stay:
+            fx, pose = SLOTS[r["slot"]]
+            draw_person(c, X(fx), Y(0.71) if pose == "sit" else Y(IN_Y), u, r["look"], pose)
+        for fx, fy, sc, pose, look, seed in sorted(people_in, key=lambda q: q[1]):
+            yy = Y(0.71) if pose == "sit" else Y(fy)
+            draw_person(c, X(fx), yy, u * sc, look, pose, t * 9 + seed)
+
+        self.draw_bars(c, w, h, top_h, bottom_h, name)
+
+    def draw_outside(self, c, x1, y1, x2, y2, name):
+        """Was man durch Fenster und Türen sieht: Bahnsteig, Haltestelle oder Straße."""
+        ride, app, s = self.ride, self.ride.app, self.ride.app.s
+        kind = ride.kind
+        W, H = x2 - x1, y2 - y1
+        X = lambda f: x1 + f * W
+        Y = lambda f: y1 + f * H
+        level = ride.levels[ride.index] if kind not in ("tram", "bus") else "ground"
+        if level == "tunnel":
+            c.create_rectangle(x1, y1, x2, Y(0.82), fill="#E6DFC8", outline="")
+            for k in range(0, 60):
+                c.create_line(X(k / 60), y1, X(k / 60), Y(0.7), fill="#D6CEB4")
+            for k in range(0, 14):
+                c.create_line(x1, Y(k * 0.05), x2, Y(k * 0.05), fill="#D6CEB4")
+            c.create_rectangle(x1, Y(0.34), x2, Y(0.38), fill=ride.line["color"], outline="")
+            sign_bg, sign_fg = "#0A3E7A", "white"
+        else:
+            for i, col in enumerate(("#8EC3EC", "#A9D2F1", "#C4E1F6")):
+                c.create_rectangle(x1, Y(i * 0.15), x2, Y((i + 1) * 0.15) + 1, fill=col, outline="")
+            if kind in ("tram", "bus"):
+                for k in range(8):                               # Häuser auf der anderen Straßenseite
+                    hx = X(k / 8)
+                    col = ["#E8C9A0", "#D9A68C", "#C7D3DD", "#E6DDB8"][k % 4]
+                    c.create_rectangle(hx, Y(0.12 + 0.04 * (k % 3)), hx + W / 8 + 1, Y(0.7), fill=col, outline="")
+                    for wy in (0.24, 0.38, 0.52):
+                        for wx in (0.2, 0.6):
+                            c.create_rectangle(hx + W / 8 * wx, Y(wy), hx + W / 8 * (wx + 0.2), Y(wy + 0.07),
+                                               fill="#7E97AD", outline="")
+                sign_bg, sign_fg = "#F2D21B", "#0F6B3A"
+            else:
+                for k in range(12):                              # Bäume hinter dem Bahnsteig
+                    tx = X((k + 0.3) / 12)
+                    c.create_oval(tx - 0.05 * W, Y(0.36), tx + 0.05 * W, Y(0.6), fill="#6E9E58", outline="")
+                c.create_rectangle(x1, Y(0.0), x2, Y(0.05), fill="#6B7079", outline="")      # Bahnsteigdach
+                sign_bg, sign_fg = ("#00703C", "white") if kind == "sbahn" else ("#0A1E6E", "white")
+            c.create_rectangle(x1, Y(0.58), x2, Y(0.7), fill="#B9B4AA", outline="")
+        c.create_rectangle(x1, Y(0.7), x2, Y(0.82), fill="#A9A49A", outline="")              # Bahnsteig / Gehweg
+        c.create_rectangle(x1, Y(0.80), x2, Y(0.82), fill="#F2D21B" if level == "tunnel" or kind in ("sbahn", "ubahn", "regio", "ice") else "#8C877D",
+                           outline="")
+        # Stationsschild, durch das mittlere Fenster zu sehen
+        f = app.font(22, "bold")
+        text = fit_text(f, name, 0.14 * W)
+        tw = f.measure(text) + 24 * s
+        cx = X(0.46)                                   # mitten im großen Fenster zwischen den Türen
+        round_rect(c, cx - tw / 2, Y(0.2), cx + tw / 2, Y(0.2) + 50 * s, 8 * s, fill=sign_bg, outline="white",
+                   width=3 * s)
+        c.create_text(cx, Y(0.2) + 25 * s, text=text, font=f, fill=sign_fg)
+        if kind in ("tram", "bus"):                    # Haltestellenschild mit „H“
+            hx = X(0.86)
+            c.create_line(hx, Y(0.24), hx, Y(0.8), fill="#8C877D", width=max(2, 4 * s))
+            c.create_oval(hx - 22 * s, Y(0.2) - 22 * s, hx + 22 * s, Y(0.2) + 22 * s, fill="#F2D21B", outline="#0F6B3A",
+                          width=3 * s)
+            c.create_text(hx, Y(0.2), text="H", font=app.font(24, "bold"), fill="#0F6B3A")
+
+    def draw_bars(self, c, w, h, top_h, bottom_h, name):
+        ride, app, s = self.ride, self.ride.app, self.ride.app.s
+        frame = "#2B2F36"
+        c.create_rectangle(0, 0, w, top_h, fill=frame, outline="")
+        c.create_rectangle(0, h - bottom_h, w, h, fill=frame, outline="")
+        # Anzeige oben wie im Führerstand
+        dx1, dx2, dy1, dy2 = 220 * s, w - 220 * s, 12 * s, top_h - 20 * s
+        round_rect(c, dx1, dy1, dx2, dy2, 10 * s, fill="#0B0B0B", outline="#45494F", width=3 * s)
+        bw = draw_badge(c, dx1 + 16 * s, (dy1 + dy2) / 2, ride.line["name"], ride.line["color"], ride.kind, 46 * s,
+                        app.font(24, "bold"))
+        tx = dx1 + 16 * s + bw + 18 * s
+        tw = dx2 - tx - 14 * s
+        big, small = app.font(26, "bold"), app.font(19, "bold")
+        c.create_text(tx, dy1 + 24 * s, text=fit_text(big, "Hier ist: " + name, tw), anchor="w", font=big, fill=LED)
+        text, until = ride.message
+        if self.closing_at is not None:
+            second = "Türen schließen – Vorsicht!"
+        elif text and time.monotonic() < until:
+            second = text
+        elif self.busy():
+            second = "Bitte ein- und aussteigen …"
+        else:
+            second = f"Fahrgäste: {len(ride.riders)} · Türen schließen: Ö"
+        c.create_text(tx, dy2 - 20 * s, text=fit_text(small, second, tw), anchor="w", font=small, fill="#FFD27A")
+        bw2, bh2 = 180 * s, 50 * s
+        by = (top_h - 8 * s - bh2) / 2
+        round_rect(c, 20 * s, by, 20 * s + bw2, by + bh2, 25 * s, fill="#454A53", outline="")
+        c.create_text(20 * s + bw2 / 2, by + bh2 / 2, text="◀  Zurück", font=app.font(18, "bold"), fill="white")
+        app.hit(20 * s, by, 20 * s + bw2, by + bh2, ride.back)
+        # Knöpfe unten
+        cy, r = h - bottom_h / 2 - 8 * s, min(38 * s, bottom_h * 0.32)
+        closing = self.closing_at is not None
+        for k, (sym, label, cb, color) in enumerate((("Ö", "Türen zu", ride.toggle_open, "#2BA59B"),
+                                                     ("T", "Signal", ride.doors, "#E8483B"),
+                                                     ("V", "Ansage", ride.announce, "#3D8BD4"))):
+            round_button(app, c, w / 2 + (k - 1) * 160 * s, cy, r, color, sym, label, not closing, cb,
+                         glow=k == 0 and not self.busy() and not closing)
 
 
 class App:

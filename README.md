@@ -51,11 +51,37 @@ python3 tools/build_web.py
 |---|---|
 | **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Regionalbahn, ICE oder Flugzeug, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–7 gehen auch) |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
-| **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht, an der Endhaltestelle `B`: Betriebshof (Bus, Tram) bzw. `A`: Abstellgleis (Bahnen), dort `W`: Waschanlage, `E`: Linie endet hier |
+| **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht, `Ö`: Türen auf und zu (Blick in den Innenraum), an der Endhaltestelle `B`: Betriebshof (Bus, Tram) bzw. `A`: Abstellgleis (Bahnen), dort `W`: Waschanlage, `E`: Linie endet hier |
 
 `Esc` oder der Knopf „Zurück“ führt immer einen Schritt zurück. `F11`
 schaltet auf Vollbild. Auf der Ringbahn (S41/S42) kann man endlos im Kreis
 fahren.
+
+## Türen auf (Taste `Ö`)
+
+Steht das Fahrzeug an einer Station, öffnet `Ö` die Türen (oder der
+türkisfarbene Knopf „Ö“, im Cockpit „Türen auf“). Die Sicht dreht sich dann
+zur Seite in den **Innenraum**: Sitze, Haltestangen, Griffe an der Decke und
+die Türen, die zur Seite gleiten. Draußen sieht man den Bahnsteig mit dem
+Stationsschild, im U-Bahnhof die gekachelte Wand, bei Bus und Tram die
+Straße mit dem „H“-Schild.
+
+Dann **steigen Menschen ein und aus**: Einige Fahrgäste stehen auf und
+gehen hinaus, neue kommen vom Bahnsteig herein und setzen sich auf einen
+freien Platz oder halten sich an der Stange fest. Die Fahrgäste fahren mit:
+An der nächsten Station sitzen noch dieselben Leute im Wagen. An belebten
+Umsteigebahnhöfen steigen mehr Leute ein, an der Endstation steigen alle
+aus. Oben steht, wie viele Fahrgäste gerade an Bord sind.
+
+Ein zweites `Ö` schließt die Türen, mit dem Türsignal des Verkehrsmittels.
+Danach dreht sich die Sicht zurück und es kann weitergehen. Solange die
+Türen offen sind, fährt das Fahrzeug nicht los, und solange noch jemand ein-
+oder aussteigt, bleiben sie offen. Auf Tastaturen ohne Ö geht auch `O`.
+
+**Im Flugzeug** gibt es keinen Innenraum. Dort öffnet `Ö` am Boden die Tür
+neben der Treppe, die Kamera fährt näher heran, und die Fluggäste steigen
+über die Treppe vom Rollfeld ein (am Start) bzw. aus (nach der Landung).
+Abfliegen geht erst wieder, wenn die Tür zu ist.
 
 ## Betriebshof und Abstellgleis
 
@@ -238,6 +264,7 @@ echte Flugzeit da. Die Flüge im Spiel dauern nur 25 bis 40 Sekunden.
 | `V` | Ansage | Ansage des Kapitäns, z. B. „Noch etwa 2 Stunden bis Tokio“ |
 | `R` | R / großer Knopf | nach der Landung zurückfliegen (bzw. noch einmal hin) |
 | `U` | U | am BER am Boden: in S-Bahn, Regionalbahn oder Bus umsteigen |
+| `Ö` | Ö | am Boden: Tür auf, Fluggäste steigen über die Treppe ein bzw. aus |
 
 Die Flüge sind auch mit den anderen Verkehrsmitteln verbunden: Wer mit der
 S-Bahn (S9, S85), dem FEX oder einem Regionalzug zum **Flughafen BER**

@@ -994,6 +994,10 @@ class RideScreen extends Screen {
     this.depot = false;      // steht auf dem Betriebshof bzw. Abstellgleis hinter der Endstation
     this.washStart = null;   // seit wann das Fahrzeug durch die Waschanlage fährt
     this.fullLine = this.line;   // Taste E kürzt die Linie nur für diese Fahrt (this.line), nicht dauerhaft
+    this.door = null;        // offene Türen mit Blick in den Innenraum (Taste Ö)
+    this.doorCount = 0;
+    const rng = seededRandom(this.line.name);
+    this.riders = rng.shuffle(SLOTS.map((_, i) => i)).slice(0, 3).map(slot => ({ look: randomLook(rng), slot }));
   }
 
   /** Höhenlage jedes Bahnhofs in der aktuellen Richtung (für die Cockpit-Ansicht). */
@@ -1123,6 +1127,11 @@ class RideScreen extends Screen {
   }
 
   draw(c, w, h) {
+    if (this.door) this.door.draw(c, w, h);
+    else this.drawView(c, w, h);
+  }
+
+  drawView(c, w, h) {
     if (this.cockpit) return drawCockpit(this, c, w, h);
     const app = this.app, s = app.s;
     const st = app.data.stations;
@@ -1280,6 +1289,7 @@ class RideScreen extends Screen {
       ["Türen", () => this.doors(), true, "#E8483B", "white", 18],
       ["Ansage", () => this.announce(), true, "#3D8BD4", "white", 17],
       [depotKey, () => this.toggleDepot(), this.depot || this.atTerminus(), "#8E6BBF", "white", 30],
+      ["Ö", () => this.toggleOpen(), !this.depot && !this.washing, "#2BA59B", "white", 30],
     ];
     const bgap = 12 * s;
     const bsize = Math.min(84 * s, (pw - (buttons.length - 1) * bgap) / buttons.length);
@@ -1325,7 +1335,7 @@ class RideScreen extends Screen {
       } else {
         font = app.font(18);
         fill = "#5A6A7C";
-        lines = wrapText(font, "↑ ↓ fahren · T Türen · V Ansage", pw - 24 * s, 2);
+        lines = wrapText(font, "↑ ↓ fahren · Ö Türen auf · V Ansage", pw - 24 * s, 2);
       }
       const lh = font.linespace();
       let ty = (boxY1 + boxY2) / 2 - lh * (lines.length - 1) / 2;
@@ -1341,6 +1351,13 @@ class RideScreen extends Screen {
   }
 
   tick() {
+    if (this.door) {
+      if (this.door.finished()) {
+        this.door = null;
+        return true;
+      }
+      return this.door.animating() || now() < this.message[1];
+    }
     if (this.washing) {
       this.speed = 5 / VMAX[this.kind];           // Schrittgeschwindigkeit am Tacho
       if (this.washTime >= WASH_TIME) {
@@ -1499,8 +1516,42 @@ class RideScreen extends Screen {
     this.app.show(this.linesScreen);
   }
 
+  /** Taste Ö: Türen auf (Blick in den Innenraum, Leute steigen ein und aus) bzw. wieder zu. */
+  toggleOpen() {
+    const app = this.app;
+    if (this.door) {
+      if (this.door.closingAt !== null) return;
+      if (this.door.busy()) this.say("Moment – es steigen noch Leute ein und aus!", 2);
+      else {
+        this.door.close();
+        this.doors();
+        this.say("Türen schließen!", 2);
+      }
+    } else if (this.washing) {
+      return;
+    } else if (this.depot) {
+      this.say(`Hier steigt niemand ein – wir sind auf dem ${depotInfo(this.kind)[0]}.`, 2.5);
+    } else if (Math.abs(this.pos - this.index) > 0.02) {
+      this.say("Erst anhalten – dann Türen auf!", 2);
+    } else {
+      this.door = new Doors(this);
+      if (this.kind === "bus") app.sound.play("bus");
+      this.say("Türen auf – bitte ein- und aussteigen!", 2.5);
+    }
+    app.redraw();
+    app.animate();
+  }
+
   key(k, char) {
     const c = (char || "").toLowerCase();
+    if (DOOR_KEYS.has(char)) return this.toggleOpen();
+    if (this.door) {
+      if (KEYS_BACK.has(k)) this.back();
+      else if (c === "t") this.doors();
+      else if (c === "v") this.announce();
+      else { this.say("Die Türen sind offen – schließen mit Ö", 2); this.app.animate(); }
+      return;
+    }
     if (KEYS_NEXT.has(k)) this.next();
     else if (KEYS_PREV.has(k)) this.prev();
     else if (KEYS_BACK.has(k)) this.back();
@@ -2283,6 +2334,7 @@ function drawCockpit(ride, c, w, h) {
     ["V", "Ansage", () => ride.announce(), true, "#3D8BD4"],
     ["⇄", "Richtung", () => ride.switchDirection(), !ride.depot, "#E8E8E8"],
     [depotKey, depotName, () => ride.toggleDepot(), ride.depot || ride.atTerminus(), "#8E6BBF"],
+    ["Ö", "Türen auf", () => ride.toggleOpen(), !ride.depot && !ride.washing, "#2BA59B"],
   ];
   const cellW = btnW / 4, cellH = ph / 2;
   const r = Math.max(14 * s, Math.min(cellW * 0.3, cellH * 0.3));
@@ -2757,6 +2809,7 @@ class FlightScreen extends Screen {
     this.phase = "gate";
     this.t0 = now();
     this.boost = 0;
+    this.door = null;        // offene Flugzeugtür mit Fluggästen auf der Treppe (Taste Ö)
     this.message = [`Boarding nach ${this.target.name}! Drücke ▼ zum Abflug.`, now() + 4];
   }
 
@@ -2798,7 +2851,9 @@ class FlightScreen extends Screen {
   /** ▼ / Leertaste: abfliegen; im Reiseflug schneller fliegen. */
   go() {
     const app = this.app;
-    if (this.phase === "gate") {
+    if (this.door) {
+      this.say("Erst die Tür schließen: Taste Ö", 2);
+    } else if (this.phase === "gate") {
       this.setPhase("takeoff");
       this.say("Startfreigabe! Volle Kraft voraus!", 3);
       app.sound.play("jet");
@@ -2809,6 +2864,66 @@ class FlightScreen extends Screen {
       this.say(this.direction === 0 ? "Rückflug? Drücke R." : "Umsteigen in Bahn und Bus? Drücke U.", 2.5);
     }
     app.animate();
+  }
+
+  /** Taste Ö: Flugzeugtür auf – Fluggäste steigen über die Treppe ein (am Start) bzw. aus (am Ziel). */
+  toggleOpen() {
+    const t = now();
+    if (this.phase !== "gate" && this.phase !== "arrived") {
+      this.say("In der Luft bleibt die Tür zu!", 2);
+    } else if (this.door) {
+      if (this.door.closing !== null) return;
+      if (t < this.door.done) this.say("Moment – es steigen noch Leute ein und aus!", 2);
+      else {
+        this.door.closing = t;
+        this.doors();
+      }
+    } else {
+      const way = this.phase === "gate" ? "in" : "out";
+      const rng = seededRandom(`${this.flight.code}-${this.direction}-${way}`);
+      const people = Array.from({ length: 6 }, (_, k) => [randomLook(rng), 0.7 * k]);
+      this.door = { t0: t, closing: null, way, people, done: t + 0.8 + 0.7 * 5 + 3.4 };
+      this.say(way === "in" ? "Boarding! Die Fluggäste steigen ein." : "Aussteigen! Alle gehen von Bord.", 3);
+    }
+    this.app.animate();
+  }
+
+  /** Vergrößerung beim Ein- und Aussteigen (1 = normale Ansicht). */
+  zoom() {
+    const d = this.door;
+    if (!d || (this.phase !== "gate" && this.phase !== "arrived")) return 1;
+    if (d.closing !== null) return 1 + 1.4 * (1 - smooth((now() - d.closing) / 0.8));
+    return 1 + 1.4 * smooth((now() - d.t0) / 0.8);
+  }
+
+  /** Lage des Flugzeugs am Boden: [Mitte x, Mitte y, Boden, Länge, Breite]. */
+  groundGeo(x1, y1, x2, y2) {
+    const W = x2 - x1, H = y2 - y1, length = Math.min(0.36 * W, 0.7 * H), gy = y1 + 0.8 * H;
+    return [x1 + PLANE_X * W, gy - 0.121 * length, gy, length, W];
+  }
+
+  /** Offene Tür und Fluggäste auf der Treppe; T rechnet Szene- in Bildschirmpunkte um. */
+  drawBoarding(c, geo, T, z) {
+    const d = this.door, [px, py, gy, length, W] = geo;
+    if (d.closing === null) {
+      const [ax, ay] = T(px + 0.35 * length, py - 0.042 * length), [bx, by] = T(px + 0.38 * length, py + 0.032 * length);
+      c.polygon([[ax, ay], [bx, ay], [bx, by], [ax, by]], { fill: "#2B3440", outline: "#9AA4AD" });
+    }
+    const xTop = px + 0.38 * length, yTop = gy - 0.091 * length, xBot = xTop + 0.16 * length;
+    const far = xBot + 0.3 * W;           // von dort kommen die Leute (bzw. gehen sie hin)
+    const tAll = now() - d.t0 - 0.8;
+    for (const [look, start] of d.people) {
+      const t = tAll - start;
+      if (t < 0) continue;
+      const bottom = [xBot + 0.02 * length, gy, 1], top = [xTop, yTop, 1], away = [far, gy, 1];
+      const segs = d.way === "in" ? [[2.0, away, bottom, "walk"], [1.0, bottom, top, "walk"]]
+        : [[1.0, top, bottom, "walk"], [2.2, bottom, away, "walk"]];
+      const pos = follow(segs, t);
+      if (pos) {
+        const [x, y] = T(pos[0], pos[1]);
+        drawPerson(c, x, y, 0.085 * length * z, look, "walk", t * 9 + start);
+      }
+    }
   }
 
   doors() {
@@ -2884,7 +2999,8 @@ class FlightScreen extends Screen {
 
   key(k, char) {
     const ch = (char || "").toLowerCase();
-    if (KEYS_NEXT.has(k) || KEYS_OK.has(k)) this.go();
+    if (DOOR_KEYS.has(char)) this.toggleOpen();
+    else if (KEYS_NEXT.has(k) || KEYS_OK.has(k)) this.go();
     else if (KEYS_BACK.has(k)) this.back();
     else if (ch === "t") this.doors();
     else if (ch === "v") this.announce();
@@ -2894,6 +3010,10 @@ class FlightScreen extends Screen {
 
   tick() {
     const t = this.t;
+    if (this.door) {
+      if (this.door.closing !== null && now() - this.door.closing > 0.85) this.door = null;
+      return true;
+    }
     if (this.phase === "takeoff" && t >= TAKEOFF_T) {
       this.setPhase("cruise");
       this.say("Reiseflughöhe erreicht. Gute Reise!", 3);
@@ -2913,7 +3033,19 @@ class FlightScreen extends Screen {
     const app = this.app, s = app.s;
     const hh0 = HEADER_H * s;
     const panelW = Math.min(430 * s, w * 0.38);
-    this.drawScene(c, 0, hh0, w - panelW, h, w);
+    const z = this.zoom();
+    if (z > 1.001) {
+      // beim Ein- und Aussteigen rückt die Kamera an die Tür heran
+      const geo = this.groundGeo(0, hh0, w - panelW, h), [px, , gy, length] = geo;
+      const cx = px + 0.45 * length, cy = gy - 0.05 * length, ctx = c.ctx;
+      ctx.save();
+      ctx.translate(cx, cy); ctx.scale(z, z); ctx.translate(-cx, -cy);
+      this.drawScene(c, 0, hh0, w - panelW, h, w);
+      ctx.restore();
+      this.drawBoarding(c, geo, (x, y) => [cx + (x - cx) * z, cy + (y - cy) * z], z);
+    } else {
+      this.drawScene(c, 0, hh0, w - panelW, h, w);
+    }
 
     // Kopfzeile
     const color = this.line.color;
@@ -3070,7 +3202,8 @@ class FlightScreen extends Screen {
       ["Ding", () => this.doors(), true, "#E8483B", "white", 18],
       ["Ansage", () => this.announce(), true, "#3D8BD4", "white", 17],
       ["R", () => this.returnFlight(), this.phase === "arrived", "#8E6BBF", "white", 30],
-      ["U", () => this.change(), this.atAirport(), "#2F855A", "white", 30]];
+      ["U", () => this.change(), this.atAirport(), "#2F855A", "white", 30],
+      ["Ö", () => this.toggleOpen(), this.phase === "gate" || this.phase === "arrived", "#2BA59B", "white", 30]];
     const bgap = 12 * s;
     const bsize = Math.min(84 * s, (pw - (buttons.length - 1) * bgap) / buttons.length);
     const by2 = h - 50 * s, btnY = by2 - bsize - 76 * s;
@@ -3098,9 +3231,10 @@ class FlightScreen extends Screen {
     let [text, until] = this.message;
     if (!(text && now() < until)) {
       text = {
-        gate: "Bereit zum Abflug – drücke ▼", takeoff: "Start!", cruise: "Reiseflug – ▼ fliegt schneller",
+        gate: "Ö: Fluggäste einsteigen · ▼: Abflug", takeoff: "Start!", cruise: "Reiseflug – ▼ fliegt schneller",
         landing: "Landeanflug", arrived: `${this.target.hello} Willkommen in ${this.target.name}!`,
       }[this.phase];
+      if (this.door) text = "Tür offen – Ö schließt sie";
     }
     const boxY1 = y + 30 * s, boxY2 = btnY - 14 * s;
     if (boxY2 - boxY1 >= 40 * s) {
@@ -3111,6 +3245,351 @@ class FlightScreen extends Screen {
       let ty = (boxY1 + boxY2) / 2 - lh * (lines.length - 1) / 2;
       for (const ln of lines) { c.text((px1 + px2) / 2, ty, ln, mf, "#FFB000"); ty += lh; }
     }
+  }
+}
+
+// --------------------------------------------------------------------------
+// Türen auf (Taste Ö): Blick in den Innenraum, Fahrgäste steigen ein und aus
+// --------------------------------------------------------------------------
+
+const DOOR_KEYS = new Set(["ö", "Ö", "o", "O"]);
+const ROT_T = 0.8;             // Sekunden für das Umdrehen in den Innenraum
+const DOOR_T = 0.7;            // Sekunden zum Öffnen bzw. Schließen der Türen
+const DOORS_X = [0.22, 0.70];  // Türmitten (Anteil der Breite)
+const DOOR_W = 0.16;
+// Plätze im Innenraum: Sitzplätze und zwei Stehplätze an den Haltestangen
+const SLOTS = [[0.05, "sit"], [0.38, "sit"], [0.46, "sit"], [0.54, "sit"], [0.86, "sit"], [0.94, "sit"],
+  [0.33, "stand"], [0.59, "stand"]];
+const IN_Y = 0.95, OUT_Y = 0.80, OUT_S = 0.72;   // Fußhöhe drinnen/draußen, Größe draußen (weiter weg)
+const SKIN = ["#F2C9A8", "#E0AC85", "#C68B5E", "#8D5A3B", "#F5D6BC"];
+const HAIR = ["#2B1E16", "#5A3A22", "#C9A15A", "#8C8C8C", "#B5442A", "#111111"];
+const SHIRT = ["#E8483B", "#3D8BD4", "#F2B233", "#2F9E5B", "#8E6BBF", "#F07FA8", "#FFFFFF", "#2BA59B", "#F28C28"];
+const PANTS = ["#2F3E5C", "#3A3A3A", "#6B5A4A", "#4F6D8A", "#7A4E8C"];
+const INTERIOR = {   // Wand, Sitze, Haltestangen, Türflügel
+  sbahn: ["#ECE7DC", "#B5121B", "#F2B233", "#C9CED6"],
+  ubahn: ["#EFEAE0", "#2F5597", "#F7D117", "#F7D117"],
+  tram: ["#F2EEE6", "#C9302C", "#F7D117", "#D5D9DE"],
+  bus: ["#EEEEEE", "#2F4E8C", "#F7D117", "#D5D9DE"],
+  regio: ["#ECECEC", "#2F5A9E", "#A8AEB5", "#D7001D"],
+  ice: ["#F4F4F4", "#59636F", "#A8AEB5", "#D5D9DE"],
+};
+
+/** Zufallszahlen, die bei gleichem Startwert immer gleich ausfallen. */
+function seededRandom(seed) {
+  let h = 1779033703;
+  for (const ch of String(seed)) h = Math.imul(h ^ ch.charCodeAt(0), 3432918353), h = (h << 13) | (h >>> 19);
+  let a = h >>> 0;
+  const random = () => {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  return {
+    random,
+    choice: arr => arr[Math.floor(random() * arr.length)],
+    randint: (lo, hi) => lo + Math.floor(random() * (hi - lo + 1)),
+    uniform: (lo, hi) => lo + (hi - lo) * random(),
+    shuffle: arr => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; },
+  };
+}
+
+function randomLook(rng) {
+  return { skin: rng.choice(SKIN), hair: rng.choice(HAIR), shirt: rng.choice(SHIRT), pants: rng.choice(PANTS),
+    size: rng.choice([0.68, 0.74, 0.95, 1.0, 1.0, 1.05]), hat: rng.random() < 0.2 };
+}
+
+/** Mensch von vorn; yf = Füße (beim Sitzen: Sitzfläche), u = Größe eines Erwachsenen in Pixeln. */
+function drawPerson(c, x, yf, u, look, pose = "stand", phase = 0) {
+  u *= look.size;
+  const lw = Math.max(1, u * 0.075);
+  let hip, top;
+  if (pose === "sit") {
+    hip = yf;
+    for (const dx of [-0.06, 0.06]) {
+      c.line([[x + dx * u, hip], [x + dx * u, hip + 0.24 * u]], { fill: look.pants, width: lw, cap: "round" });
+      c.oval(x + dx * u - 0.05 * u, hip + 0.22 * u, x + dx * u + 0.05 * u, hip + 0.27 * u, { fill: "#2B2B2B" });
+    }
+  } else {
+    hip = yf - 0.44 * u;
+    const swing = pose === "walk" ? Math.sin(phase) * 0.07 * u : 0;
+    for (const [dx, sw] of [[-0.06, swing], [0.06, -swing]]) {
+      c.line([[x + dx * u, hip], [x + dx * u + sw, yf - 0.03 * u]], { fill: look.pants, width: lw, cap: "round" });
+      c.oval(x + dx * u + sw - 0.05 * u, yf - 0.05 * u, x + dx * u + sw + 0.05 * u, yf, { fill: "#2B2B2B" });
+    }
+  }
+  top = hip - 0.36 * u;
+  const arm = pose === "walk" ? Math.sin(phase) * 0.06 * u : 0;
+  for (const [dx, sw] of [[-0.15, -arm], [0.15, arm]]) {
+    c.line([[x + dx * u, top + 0.06 * u], [x + dx * u * 1.1 + sw, top + 0.32 * u]], { fill: look.shirt, width: lw, cap: "round" });
+  }
+  c.roundRect(x - 0.14 * u, top, x + 0.14 * u, hip + 0.03 * u, 0.06 * u, { fill: look.shirt });
+  const hy = top - 0.11 * u;
+  c.oval(x - 0.1 * u, hy - 0.11 * u, x + 0.1 * u, hy + 0.11 * u, { fill: look.skin });
+  if (look.hat) {
+    c.rect(x - 0.12 * u, hy - 0.08 * u, x + 0.12 * u, hy - 0.04 * u, look.pants);
+    c.oval(x - 0.09 * u, hy - 0.17 * u, x + 0.09 * u, hy - 0.04 * u, { fill: look.pants });
+  } else {
+    c.oval(x - 0.105 * u, hy - 0.125 * u, x + 0.105 * u, hy - 0.01 * u, { fill: look.hair });
+  }
+  c.oval(x - 0.045 * u, hy - 0.01 * u, x - 0.02 * u, hy + 0.015 * u, { fill: "#2B2B2B" });
+  c.oval(x + 0.02 * u, hy - 0.01 * u, x + 0.045 * u, hy + 0.015 * u, { fill: "#2B2B2B" });
+}
+
+/** Weg aus Abschnitten [Dauer, von, nach, Haltung]: [x, y, Größe, Haltung] zur Zeit t – oder null. */
+function follow(segments, t) {
+  for (const [dur, a, b, pose] of segments) {
+    if (t < dur || dur === Infinity) {
+      const f = dur === 0 || dur === Infinity ? 0 : Math.max(0, t / dur);
+      return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, pose];
+    }
+    t -= dur;
+  }
+  return null;
+}
+
+/** Türen eines Fahrzeugs an einer Station: umdrehen, Türen auf, Leute steigen ein und aus. */
+class Doors {
+  constructor(ride) {
+    this.ride = ride;
+    this.t0 = now();
+    this.closingAt = null;
+    const key = ride.stops[ride.index];
+    const rng = seededRandom(`${key}-${ride.line.name}-${ride.doorCount}`);
+    ride.doorCount += 1;
+    const last = ride.index === ride.stops.length - 1 && !ride.ring;
+    const busy = Math.min(3, Math.floor(ride.transferOptions().length / 3));
+    // wer aussteigt (an der Endstation alle), wer bleibt
+    const leaving = ride.riders.filter(() => last || rng.random() < 0.4);
+    this.stay = ride.riders.filter(r => !leaving.includes(r));
+    const taken = new Set(this.stay.map(r => r.slot));
+    const free = rng.shuffle(SLOTS.map((_, i) => i).filter(i => !taken.has(i)));
+    const nIn = last ? 0 : Math.min(free.length, rng.randint(1, 3) + busy);
+    const entering = free.slice(0, nIn).map(slot => ({ look: randomLook(rng), slot }));
+    const start = ROT_T + DOOR_T;
+    this.movers = leaving.map((r, k) => this.path(r, "out", start + 0.7 * k, rng))
+      .concat(entering.map((r, k) => this.path(r, "in", start + 0.6 + 0.8 * k, rng)));
+    this.doneAt = Math.max(start, ...this.movers.map(m => m.segs.reduce((sum, sg) => sum + (sg[0] === Infinity ? 0 : sg[0]), 0)));
+    ride.riders = this.stay.concat(entering);
+    // Leute, die auf dem Bahnsteig warten und nicht einsteigen
+    this.crowd = Array.from({ length: rng.randint(1, 3) }, () => [rng.uniform(0.02, 0.98), randomLook(rng)]);
+  }
+
+  path(rider, way, start, rng) {
+    const [sx, pose] = SLOTS[rider.slot];
+    const dx = DOORS_X.reduce((best, d) => (Math.abs(d - sx) < Math.abs(best - sx) ? d : best));
+    const side = rng.choice([-1, 1]);
+    const outside = [dx + side * 0.09, OUT_Y, OUT_S], doorOut = [dx, OUT_Y, OUT_S], doorIn = [dx, IN_Y, 1], seat = [sx, IN_Y, 1];
+    const walkIn = 0.3 + Math.abs(sx - dx) * 2.5;
+    let segs;
+    if (way === "in") {
+      segs = [[start, outside, outside, "stand"], [0.6, outside, doorOut, "walk"], [0.5, doorOut, doorIn, "walk"],
+        [walkIn, doorIn, seat, "walk"], [Infinity, seat, seat, pose]];
+    } else {
+      const away = [dx + side * 0.3, OUT_Y, OUT_S];
+      segs = [[start, seat, seat, pose], [walkIn, seat, doorIn, "walk"], [0.5, doorIn, doorOut, "walk"], [1.2, doorOut, away, "walk"]];
+    }
+    return { look: rider.look, segs, way, seed: rng.random() * 6 };
+  }
+
+  get t() { return now() - this.t0; }
+
+  /** 0 = Ansicht von vorher, 1 = Innenraum. */
+  rotation() {
+    if (this.closingAt !== null) return 1 - smooth((this.t - this.closingAt - DOOR_T) / ROT_T);
+    return smooth(this.t / ROT_T);
+  }
+
+  /** 0 = Türen zu, 1 = ganz offen. */
+  opening() {
+    if (this.closingAt !== null) return 1 - Math.min(1, (this.t - this.closingAt) / DOOR_T);
+    return Math.min(1, Math.max(0, (this.t - ROT_T) / DOOR_T));
+  }
+
+  busy() { return this.closingAt === null && this.t < this.doneAt; }
+  finished() { return this.closingAt !== null && this.t >= this.closingAt + DOOR_T + ROT_T; }
+  close() { this.closingAt = this.t; }
+  animating() { return this.closingAt !== null || this.t < this.doneAt + 0.2; }
+
+  draw(c, w, h) {
+    const app = this.ride.app, p = this.rotation(), ctx = c.ctx;
+    if (p < 1) {
+      // Umdrehen: die bisherige Ansicht schiebt sich zur Seite, der Innenraum kommt nach
+      ctx.save(); ctx.translate(-p * w, 0); this.ride.drawView(c, w, h); ctx.restore();
+      ctx.save(); ctx.translate((1 - p) * w, 0); this.drawInside(c, w, h); ctx.restore();
+      app.hits = [];
+    } else {
+      this.drawInside(c, w, h);
+    }
+  }
+
+  drawInside(c, w, h) {
+    const ride = this.ride, app = ride.app, s = app.s, kind = ride.kind;
+    const name = app.data.stations[ride.stops[ride.index]];
+    const topH = 112 * s, bottomH = 120 * s;
+    const x1 = 0, y1 = topH, x2 = w, y2 = h - bottomH, W = x2 - x1, H = y2 - y1;
+    const X = f => x1 + f * W, Y = f => y1 + f * H;
+    const [wall, seatCol, pole, leaf] = INTERIOR[kind] || INTERIOR.sbahn;
+    const t = this.t;
+
+    this.drawOutside(c, x1, y1, x2, y2, name);
+    const u = 0.55 * H;
+    // Leute draußen (nur durch Fenster und Türen zu sehen)
+    for (const [fx, look] of this.crowd) drawPerson(c, X(fx), Y(OUT_Y), u * OUT_S, look);
+    const peopleIn = [];
+    for (const m of this.movers) {
+      const pos = follow(m.segs, t);
+      if (!pos) continue;
+      const [fx, fy, sc, pose] = pos;
+      if (sc < 0.86) drawPerson(c, X(fx), Y(fy), u * sc, m.look, pose, t * 9 + m.seed);
+      else peopleIn.push([fx, fy, sc, pose, m.look, m.seed]);
+    }
+
+    // Wand mit Fenstern und Türöffnungen
+    const winTop = 0.16, winBot = 0.48, doorTop = 0.14;
+    const doors = DOORS_X.map(d => [X(d - DOOR_W / 2), X(d + DOOR_W / 2)]);
+    c.rect(x1, y1, x2, Y(winTop), wall);
+    const cols = [x1].concat(...doors, [x2]);
+    for (let i = 0; i < cols.length; i += 2) {                     // Wandstücke zwischen den Türen
+      const a = cols[i], b = cols[i + 1];
+      c.rect(a, Y(winBot), b, Y(0.82), wall);
+      const n = a > x1 && b < x2 ? 1 : Math.max(1, Math.round((b - a) / (0.13 * W)));
+      for (let k = 0; k <= n; k++) {                               // Fensterpfosten
+        const px = a + (b - a) * k / n;
+        c.rect(px - 0.008 * W, Y(winTop), px + 0.008 * W, Y(winBot), wall);
+      }
+      c.rect(a, Y(winTop) - 2 * s, b, Y(winTop) + 3 * s, darker(wall, 0.85));
+    }
+    const o = this.opening();
+    for (const [a, b] of doors) {                                  // Türrahmen
+      c.rect(a - 0.012 * W, Y(doorTop) - 0.012 * W, b + 0.012 * W, Y(doorTop), "#5F6670");
+      c.rect(a - 0.012 * W, Y(doorTop), a, Y(0.82), "#5F6670");
+      c.rect(b, Y(doorTop), b + 0.012 * W, Y(0.82), "#5F6670");
+      // Türflügel gleiten zur Seite
+      const half = (b - a) / 2;
+      for (const [lx1, lx2] of [[a - o * half * 0.95, a + half - o * half * 0.95], [a + half + o * half * 0.95, b + o * half * 0.95]]) {
+        c.polygon([[lx1, Y(doorTop)], [lx2, Y(doorTop)], [lx2, Y(0.82)], [lx1, Y(0.82)]], { fill: leaf, outline: darker(leaf, 0.7), width: Math.max(1, 2 * s) });
+        c.polygon([[lx1 + half * 0.18, Y(doorTop + 0.05)], [lx2 - half * 0.18, Y(doorTop + 0.05)], [lx2 - half * 0.18, Y(0.5)], [lx1 + half * 0.18, Y(0.5)]],
+          { fill: "#BFD9EE", outline: darker(leaf, 0.7) });
+      }
+      // Lampe über der Tür: blinkt beim Öffnen und Schließen
+      const lamp = o > 0 && o < 1 && Math.floor(t * 6) % 2 === 0 ? "#FF9A1F" : "#7A5A2A";
+      const cx = (a + b) / 2;
+      c.oval(cx - 7 * s, Y(doorTop) - 0.012 * W - 14 * s, cx + 7 * s, Y(doorTop) - 0.012 * W, { fill: lamp });
+    }
+    // Decke: Haltestange und Griffe, Werbeflächen
+    c.line([[x1, Y(0.09)], [x2, Y(0.09)]], { fill: pole, width: Math.max(2, 5 * s) });
+    for (let k = 0; k < 14; k++) {
+      const gx = X((k + 0.5) / 14);
+      c.line([[gx, Y(0.09)], [gx, Y(0.13)]], { fill: "#6B7079", width: Math.max(1, 2 * s) });
+      c.oval(gx - 6 * s, Y(0.13), gx + 6 * s, Y(0.13) + 12 * s, { outline: "#6B7079", width: Math.max(1, 2 * s) });
+    }
+    for (const fx of [0.04, 0.36, 0.84]) {
+      c.polygon([[X(fx), Y(0.015)], [X(fx + 0.12), Y(0.015)], [X(fx + 0.12), Y(0.065)], [X(fx), Y(0.065)]], { fill: "#FFFFFF", outline: darker(wall, 0.8) });
+      c.rect(X(fx + 0.01), Y(0.025), X(fx + 0.05), Y(0.055), MODE[kind][2]);
+    }
+    // Boden
+    c.rect(x1, Y(0.82), x2, y2, "#5C5F66");
+    for (let k = 1; k < 4; k++) c.line([[x1, Y(0.82 + k * 0.045)], [x2, Y(0.82 + k * 0.045)]], { fill: "#52555C", width: Math.max(1, s) });
+    // Sitze
+    for (const [fx, pose] of SLOTS) {
+      if (pose !== "sit") continue;
+      c.roundRect(X(fx - 0.035), Y(0.5), X(fx + 0.035), Y(0.72), 8 * s, { fill: seatCol, outline: darker(seatCol, 0.7) });
+      for (let k = 0; k < 3; k++) {                                // Muster im Sitzbezug
+        const mx = X(fx - 0.02 + k * 0.02);
+        c.oval(mx - 2 * s, Y(0.58) - 2 * s, mx + 2 * s, Y(0.58) + 2 * s, { fill: tint(seatCol, 0.5) });
+      }
+      c.roundRect(X(fx - 0.04), Y(0.7), X(fx + 0.04), Y(0.75), 6 * s, { fill: darker(seatCol, 0.85) });
+    }
+    // Haltestangen neben den Türen
+    for (const [a, b] of doors) {
+      for (const px of [a - 0.03 * W, b + 0.03 * W]) c.line([[px, Y(0.09)], [px, y2]], { fill: pole, width: Math.max(3, 7 * s) });
+    }
+    // Fahrgäste drinnen: sitzend, stehend, gehend
+    for (const r of this.stay) {
+      const [fx, pose] = SLOTS[r.slot];
+      drawPerson(c, X(fx), pose === "sit" ? Y(0.71) : Y(IN_Y), u, r.look, pose);
+    }
+    peopleIn.sort((p, q) => p[1] - q[1]);
+    for (const [fx, fy, sc, pose, look, seed] of peopleIn) {
+      drawPerson(c, X(fx), pose === "sit" ? Y(0.71) : Y(fy), u * sc, look, pose, t * 9 + seed);
+    }
+    this.drawBars(c, w, h, topH, bottomH, name);
+  }
+
+  /** Was man durch Fenster und Türen sieht: Bahnsteig, Haltestelle oder Straße. */
+  drawOutside(c, x1, y1, x2, y2, name) {
+    const ride = this.ride, app = ride.app, s = app.s, kind = ride.kind;
+    const W = x2 - x1, H = y2 - y1, X = f => x1 + f * W, Y = f => y1 + f * H;
+    const level = kind !== "tram" && kind !== "bus" ? ride.levels[ride.index] : "ground";
+    let signBg, signFg;
+    if (level === "tunnel") {
+      c.rect(x1, y1, x2, Y(0.82), "#E6DFC8");
+      for (let k = 0; k < 60; k++) c.line([[X(k / 60), y1], [X(k / 60), Y(0.7)]], { fill: "#D6CEB4" });
+      for (let k = 0; k < 14; k++) c.line([[x1, Y(k * 0.05)], [x2, Y(k * 0.05)]], { fill: "#D6CEB4" });
+      c.rect(x1, Y(0.34), x2, Y(0.38), ride.line.color);
+      [signBg, signFg] = ["#0A3E7A", "white"];
+    } else {
+      ["#8EC3EC", "#A9D2F1", "#C4E1F6"].forEach((col, i) => c.rect(x1, Y(i * 0.15), x2, Y((i + 1) * 0.15) + 1, col));
+      if (kind === "tram" || kind === "bus") {
+        for (let k = 0; k < 8; k++) {                              // Häuser auf der anderen Straßenseite
+          const hx = X(k / 8);
+          c.rect(hx, Y(0.12 + 0.04 * (k % 3)), hx + W / 8 + 1, Y(0.7), ["#E8C9A0", "#D9A68C", "#C7D3DD", "#E6DDB8"][k % 4]);
+          for (const wy of [0.24, 0.38, 0.52]) for (const wx of [0.2, 0.6]) c.rect(hx + W / 8 * wx, Y(wy), hx + W / 8 * (wx + 0.2), Y(wy + 0.07), "#7E97AD");
+        }
+        [signBg, signFg] = ["#F2D21B", "#0F6B3A"];
+      } else {
+        for (let k = 0; k < 12; k++) {                             // Bäume hinter dem Bahnsteig
+          const tx = X((k + 0.3) / 12);
+          c.oval(tx - 0.05 * W, Y(0.36), tx + 0.05 * W, Y(0.6), { fill: "#6E9E58" });
+        }
+        c.rect(x1, Y(0), x2, Y(0.05), "#6B7079");                   // Bahnsteigdach
+        [signBg, signFg] = kind === "sbahn" ? ["#00703C", "white"] : ["#0A1E6E", "white"];
+      }
+      c.rect(x1, Y(0.58), x2, Y(0.7), "#B9B4AA");
+    }
+    c.rect(x1, Y(0.7), x2, Y(0.82), "#A9A49A");                       // Bahnsteig / Gehweg
+    c.rect(x1, Y(0.8), x2, Y(0.82), level === "tunnel" || ["sbahn", "ubahn", "regio", "ice"].includes(kind) ? "#F2D21B" : "#8C877D");
+    // Stationsschild, durch das große Fenster zwischen den Türen zu sehen
+    const f = app.font(22, "bold"), text = fitText(f, name, 0.14 * W), tw = f.measure(text) + 24 * s, cx = X(0.46);
+    c.roundRect(cx - tw / 2, Y(0.2), cx + tw / 2, Y(0.2) + 50 * s, 8 * s, { fill: signBg, outline: "white", width: 3 * s });
+    c.text(cx, Y(0.2) + 25 * s, text, f, signFg);
+    if (kind === "tram" || kind === "bus") {                           // Haltestellenschild mit „H“
+      const hx = X(0.86);
+      c.line([[hx, Y(0.24)], [hx, Y(0.8)]], { fill: "#8C877D", width: Math.max(2, 4 * s) });
+      c.oval(hx - 22 * s, Y(0.2) - 22 * s, hx + 22 * s, Y(0.2) + 22 * s, { fill: "#F2D21B", outline: "#0F6B3A", width: 3 * s });
+      c.text(hx, Y(0.2), "H", app.font(24, "bold"), "#0F6B3A");
+    }
+  }
+
+  drawBars(c, w, h, topH, bottomH, name) {
+    const ride = this.ride, app = ride.app, s = app.s, frame = "#2B2F36";
+    c.rect(0, 0, w, topH, frame);
+    c.rect(0, h - bottomH, w, h, frame);
+    // Anzeige oben wie im Führerstand
+    const dx1 = 220 * s, dx2 = w - 220 * s, dy1 = 12 * s, dy2 = topH - 20 * s;
+    c.roundRect(dx1, dy1, dx2, dy2, 10 * s, { fill: "#0B0B0B", outline: "#45494F", width: 3 * s });
+    const bw = drawBadge(c, dx1 + 16 * s, (dy1 + dy2) / 2, ride.line.name, ride.line.color, ride.kind, 46 * s, app.font(24, "bold"));
+    const tx = dx1 + 16 * s + bw + 18 * s, tw = dx2 - tx - 14 * s;
+    const big = app.font(26, "bold"), small = app.font(19, "bold");
+    c.text(tx, dy1 + 24 * s, fitText(big, "Hier ist: " + name, tw), big, LED, "w");
+    const [text, until] = ride.message;
+    let second;
+    if (this.closingAt !== null) second = "Türen schließen – Vorsicht!";
+    else if (text && now() < until) second = text;
+    else if (this.busy()) second = "Bitte ein- und aussteigen …";
+    else second = `Fahrgäste: ${ride.riders.length} · Türen schließen: Ö`;
+    c.text(tx, dy2 - 20 * s, fitText(small, second, tw), small, "#FFD27A", "w");
+    const bw2 = 180 * s, bh2 = 50 * s, by = (topH - 8 * s - bh2) / 2;
+    c.roundRect(20 * s, by, 20 * s + bw2, by + bh2, 25 * s, { fill: "#454A53" });
+    c.text(20 * s + bw2 / 2, by + bh2 / 2, "◀  Zurück", app.font(18, "bold"), "white");
+    app.hit(20 * s, by, 20 * s + bw2, by + bh2, () => ride.back());
+    // Knöpfe unten
+    const cy = h - bottomH / 2 - 8 * s, r = Math.min(38 * s, bottomH * 0.32), closing = this.closingAt !== null;
+    [["Ö", "Türen zu", () => ride.toggleOpen(), "#2BA59B"], ["T", "Signal", () => ride.doors(), "#E8483B"],
+      ["V", "Ansage", () => ride.announce(), "#3D8BD4"]].forEach(([sym, label, cb, color], k) => {
+      roundButton(app, c, w / 2 + (k - 1) * 160 * s, cy, r, color, sym, label, !closing, cb, k === 0 && !this.busy() && !closing);
+    });
   }
 }
 
