@@ -2920,6 +2920,21 @@ class WorldMap:
         c.create_polygon(plane_top_points(px, py, 30 * s, angle), fill="white", outline="#1C6DD0", width=max(1, 1.5 * s))
 
 
+HANGAR_T = 2.8          # Sekunden zum Hinein- bzw. Hinausrollen
+# Erfundene Flugzeug-Waschanlage: Ende jedes Schritts in Sekunden
+PLANE_WASH = [(3.5, "Einschäumen"), (7.0, "Bürsten"), (9.5, "Abspülen"), (12.0, "Trocknen"), (14.0, "Blitzblank!")]
+PLANE_WASH_T = PLANE_WASH[-1][0]
+
+
+def plane_wash_phase(t):
+    """(Schritt, Fortschritt 0…1) der Flugzeugwäsche nach t Sekunden."""
+    start = 0.0
+    for end, name in PLANE_WASH:
+        if t < end or end == PLANE_WASH_T:
+            return name, min(1.0, max(0.0, (t - start) / (end - start)))
+        start = end
+
+
 class FlightScreen(Screen):
     """Ein Flug vom BER zum Ziel (Richtung 0) oder zurück (Richtung 1): Boarding, Start, Reiseflug, Landung."""
 
@@ -2932,6 +2947,7 @@ class FlightScreen(Screen):
         self.line = app.data["lines"]["flug"][index]
         self.flight = app.data["flights"]["flights"][index]
         self.home = app.data["flights"]["home"]
+        self.clean = False      # nach dem Waschen glänzt das Flugzeug, nach dem nächsten Flug ist es wieder schmutzig
         self.start_gate()
 
     def start_gate(self):
@@ -2939,6 +2955,7 @@ class FlightScreen(Screen):
         self.t0 = time.monotonic()
         self.boost = 0.0
         self.door = None        # offene Flugzeugtür mit Fluggästen auf der Treppe (Taste Ö)
+        self.hangar = None      # im Hangar (Taste H), dort auch die Waschanlage (Taste W)
         self.message = (f"Boarding nach {self.target['name']}! Drücke ▼ zum Abflug.", time.monotonic() + 4)
 
     # --- Zustand ---
@@ -2990,7 +3007,9 @@ class FlightScreen(Screen):
     def go(self):
         """▼ / Leertaste: abfliegen; im Reiseflug schneller fliegen."""
         app = self.app
-        if self.door:
+        if self.hangar:
+            self.say("Erst aus dem Hangar rollen: Taste H", 2)
+        elif self.door:
             self.say("Erst die Tür schließen: Taste Ö", 2)
         elif self.phase == "gate":
             self.set_phase("takeoff")
@@ -3006,7 +3025,9 @@ class FlightScreen(Screen):
     def toggle_open(self):
         """Taste Ö: Flugzeugtür auf – Fluggäste steigen über die Treppe ein (am Start) bzw. aus (am Ziel)."""
         app, now = self.app, time.monotonic()
-        if self.phase not in ("gate", "arrived"):
+        if self.hangar:
+            self.say("Im Hangar steigt niemand ein.", 2)
+        elif self.phase not in ("gate", "arrived"):
             self.say("In der Luft bleibt die Tür zu!", 2)
         elif self.door:
             if self.door["closing"] is not None:
@@ -3033,6 +3054,221 @@ class FlightScreen(Screen):
         if d["closing"] is not None:
             return 1 + 1.4 * (1 - smooth((now - d["closing"]) / 0.8))
         return 1 + 1.4 * smooth((now - d["t0"]) / 0.8)
+
+    # --- Hangar (Taste H) und Flugzeug-Waschanlage (Taste W) ---
+    def hangar_state(self):
+        """None, ("rein", 0…1), ("drin", None) oder ("raus", 0…1)."""
+        hg = self.hangar
+        if not hg:
+            return None
+        now = time.monotonic()
+        if hg["out"] is not None:
+            return "raus", min(1.0, (now - hg["out"]) / HANGAR_T)
+        if now - hg["t0"] < HANGAR_T:
+            return "rein", (now - hg["t0"]) / HANGAR_T
+        return "drin", None
+
+    def plane_wash_t(self):
+        hg = self.hangar
+        return None if not hg or hg["wash"] is None else time.monotonic() - hg["wash"]
+
+    def toggle_hangar(self):
+        """Taste H: am Boden in den großen Hangar rollen – und wieder hinaus."""
+        app, now = self.app, time.monotonic()
+        state = self.hangar_state()
+        if self.phase not in ("gate", "arrived"):
+            self.say("In der Luft gibt es keinen Hangar!", 2)
+        elif self.door:
+            self.say("Erst die Tür schließen: Taste Ö", 2)
+        elif state is None:
+            self.hangar = {"t0": now, "out": None, "wash": None}
+            self.say("Ab in den Hangar!", 2.5)
+            app.sound.play(SOUND_DIR / "jet.wav")
+        elif state[0] != "drin":
+            return
+        elif self.plane_wash_t() is not None:
+            self.say("Erst fertig waschen!", 2)
+        else:
+            self.hangar["out"] = now
+            self.say("Wir rollen hinaus.", 2.5)
+            app.sound.play(SOUND_DIR / "jet.wav")
+        app.animate()
+
+    def wash_plane(self):
+        """Taste W: im Hangar durch die (erfundene) Flugzeug-Waschanlage."""
+        state = self.hangar_state()
+        if state is None or state[0] != "drin":
+            self.say("Gewaschen wird im Hangar – erst Taste H!", 2.5)
+        elif self.plane_wash_t() is None:
+            self.hangar["wash"] = time.monotonic()
+            self.app.sound.play(SOUND_DIR / "bus.wav")
+            self.say("Die Waschanlage startet!", 2)
+        self.app.animate()
+
+    def draw_hangar_outside(self, c, x1, gy, H, W, full_x2, slide, part):
+        """Hangar von außen beim Hinein- und Hinausrollen; ``part``: "hinten" (vor dem Flugzeug) oder "vorn"."""
+        s = self.app.s
+        hx = x1 + (0.62 + slide) * W
+        top, door_top = gy - 0.64 * H, gy - 0.46 * H
+        right = max(full_x2, hx + 1.4 * W)
+        if part == "hinten":
+            arc = [(hx + (right - hx) * k / 20, top - 0.08 * H * math.sin(math.pi * k / 20)) for k in range(21)]
+            c.create_polygon([hx, gy] + [v for p in arc for v in p] + [right, gy], fill="#B9C1CA", outline="")
+            c.create_rectangle(hx + 0.05 * W, door_top, right, gy, fill="#3A4048", outline="")
+            for k in range(6):                                     # Lampen in der Halle
+                lx = hx + 0.15 * W + k * 0.18 * W
+                c.create_oval(lx - 6 * s, door_top + 0.05 * H - 4 * s, lx + 6 * s, door_top + 0.05 * H + 4 * s,
+                              fill="#FFE9A8", outline="")
+            c.create_rectangle(hx + 0.05 * W, gy - 0.015 * H, right, gy, fill="#5A616B", outline="")
+        else:
+            c.create_rectangle(hx, top, right, door_top, fill="#C9D0D8", outline="")
+            for k in range(int((right - hx) / (0.03 * W)) + 1):   # Wellblech
+                lx = hx + k * 0.03 * W
+                c.create_line(lx, top, lx, door_top, fill="#AFB8C2", width=max(1, s))
+            c.create_rectangle(hx, top, hx + 0.05 * W, gy, fill="#C9D0D8", outline="#AFB8C2")
+            c.create_rectangle(hx + 0.05 * W, door_top - 3 * s, right, door_top + 3 * s, fill="#F2B233", outline="")
+            f = self.app.font(28, "bold")
+            c.create_text(hx + 0.32 * W, (top + door_top) / 2, text="HANGAR", font=f, fill="#1E2A38")
+
+    def draw_hangar(self, c, x1, y1, x2, y2, full_x2):
+        """Im Hangar: große Halle, das Flugzeug – und die Flugzeug-Waschanlage."""
+        app, s = self.app, self.app.s
+        W, H = x2 - x1, y2 - y1
+        X = lambda f: x1 + f * W
+        Y = lambda f: y1 + f * H
+        gy = Y(0.82)
+        wt = self.plane_wash_t()
+        phase, f = plane_wash_phase(wt) if wt is not None else (None, 0.0)
+
+        # Halle: Rückwand, Fensterband, Dachbinder, Lampen
+        c.create_rectangle(x1, y1, full_x2, gy, fill="#D5DAE0", outline="")
+        k = 0
+        while X(k * 0.06) < full_x2:
+            c.create_line(X(k * 0.06), Y(0.2), X(k * 0.06), gy, fill="#C3C9D0", width=max(1, 2 * s))
+            k += 1
+        c.create_rectangle(x1, Y(0.08), full_x2, Y(0.2), fill="#CFE6F7", outline="")
+        k = 0
+        while X(k * 0.08) < full_x2:
+            c.create_rectangle(X(k * 0.08) - 3 * s, Y(0.08), X(k * 0.08) + 3 * s, Y(0.2), fill="#8B949E", outline="")
+            k += 1
+        c.create_rectangle(x1, y1, full_x2, Y(0.04), fill="#6F7882", outline="")
+        k = 0
+        while X(k * 0.05) < full_x2:                                 # Fachwerk unter dem Dach
+            c.create_line(X(k * 0.05), Y(0.04), X(k * 0.05 + 0.025), Y(0.08), X(k * 0.05 + 0.05), Y(0.04),
+                          fill="#8B949E", width=max(1, 2 * s))
+            k += 1
+        for k in range(5):
+            lx = X(0.1 + k * 0.2)
+            c.create_line(lx, Y(0.04), lx, Y(0.2), fill="#5A616B", width=max(1, 2 * s))
+            c.create_polygon(lx - 14 * s, Y(0.2) + 12 * s, lx + 14 * s, Y(0.2) + 12 * s, lx + 6 * s, Y(0.2),
+                             lx - 6 * s, Y(0.2), fill="#3A4048", outline="")
+            c.create_oval(lx - 12 * s, Y(0.2) + 8 * s, lx + 12 * s, Y(0.2) + 18 * s, fill="#FFF3C4", outline="")
+        code = (self.origin if self.phase == "gate" else self.target)["code"]
+        round_rect(c, X(0.36), Y(0.36), X(0.64), Y(0.46), 8 * s, fill="#1E2A38", outline="")
+        c.create_text(X(0.5), Y(0.41), text=f"HANGAR {code}", font=app.font(20, "bold"), fill="white")
+        # Boden mit Markierungen und Spiegelung
+        c.create_rectangle(x1, gy, full_x2, y2, fill="#AEB5BD", outline="")
+        c.create_rectangle(x1, gy + 0.03 * H, full_x2, gy + 0.05 * H, fill="#BCC2C9", outline="")
+        c.create_rectangle(x1, gy + 0.09 * H, full_x2, gy + 0.105 * H, fill="#F2D21B", outline="")
+        for k in range(8):
+            c.create_polygon(X(0.02 + k * 0.03), y2, X(0.035 + k * 0.03), y2, X(0.05 + k * 0.03), y2 - 0.05 * H,
+                             X(0.035 + k * 0.03), y2 - 0.05 * H, fill="#2B2B2B", outline="")
+        # Waschanlage: Schiene an der Decke, große Ventilatoren am Boden
+        rail = Y(0.27)
+        c.create_rectangle(X(0.04), rail - 5 * s, X(0.96), rail + 5 * s, fill="#4A525C", outline="")
+        drying = phase == "Trocknen"
+        for fx in (0.08, 0.92):
+            fcx, fcy, fr = X(fx), gy - 0.2 * H, 0.1 * H
+            c.create_line(fcx, fcy, fcx, gy, fill="#5A616B", width=max(2, 6 * s))
+            c.create_oval(fcx - fr, fcy - fr, fcx + fr, fcy + fr, fill="#E6E9ED", outline="#5A616B", width=max(1, 3 * s))
+            spin = (wt or 0) * (14 if drying else 0)
+            for b in range(4):
+                a = spin + b * math.pi / 2
+                c.create_polygon(fcx, fcy, fcx + math.cos(a - 0.3) * fr * 0.9, fcy + math.sin(a - 0.3) * fr * 0.9,
+                                 fcx + math.cos(a + 0.3) * fr * 0.9, fcy + math.sin(a + 0.3) * fr * 0.9,
+                                 fill="#3D8BD4", outline="")
+            c.create_oval(fcx - 6 * s, fcy - 6 * s, fcx + 6 * s, fcy + 6 * s, fill="#5A616B", outline="")
+
+        # Flugzeug
+        length = min(0.62 * W, 1.05 * H)
+        cx = X(0.5)
+        py = gy - 0.121 * length
+        tail, nose = cx - 0.56 * length, cx + 0.56 * length
+        park = cx - 0.66 * length
+        gx = {"Einschäumen": tail + (nose - tail) * f, "Bürsten": nose + (tail - nose) * f}.get(phase, park)
+        # Waschroboter: Wagen an der Schiene mit Gesicht, Mast hinter dem Flugzeug
+        c.create_rectangle(gx - 0.012 * W, rail, gx + 0.012 * W, gy, fill="#E0A21B", outline="")
+        draw_plane(c, cx, py, length)
+        # Schmutz (vor dem Waschen) und Schaum
+        if not self.clean:
+            for i in range(16):
+                lx, ly = -0.42 + 0.84 * rnd(i, 51), -0.04 + 0.08 * rnd(i, 52)
+                x = cx + lx * length
+                if phase in ("Abspülen", "Trocknen", "Blitzblank!") or (phase == "Bürsten" and x > gx):
+                    continue
+                r = (0.008 + 0.012 * rnd(i, 53)) * length
+                c.create_oval(x - r, py + ly * length - r * 0.7, x + r, py + ly * length + r * 0.7, fill="#8A7457",
+                              outline="")
+        if phase in ("Einschäumen", "Bürsten", "Abspülen"):
+            for i in range(60):
+                lx, ly = -0.5 + 1.0 * rnd(i, 61), -0.07 + 0.14 * rnd(i, 62)
+                x = cx + lx * length
+                if (phase == "Einschäumen" and x > gx) or (phase == "Abspülen" and rnd(i, 63) < f):
+                    continue
+                r = (0.012 + 0.016 * rnd(i, 64)) * length
+                c.create_oval(x - r, py + ly * length - r, x + r, py + ly * length + r, fill="#FBFDFF",
+                              outline="#D8E6F2")
+        # Bürsten am Waschroboter
+        spin = (wt or 0) * (16 if phase == "Bürsten" else 5)
+        for by, br in ((py - 0.055 * length - 0.06 * length, 0.06 * length), (py + 0.055 * length + 0.04 * length, 0.04 * length)):
+            c.create_line(gx, rail if by < py else gy, gx, by, fill="#E0A21B", width=max(2, 6 * s))
+            c.create_oval(gx - br, by - br, gx + br, by + br, fill="#3D8BD4", outline="#2B6CB0", width=max(1, 2 * s))
+            for b in range(6):
+                a = spin + b * math.pi / 3
+                c.create_line(gx, by, gx + math.cos(a) * br, by + math.sin(a) * br, fill="#CFE6F7", width=max(1, 2 * s))
+            for b in range(16):
+                a = spin + b * math.pi / 8
+                c.create_oval(gx + math.cos(a) * br - 2 * s, by + math.sin(a) * br - 2 * s,
+                              gx + math.cos(a) * br + 2 * s, by + math.sin(a) * br + 2 * s, fill="#7FB2FF", outline="")
+        # Wagen mit freundlichem Gesicht
+        round_rect(c, gx - 0.04 * W, rail - 0.05 * H, gx + 0.04 * W, rail + 0.03 * H, 10 * s, fill="#F2B233",
+                   outline="#C98A12", width=max(1, 2 * s))
+        for ex in (-0.014, 0.014):
+            c.create_oval(gx + ex * W - 7 * s, rail - 0.03 * H - 7 * s, gx + ex * W + 7 * s, rail - 0.03 * H + 7 * s,
+                          fill="white", outline="")
+            c.create_oval(gx + ex * W - 3 * s, rail - 0.03 * H - 3 * s, gx + ex * W + 3 * s, rail - 0.03 * H + 3 * s,
+                          fill="#1E2A38", outline="")
+        c.create_arc(gx - 0.014 * W, rail - 0.03 * H, gx + 0.014 * W, rail + 0.015 * H, start=200, extent=140,
+                     style="arc", outline="#1E2A38", width=max(1, 2 * s))
+        t = wt or 0.0
+        if phase in ("Einschäumen", "Bürsten"):                       # Düsen sprühen Schaum bzw. Wasser
+            col = "#FFFFFF" if phase == "Einschäumen" else "#9CCBF0"
+            for i in range(14):
+                a = rnd(i, 71) * 2 * math.pi
+                d = ((t * 3 + rnd(i, 72)) % 1) * 0.12 * length
+                x, y = gx + math.cos(a) * d, py + (rnd(i, 73) - 0.5) * 0.25 * length + math.sin(a) * d * 0.3
+                r = 3 * s if phase == "Einschäumen" else 2 * s
+                c.create_oval(x - r, y - r, x + r, y + r, fill=col, outline="")
+        if phase == "Abspülen":                                         # Regen aus der Decke
+            c.create_rectangle(X(0.04), Y(0.3), X(0.96), Y(0.3) + 6 * s, fill="#7D8794", outline="")
+            for i in range(90):
+                x = X(0.05 + 0.9 * rnd(i, 81))
+                y = Y(0.31) + ((rnd(i, 82) + t * 1.6) % 1) * (gy - Y(0.31))
+                c.create_line(x, y, x, y + 0.035 * H, fill="#7FB8E6", width=max(1, 2 * s))
+        if drying:                                                      # Wind von den Ventilatoren
+            for i in range(26):
+                y = py + (rnd(i, 91) - 0.5) * 0.3 * length
+                side = 1 if i % 2 else -1
+                prog = (rnd(i, 92) + t * 1.3) % 1
+                x = X(0.08) + prog * 0.45 * W if side > 0 else X(0.92) - prog * 0.45 * W
+                c.create_line(x, y, x + side * 0.05 * W, y, fill="#FFFFFF", width=max(1, 2 * s))
+        if phase == "Blitzblank!":                                      # Glitzern
+            for i in range(14):
+                x, y = cx + (-0.45 + 0.9 * rnd(i, 101)) * length, py + (-0.06 + 0.1 * rnd(i, 102)) * length
+                r = (8 + 12 * abs(math.sin(t * 6 + i))) * s
+                c.create_polygon(x, y - r, x + r * 0.25, y - r * 0.25, x + r, y, x + r * 0.25, y + r * 0.25, x, y + r,
+                                 x - r * 0.25, y + r * 0.25, x - r, y, x - r * 0.25, y - r * 0.25, fill="#FFE27A",
+                                 outline="")
 
     def draw_boarding(self, c, T, z):
         """Offene Tür und Fluggäste auf der Treppe; ``T`` rechnet Szene- in Bildschirmpunkte um."""
@@ -3069,6 +3305,12 @@ class FlightScreen(Screen):
 
     def announce(self):
         name = self.target["name"]
+        if self.hangar:
+            text = show = "Wir sind im Hangar. Hier wird das Flugzeug geprüft und gewaschen."
+            self.app.sound.speak(text)
+            self.say(show, 3)
+            self.app.animate()
+            return
         if self.phase == "gate":
             text = f"Willkommen an Bord! Flug nach {name}. Flugzeit etwa {hours_text(self.flight['hours'], True)}."
             show = f"Flug nach {name}"
@@ -3125,7 +3367,14 @@ class FlightScreen(Screen):
 
     def key(self, k, char):
         ch = (char or "").lower()
-        if char in DOOR_KEYS or k == "odiaeresis":
+        if ch == "h":
+            self.toggle_hangar()
+        elif ch == "w":
+            self.wash_plane()
+        elif self.hangar and not (k in KEYS_BACK or ch in ("v", "t")):
+            self.say("Wir sind im Hangar – W: waschen, H: hinausrollen", 2.5)
+            self.app.animate()
+        elif char in DOOR_KEYS or k == "odiaeresis":
             self.toggle_open()
         elif k in KEYS_NEXT or k in KEYS_OK:
             self.go()
@@ -3142,6 +3391,22 @@ class FlightScreen(Screen):
 
     def tick(self):
         t = self.t
+        if self.hangar:
+            hg, now = self.hangar, time.monotonic()
+            if hg["out"] is not None and now - hg["out"] >= HANGAR_T:
+                self.hangar = None
+                return True
+            wt = self.plane_wash_t()
+            if wt is not None:
+                name = plane_wash_phase(wt)[0]
+                if name != hg.get("said"):
+                    hg["said"] = name
+                    self.say("Blitzblank! Das Flugzeug glänzt." if name == "Blitzblank!" else name + " …", 3)
+                if wt >= PLANE_WASH_T:
+                    hg["wash"] = None
+                    self.clean = True
+                return True
+            return self.hangar_state()[0] != "drin" or now < self.message[1]
         if self.door:
             if self.door["closing"] is not None and time.monotonic() - self.door["closing"] > 0.85:
                 self.door = None
@@ -3154,6 +3419,7 @@ class FlightScreen(Screen):
             self.say(f"Landeanflug auf {self.target['name']}!", 3)
         elif self.phase == "landing" and t >= LANDING_T:
             self.set_phase("arrived")
+            self.clean = False
             self.say(f"Willkommen in {self.target['name']}!", 4)
             self.app.sound.speak(self.welcome_text())
         return self.phase in ("takeoff", "cruise", "landing") or time.monotonic() < self.message[1]
@@ -3164,7 +3430,17 @@ class FlightScreen(Screen):
         hh = HEADER_H * s
         panel_w = min(430 * s, w * 0.38)
         z = self.zoom()
-        if z > 1.001:
+        state = self.hangar_state()
+        if state and state[0] == "drin":
+            self.draw_hangar(c, 0, hh, w - panel_w, h, w)
+        elif state:
+            u = smooth(state[1])
+            if state[0] == "rein":
+                dx, slide = 0.65 * u, 0.6 * (1 - smooth(state[1] / 0.35))
+            else:
+                dx, slide = 0.65 * (1 - u), 0.6 * smooth((state[1] - 0.65) / 0.35)
+            self.draw_scene(c, 0, hh, w - panel_w, h, w, dx, slide)
+        elif z > 1.001:
             # beim Ein- und Aussteigen rückt die Kamera an die Tür heran
             c.addtag_all("vorher")
             self.draw_scene(c, 0, hh, w - panel_w, h, w)
@@ -3190,7 +3466,7 @@ class FlightScreen(Screen):
                       font=tf, fill=text_color_for(color))
         self.draw_panel(c, w, h, w - panel_w, hh)
 
-    def draw_scene(self, c, x1, y1, x2, y2, full_x2):
+    def draw_scene(self, c, x1, y1, x2, y2, full_x2, plane_dx=0.0, hangar=None):
         app, s = self.app, self.app.s
         W, H = x2 - x1, y2 - y1
         X, A, pitch, v = flight_state(self.phase, self.t)
@@ -3240,7 +3516,7 @@ class FlightScreen(Screen):
                 c.create_rectangle(dx, gy + 0.006 * H, dx + 0.1 * W, gy + 0.013 * H, fill="#F2F2F2", outline="")
                 c.create_oval(dx - 2 * s, gy - 0.012 * H - 2 * s, dx + 2 * s, gy - 0.012 * H + 2 * s,
                               fill="#FFE27A", outline="")
-            if self.phase in ("gate", "arrived"):
+            if self.phase in ("gate", "arrived") and not self.hangar:
                 self.draw_stairs(c, x1 + PLANE_X * W, gy, min(0.36 * W, 0.7 * H))
 
         # Wolken: einzelne Wolken und die Wolkendecke, durch die man beim Steigen fliegt
@@ -3275,7 +3551,11 @@ class FlightScreen(Screen):
             ex, ey = x1 + PLANE_X * W - 0.06 * length, py + 0.08 * length
             for dy in (-3 * s, 3 * s):
                 c.create_line(x1, ey + dy, ex, ey + dy, fill=trail, width=max(2, 4 * s))
-        draw_plane(c, x1 + PLANE_X * W, py, length, pitch, gear=A < 0.6)
+        if hangar is not None:
+            self.draw_hangar_outside(c, x1, gy, H, W, full_x2, hangar, "hinten")
+        draw_plane(c, x1 + (PLANE_X + plane_dx) * W, py, length, pitch, gear=A < 0.6)
+        if hangar is not None:
+            self.draw_hangar_outside(c, x1, gy, H, W, full_x2, hangar, "vorn")
         self.geo = (x1 + PLANE_X * W, py, gy, length, W)
 
         # Höhe und Tempo
@@ -3349,12 +3629,21 @@ class FlightScreen(Screen):
 
         # Knöpfe
         go_label = {"gate": "▼", "cruise": "▶▶"}.get(self.phase, "▼")
-        buttons = [(go_label, self.go, self.phase in ("gate", "cruise"), "#F7D117", PANEL, 30),
-                   ("Ding", self.doors, True, "#E8483B", "white", 18),
-                   ("Ansage", self.announce, True, "#3D8BD4", "white", 17),
-                   ("R", self.return_flight, self.phase == "arrived", "#8E6BBF", "white", 30),
-                   ("U", self.change, self.at_airport(), "#2F855A", "white", 30),
-                   ("Ö", self.toggle_open, self.phase in ("gate", "arrived"), "#2BA59B", "white", 30)]
+        ground = self.phase in ("gate", "arrived")
+        state = self.hangar_state()
+        washing = self.plane_wash_t() is not None
+        if state:
+            inside = state[0] == "drin"
+            buttons = [("W", self.wash_plane, inside and not washing, "#3D8BD4", "white", 30),
+                       ("H", self.toggle_hangar, inside and not washing, "#6B7C93", "white", 30),
+                       ("Ansage", self.announce, True, "#3D8BD4", "white", 17)]
+        else:
+            buttons = [(go_label, self.go, self.phase in ("gate", "cruise"), "#F7D117", PANEL, 30),
+                       ("Ansage", self.announce, True, "#3D8BD4", "white", 17),
+                       ("R", self.return_flight, self.phase == "arrived", "#8E6BBF", "white", 30),
+                       ("U", self.change, self.at_airport(), "#2F855A", "white", 30),
+                       ("Ö", self.toggle_open, ground, "#2BA59B", "white", 30),
+                       ("H", self.toggle_hangar, ground and not self.door, "#6B7C93", "white", 30)]
         bgap = 12 * s
         bsize = min(84 * s, (pw - (len(buttons) - 1) * bgap) / len(buttons))
         by2 = h - 50 * s
@@ -3369,7 +3658,10 @@ class FlightScreen(Screen):
                 app.hit(bx1, btn_y, bx1 + bsize, btn_y + bsize, cb)
             bx1 += bsize + bgap
         # großer Knopf unten
-        if self.phase == "gate":
+        if state:
+            label, cb, on = ("Waschanlage läuft …", None, False) if washing else \
+                ("H  Raus aus dem Hangar", self.toggle_hangar, state[0] == "drin")
+        elif self.phase == "gate":
             label, cb, on = "✈  Abflug!", self.go, True
         elif self.phase == "arrived":
             label, cb, on = ("⟲  Rückflug nach Berlin" if self.direction == 0 else f"✈  Nochmal nach {self.flight['name']}",
@@ -3395,6 +3687,9 @@ class FlightScreen(Screen):
                     "arrived": f"{self.target['hello']} Willkommen in {self.target['name']}!"}[self.phase]
             if self.door:
                 text = "Tür offen – Ö schließt sie"
+            if state:
+                text = plane_wash_phase(self.plane_wash_t())[0] if washing else (
+                    "W: waschen · H: hinausrollen" if state[0] == "drin" else "Das Flugzeug rollt …")
         box_y1, box_y2 = y + 30 * s, btn_y - 14 * s
         if box_y2 - box_y1 >= 40 * s:
             round_rect(c, ix, box_y1, ix + pw, box_y2, 14 * s, fill="#11181F", outline="#3A4A5C", width=2 * s)

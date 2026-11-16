@@ -265,6 +265,32 @@ echte Flugzeit da. Die Flüge im Spiel dauern nur 25 bis 40 Sekunden.
 | `R` | R / großer Knopf | nach der Landung zurückfliegen (bzw. noch einmal hin) |
 | `U` | U | am BER am Boden: in S-Bahn, Regionalbahn oder Bus umsteigen |
 | `Ö` | Ö | am Boden: Tür auf, Fluggäste steigen über die Treppe ein bzw. aus |
+| `H` | H | am Boden: in den Hangar rollen und wieder hinaus |
+| `W` | W | im Hangar: durch die Flugzeug-Waschanlage |
+
+### Hangar und Flugzeug-Waschanlage
+
+Am Boden (vor dem Abflug oder nach der Landung) rollt das Flugzeug mit `H`
+in einen großen **Hangar**: Die Halle schiebt sich ins Bild, das Flugzeug
+rollt durch das offene Tor, und drinnen sieht man die hohe Halle mit
+Dachbindern, Lampen, Fensterband und dem Schild „HANGAR BER“ (bzw. dem Code
+des Zielflughafens). Ein zweites `H` rollt wieder hinaus.
+
+Nach jedem Flug ist das Flugzeug schmutzig. Mit `W` startet im Hangar die
+**Flugzeug-Waschanlage**. Die gibt es in Wirklichkeit nicht, sie ist für das
+Spiel erfunden: Ein gelber Waschroboter mit freundlichem Gesicht fährt an
+einer Schiene unter dem Dach entlang und hat oben und unten je eine runde,
+sich drehende Bürste.
+
+1. **Einschäumen:** Der Roboter fährt vom Heck zur Nase und sprüht Schaum.
+2. **Bürsten:** Zurück zum Heck, die Bürsten drehen sich schnell, der Schmutz
+   verschwindet.
+3. **Abspülen:** Aus einem Rohr an der Decke regnet es, der Schaum wird weniger.
+4. **Trocknen:** Zwei riesige Ventilatoren blasen Wind über das Flugzeug.
+5. **Blitzblank!** Das Flugzeug glitzert.
+
+Während der Wäsche kann man nicht hinausrollen. Im Hangar steigt niemand ein
+oder aus, und abfliegen geht erst wieder draußen.
 
 Die Flüge sind auch mit den anderen Verkehrsmitteln verbunden: Wer mit der
 S-Bahn (S9, S85), dem FEX oder einem Regionalzug zum **Flughafen BER**

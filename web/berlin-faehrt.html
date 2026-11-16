@@ -2814,6 +2814,20 @@ class WorldMap {
   }
 }
 
+const HANGAR_T = 2.8;          // Sekunden zum Hinein- bzw. Hinausrollen
+// Erfundene Flugzeug-Waschanlage: Ende jedes Schritts in Sekunden
+const PLANE_WASH = [[3.5, "Einschäumen"], [7.0, "Bürsten"], [9.5, "Abspülen"], [12.0, "Trocknen"], [14.0, "Blitzblank!"]];
+const PLANE_WASH_T = PLANE_WASH[PLANE_WASH.length - 1][0];
+
+/** [Schritt, Fortschritt 0…1] der Flugzeugwäsche nach t Sekunden. */
+function planeWashPhase(t) {
+  let start = 0;
+  for (const [end, name] of PLANE_WASH) {
+    if (t < end || end === PLANE_WASH_T) return [name, Math.min(1, Math.max(0, (t - start) / (end - start)))];
+    start = end;
+  }
+}
+
 /** Ein Flug vom BER zum Ziel (Richtung 0) oder zurück (Richtung 1): Boarding, Start, Reiseflug, Landung. */
 class FlightScreen extends Screen {
   constructor(app, index, direction = 0, linesScreen = null) {
@@ -2825,6 +2839,7 @@ class FlightScreen extends Screen {
     this.line = app.data.lines.flug[index];
     this.flight = app.data.flights.flights[index];
     this.home = app.data.flights.home;
+    this.clean = false;      // nach dem Waschen glänzt das Flugzeug, nach dem nächsten Flug ist es wieder schmutzig
     this.startGate();
   }
 
@@ -2833,6 +2848,7 @@ class FlightScreen extends Screen {
     this.t0 = now();
     this.boost = 0;
     this.door = null;        // offene Flugzeugtür mit Fluggästen auf der Treppe (Taste Ö)
+    this.hangar = null;      // im Hangar (Taste H), dort auch die Waschanlage (Taste W)
     this.message = [`Boarding nach ${this.target.name}! Drücke ▼ zum Abflug.`, now() + 4];
   }
 
@@ -2874,7 +2890,9 @@ class FlightScreen extends Screen {
   /** ▼ / Leertaste: abfliegen; im Reiseflug schneller fliegen. */
   go() {
     const app = this.app;
-    if (this.door) {
+    if (this.hangar) {
+      this.say("Erst aus dem Hangar rollen: Taste H", 2);
+    } else if (this.door) {
       this.say("Erst die Tür schließen: Taste Ö", 2);
     } else if (this.phase === "gate") {
       this.setPhase("takeoff");
@@ -2892,7 +2910,9 @@ class FlightScreen extends Screen {
   /** Taste Ö: Flugzeugtür auf – Fluggäste steigen über die Treppe ein (am Start) bzw. aus (am Ziel). */
   toggleOpen() {
     const t = now();
-    if (this.phase !== "gate" && this.phase !== "arrived") {
+    if (this.hangar) {
+      this.say("Im Hangar steigt niemand ein.", 2);
+    } else if (this.phase !== "gate" && this.phase !== "arrived") {
       this.say("In der Luft bleibt die Tür zu!", 2);
     } else if (this.door) {
       if (this.door.closing !== null) return;
@@ -2909,6 +2929,209 @@ class FlightScreen extends Screen {
       this.say(way === "in" ? "Boarding! Die Fluggäste steigen ein." : "Aussteigen! Alle gehen von Bord.", 3);
     }
     this.app.animate();
+  }
+
+  // --- Hangar (Taste H) und Flugzeug-Waschanlage (Taste W) ---
+  /** null, ["rein", 0…1], ["drin", null] oder ["raus", 0…1]. */
+  hangarState() {
+    const hg = this.hangar;
+    if (!hg) return null;
+    const t = now();
+    if (hg.out !== null) return ["raus", Math.min(1, (t - hg.out) / HANGAR_T)];
+    if (t - hg.t0 < HANGAR_T) return ["rein", (t - hg.t0) / HANGAR_T];
+    return ["drin", null];
+  }
+
+  planeWashT() {
+    const hg = this.hangar;
+    return !hg || hg.wash === null ? null : now() - hg.wash;
+  }
+
+  /** Taste H: am Boden in den großen Hangar rollen – und wieder hinaus. */
+  toggleHangar() {
+    const app = this.app, t = now(), state = this.hangarState();
+    if (this.phase !== "gate" && this.phase !== "arrived") this.say("In der Luft gibt es keinen Hangar!", 2);
+    else if (this.door) this.say("Erst die Tür schließen: Taste Ö", 2);
+    else if (!state) {
+      this.hangar = { t0: t, out: null, wash: null, said: null };
+      this.say("Ab in den Hangar!", 2.5);
+      app.sound.play("jet");
+    } else if (state[0] !== "drin") return;
+    else if (this.planeWashT() !== null) this.say("Erst fertig waschen!", 2);
+    else {
+      this.hangar.out = t;
+      this.say("Wir rollen hinaus.", 2.5);
+      app.sound.play("jet");
+    }
+    app.animate();
+  }
+
+  /** Taste W: im Hangar durch die (erfundene) Flugzeug-Waschanlage. */
+  washPlane() {
+    const state = this.hangarState();
+    if (!state || state[0] !== "drin") this.say("Gewaschen wird im Hangar – erst Taste H!", 2.5);
+    else if (this.planeWashT() === null) {
+      this.hangar.wash = now();
+      this.app.sound.play("bus");
+      this.say("Die Waschanlage startet!", 2);
+    }
+    this.app.animate();
+  }
+
+  /** Hangar von außen beim Hinein- und Hinausrollen; part: "hinten" (vor dem Flugzeug) oder "vorn". */
+  drawHangarOutside(c, x1, gy, H, W, fullX2, slide, part) {
+    const s = this.app.s;
+    const hx = x1 + (0.62 + slide) * W, top = gy - 0.64 * H, doorTop = gy - 0.46 * H;
+    const right = Math.max(fullX2, hx + 1.4 * W);
+    if (part === "hinten") {
+      const arc = Array.from({ length: 21 }, (_, k) => [hx + (right - hx) * k / 20, top - 0.08 * H * Math.sin(Math.PI * k / 20)]);
+      c.polygon([[hx, gy]].concat(arc, [[right, gy]]), { fill: "#B9C1CA" });
+      c.rect(hx + 0.05 * W, doorTop, right, gy, "#3A4048");
+      for (let k = 0; k < 6; k++) {                                   // Lampen in der Halle
+        const lx = hx + 0.15 * W + k * 0.18 * W;
+        c.oval(lx - 6 * s, doorTop + 0.05 * H - 4 * s, lx + 6 * s, doorTop + 0.05 * H + 4 * s, { fill: "#FFE9A8" });
+      }
+      c.rect(hx + 0.05 * W, gy - 0.015 * H, right, gy, "#5A616B");
+    } else {
+      c.rect(hx, top, right, doorTop, "#C9D0D8");
+      for (let k = 0; hx + k * 0.03 * W <= right; k++) {              // Wellblech
+        const lx = hx + k * 0.03 * W;
+        c.line([[lx, top], [lx, doorTop]], { fill: "#AFB8C2", width: Math.max(1, s) });
+      }
+      c.polygon([[hx, top], [hx + 0.05 * W, top], [hx + 0.05 * W, gy], [hx, gy]], { fill: "#C9D0D8", outline: "#AFB8C2" });
+      c.rect(hx + 0.05 * W, doorTop - 3 * s, right, doorTop + 3 * s, "#F2B233");
+      c.text(hx + 0.32 * W, (top + doorTop) / 2, "HANGAR", this.app.font(28, "bold"), "#1E2A38");
+    }
+  }
+
+  /** Im Hangar: große Halle, das Flugzeug – und die Flugzeug-Waschanlage. */
+  drawHangar(c, x1, y1, x2, y2, fullX2) {
+    const app = this.app, s = app.s;
+    const W = x2 - x1, H = y2 - y1, X = f => x1 + f * W, Y = f => y1 + f * H;
+    const gy = Y(0.82), wt = this.planeWashT();
+    const [phase, f] = wt !== null ? planeWashPhase(wt) : [null, 0];
+
+    // Halle: Rückwand, Fensterband, Dachbinder, Lampen
+    c.rect(x1, y1, fullX2, gy, "#D5DAE0");
+    for (let k = 0; X(k * 0.06) < fullX2; k++) c.line([[X(k * 0.06), Y(0.2)], [X(k * 0.06), gy]], { fill: "#C3C9D0", width: Math.max(1, 2 * s) });
+    c.rect(x1, Y(0.08), fullX2, Y(0.2), "#CFE6F7");
+    for (let k = 0; X(k * 0.08) < fullX2; k++) c.rect(X(k * 0.08) - 3 * s, Y(0.08), X(k * 0.08) + 3 * s, Y(0.2), "#8B949E");
+    c.rect(x1, y1, fullX2, Y(0.04), "#6F7882");
+    for (let k = 0; X(k * 0.05) < fullX2; k++) {                      // Fachwerk unter dem Dach
+      c.line([[X(k * 0.05), Y(0.04)], [X(k * 0.05 + 0.025), Y(0.08)], [X(k * 0.05 + 0.05), Y(0.04)]], { fill: "#8B949E", width: Math.max(1, 2 * s) });
+    }
+    for (let k = 0; k < 5; k++) {
+      const lx = X(0.1 + k * 0.2);
+      c.line([[lx, Y(0.04)], [lx, Y(0.2)]], { fill: "#5A616B", width: Math.max(1, 2 * s) });
+      c.polygon([[lx - 14 * s, Y(0.2) + 12 * s], [lx + 14 * s, Y(0.2) + 12 * s], [lx + 6 * s, Y(0.2)], [lx - 6 * s, Y(0.2)]], { fill: "#3A4048" });
+      c.oval(lx - 12 * s, Y(0.2) + 8 * s, lx + 12 * s, Y(0.2) + 18 * s, { fill: "#FFF3C4" });
+    }
+    const code = (this.phase === "gate" ? this.origin : this.target).code;
+    c.roundRect(X(0.36), Y(0.36), X(0.64), Y(0.46), 8 * s, { fill: "#1E2A38" });
+    c.text(X(0.5), Y(0.41), `HANGAR ${code}`, app.font(20, "bold"), "white");
+    // Boden mit Markierungen und Spiegelung
+    c.rect(x1, gy, fullX2, y2, "#AEB5BD");
+    c.rect(x1, gy + 0.03 * H, fullX2, gy + 0.05 * H, "#BCC2C9");
+    c.rect(x1, gy + 0.09 * H, fullX2, gy + 0.105 * H, "#F2D21B");
+    for (let k = 0; k < 8; k++) {
+      c.polygon([[X(0.02 + k * 0.03), y2], [X(0.035 + k * 0.03), y2], [X(0.05 + k * 0.03), y2 - 0.05 * H], [X(0.035 + k * 0.03), y2 - 0.05 * H]], { fill: "#2B2B2B" });
+    }
+
+    // Waschanlage: Schiene an der Decke, große Ventilatoren am Boden
+    const rail = Y(0.27);
+    c.rect(X(0.04), rail - 5 * s, X(0.96), rail + 5 * s, "#4A525C");
+    const drying = phase === "Trocknen";
+    for (const fx of [0.08, 0.92]) {
+      const fcx = X(fx), fcy = gy - 0.2 * H, fr = 0.1 * H;
+      c.line([[fcx, fcy], [fcx, gy]], { fill: "#5A616B", width: Math.max(2, 6 * s) });
+      c.oval(fcx - fr, fcy - fr, fcx + fr, fcy + fr, { fill: "#E6E9ED", outline: "#5A616B", width: Math.max(1, 3 * s) });
+      const spin = (wt || 0) * (drying ? 14 : 0);
+      for (let b = 0; b < 4; b++) {
+        const a = spin + b * Math.PI / 2;
+        c.polygon([[fcx, fcy], [fcx + Math.cos(a - 0.3) * fr * 0.9, fcy + Math.sin(a - 0.3) * fr * 0.9],
+          [fcx + Math.cos(a + 0.3) * fr * 0.9, fcy + Math.sin(a + 0.3) * fr * 0.9]], { fill: "#3D8BD4" });
+      }
+      c.oval(fcx - 6 * s, fcy - 6 * s, fcx + 6 * s, fcy + 6 * s, { fill: "#5A616B" });
+    }
+
+    // Flugzeug
+    const length = Math.min(0.62 * W, 1.05 * H), cx = X(0.5), py = gy - 0.121 * length;
+    const tail = cx - 0.56 * length, nose = cx + 0.56 * length, park = cx - 0.66 * length;
+    const gx = phase === "Einschäumen" ? tail + (nose - tail) * f : phase === "Bürsten" ? nose + (tail - nose) * f : park;
+    c.rect(gx - 0.012 * W, rail, gx + 0.012 * W, gy, "#E0A21B");    // Mast des Waschroboters
+    drawPlane(c, cx, py, length);
+    // Schmutz (vor dem Waschen) und Schaum
+    if (!this.clean) {
+      for (let i = 0; i < 16; i++) {
+        const lx = -0.42 + 0.84 * rnd(i, 51), ly = -0.04 + 0.08 * rnd(i, 52), x = cx + lx * length;
+        if (["Abspülen", "Trocknen", "Blitzblank!"].includes(phase) || (phase === "Bürsten" && x > gx)) continue;
+        const r = (0.008 + 0.012 * rnd(i, 53)) * length;
+        c.oval(x - r, py + ly * length - r * 0.7, x + r, py + ly * length + r * 0.7, { fill: "#8A7457" });
+      }
+    }
+    if (["Einschäumen", "Bürsten", "Abspülen"].includes(phase)) {
+      for (let i = 0; i < 60; i++) {
+        const lx = -0.5 + rnd(i, 61), ly = -0.07 + 0.14 * rnd(i, 62), x = cx + lx * length;
+        if ((phase === "Einschäumen" && x > gx) || (phase === "Abspülen" && rnd(i, 63) < f)) continue;
+        const r = (0.012 + 0.016 * rnd(i, 64)) * length;
+        c.oval(x - r, py + ly * length - r, x + r, py + ly * length + r, { fill: "#FBFDFF", outline: "#D8E6F2" });
+      }
+    }
+    // Bürsten am Waschroboter
+    const spin = (wt || 0) * (phase === "Bürsten" ? 16 : 5);
+    for (const [by, br] of [[py - 0.115 * length, 0.06 * length], [py + 0.095 * length, 0.04 * length]]) {
+      c.line([[gx, by < py ? rail : gy], [gx, by]], { fill: "#E0A21B", width: Math.max(2, 6 * s) });
+      c.oval(gx - br, by - br, gx + br, by + br, { fill: "#3D8BD4", outline: "#2B6CB0", width: Math.max(1, 2 * s) });
+      for (let b = 0; b < 6; b++) {
+        const a = spin + b * Math.PI / 3;
+        c.line([[gx, by], [gx + Math.cos(a) * br, by + Math.sin(a) * br]], { fill: "#CFE6F7", width: Math.max(1, 2 * s) });
+      }
+      for (let b = 0; b < 16; b++) {
+        const a = spin + b * Math.PI / 8, bx = gx + Math.cos(a) * br, byy = by + Math.sin(a) * br;
+        c.oval(bx - 2 * s, byy - 2 * s, bx + 2 * s, byy + 2 * s, { fill: "#7FB2FF" });
+      }
+    }
+    // Wagen mit freundlichem Gesicht
+    c.roundRect(gx - 0.04 * W, rail - 0.05 * H, gx + 0.04 * W, rail + 0.03 * H, 10 * s, { fill: "#F2B233", outline: "#C98A12", width: Math.max(1, 2 * s) });
+    for (const ex of [-0.014, 0.014]) {
+      const ox = gx + ex * W, oy = rail - 0.03 * H;
+      c.oval(ox - 7 * s, oy - 7 * s, ox + 7 * s, oy + 7 * s, { fill: "white" });
+      c.oval(ox - 3 * s, oy - 3 * s, ox + 3 * s, oy + 3 * s, { fill: "#1E2A38" });
+    }
+    const smileR = 0.014 * W, smileY = rail - 0.0075 * H;
+    c.line(Array.from({ length: 9 }, (_, k) => { const a = Math.PI * (0.2 + 0.6 * k / 8); return [gx + Math.cos(a) * smileR, smileY + Math.sin(a) * smileR * 0.8]; }),
+      { fill: "#1E2A38", width: Math.max(1, 2 * s), cap: "round" });
+    const t = wt || 0;
+    if (phase === "Einschäumen" || phase === "Bürsten") {              // Düsen sprühen Schaum bzw. Wasser
+      const col = phase === "Einschäumen" ? "#FFFFFF" : "#9CCBF0", r = (phase === "Einschäumen" ? 3 : 2) * s;
+      for (let i = 0; i < 14; i++) {
+        const a = rnd(i, 71) * 2 * Math.PI, d = ((t * 3 + rnd(i, 72)) % 1) * 0.12 * length;
+        const x = gx + Math.cos(a) * d, y = py + (rnd(i, 73) - 0.5) * 0.25 * length + Math.sin(a) * d * 0.3;
+        c.oval(x - r, y - r, x + r, y + r, { fill: col });
+      }
+    }
+    if (phase === "Abspülen") {                                         // Regen aus der Decke
+      c.rect(X(0.04), Y(0.3), X(0.96), Y(0.3) + 6 * s, "#7D8794");
+      for (let i = 0; i < 90; i++) {
+        const x = X(0.05 + 0.9 * rnd(i, 81)), y = Y(0.31) + ((rnd(i, 82) + t * 1.6) % 1) * (gy - Y(0.31));
+        c.line([[x, y], [x, y + 0.035 * H]], { fill: "#7FB8E6", width: Math.max(1, 2 * s) });
+      }
+    }
+    if (drying) {                                                       // Wind von den Ventilatoren
+      for (let i = 0; i < 26; i++) {
+        const y = py + (rnd(i, 91) - 0.5) * 0.3 * length, side = i % 2 ? 1 : -1, prog = (rnd(i, 92) + t * 1.3) % 1;
+        const x = side > 0 ? X(0.08) + prog * 0.45 * W : X(0.92) - prog * 0.45 * W;
+        c.line([[x, y], [x + side * 0.05 * W, y]], { fill: "#FFFFFF", width: Math.max(1, 2 * s) });
+      }
+    }
+    if (phase === "Blitzblank!") {                                      // Glitzern
+      for (let i = 0; i < 14; i++) {
+        const x = cx + (-0.45 + 0.9 * rnd(i, 101)) * length, y = py + (-0.06 + 0.1 * rnd(i, 102)) * length;
+        const r = (8 + 12 * Math.abs(Math.sin(t * 6 + i))) * s;
+        c.polygon([[x, y - r], [x + r * 0.25, y - r * 0.25], [x + r, y], [x + r * 0.25, y + r * 0.25], [x, y + r],
+          [x - r * 0.25, y + r * 0.25], [x - r, y], [x - r * 0.25, y - r * 0.25]], { fill: "#FFE27A" });
+      }
+    }
   }
 
   /** Vergrößerung beim Ein- und Aussteigen (1 = normale Ansicht). */
@@ -2959,7 +3182,9 @@ class FlightScreen extends Screen {
   announce() {
     const name = this.target.name;
     let text, show;
-    if (this.phase === "gate") {
+    if (this.hangar) {
+      text = show = "Wir sind im Hangar. Hier wird das Flugzeug geprüft und gewaschen.";
+    } else if (this.phase === "gate") {
       text = `Willkommen an Bord! Flug nach ${name}. Flugzeit etwa ${hoursText(this.flight.hours, true)}.`;
       show = `Flug nach ${name}`;
     } else if (this.phase === "takeoff") {
@@ -3022,7 +3247,12 @@ class FlightScreen extends Screen {
 
   key(k, char) {
     const ch = (char || "").toLowerCase();
-    if (DOOR_KEYS.has(char)) this.toggleOpen();
+    if (ch === "h") this.toggleHangar();
+    else if (ch === "w") this.washPlane();
+    else if (this.hangar && !(KEYS_BACK.has(k) || ch === "v" || ch === "t")) {
+      this.say("Wir sind im Hangar – W: waschen, H: hinausrollen", 2.5);
+      this.app.animate();
+    } else if (DOOR_KEYS.has(char)) this.toggleOpen();
     else if (KEYS_NEXT.has(k) || KEYS_OK.has(k)) this.go();
     else if (KEYS_BACK.has(k)) this.back();
     else if (ch === "t") this.doors();
@@ -3033,6 +3263,27 @@ class FlightScreen extends Screen {
 
   tick() {
     const t = this.t;
+    if (this.hangar) {
+      const hg = this.hangar, tn = now();
+      if (hg.out !== null && tn - hg.out >= HANGAR_T) {
+        this.hangar = null;
+        return true;
+      }
+      const wt = this.planeWashT();
+      if (wt !== null) {
+        const name = planeWashPhase(wt)[0];
+        if (name !== hg.said) {
+          hg.said = name;
+          this.say(name === "Blitzblank!" ? "Blitzblank! Das Flugzeug glänzt." : name + " …", 3);
+        }
+        if (wt >= PLANE_WASH_T) {
+          hg.wash = null;
+          this.clean = true;
+        }
+        return true;
+      }
+      return this.hangarState()[0] !== "drin" || tn < this.message[1];
+    }
     if (this.door) {
       if (this.door.closing !== null && now() - this.door.closing > 0.85) this.door = null;
       return true;
@@ -3045,6 +3296,7 @@ class FlightScreen extends Screen {
       this.say(`Landeanflug auf ${this.target.name}!`, 3);
     } else if (this.phase === "landing" && t >= LANDING_T) {
       this.setPhase("arrived");
+      this.clean = false;
       this.say(`Willkommen in ${this.target.name}!`, 4);
       this.app.sound.speak(this.welcomeText());
     }
@@ -3056,8 +3308,15 @@ class FlightScreen extends Screen {
     const app = this.app, s = app.s;
     const hh0 = HEADER_H * s;
     const panelW = Math.min(430 * s, w * 0.38);
-    const z = this.zoom();
-    if (z > 1.001) {
+    const z = this.zoom(), state = this.hangarState();
+    if (state && state[0] === "drin") {
+      this.drawHangar(c, 0, hh0, w - panelW, h, w);
+    } else if (state) {
+      const u = smooth(state[1]);
+      const [dx, slide] = state[0] === "rein" ? [0.65 * u, 0.6 * (1 - smooth(state[1] / 0.35))]
+        : [0.65 * (1 - u), 0.6 * smooth((state[1] - 0.65) / 0.35)];
+      this.drawScene(c, 0, hh0, w - panelW, h, w, dx, slide);
+    } else if (z > 1.001) {
       // beim Ein- und Aussteigen rückt die Kamera an die Tür heran
       const geo = this.groundGeo(0, hh0, w - panelW, h), [px, , gy, length] = geo;
       const cx = px + 0.45 * length, cy = gy - 0.05 * length, ctx = c.ctx;
@@ -3081,7 +3340,7 @@ class FlightScreen extends Screen {
     this.drawPanel(c, w, h, w - panelW, hh);
   }
 
-  drawScene(c, x1, y1, x2, y2, fullX2) {
+  drawScene(c, x1, y1, x2, y2, fullX2, planeDx = 0, hangar = null) {
     const app = this.app, s = app.s;
     const W = x2 - x1, H = y2 - y1;
     const [X, A, pitch] = flightState(this.phase, this.t);
@@ -3128,7 +3387,7 @@ class FlightScreen extends Screen {
         c.rect(dx, gy + 0.006 * H, dx + 0.1 * W, gy + 0.013 * H, "#F2F2F2");
         c.oval(dx - 2 * s, gy - 0.012 * H - 2 * s, dx + 2 * s, gy - 0.012 * H + 2 * s, { fill: "#FFE27A" });
       }
-      if (this.phase === "gate" || this.phase === "arrived") this.drawStairs(c, x1 + PLANE_X * W, gy, length);
+      if ((this.phase === "gate" || this.phase === "arrived") && !this.hangar) this.drawStairs(c, x1 + PLANE_X * W, gy, length);
     }
 
     // Wolken: einzelne Wolken und die Wolkendecke, durch die man beim Steigen fliegt
@@ -3161,7 +3420,9 @@ class FlightScreen extends Screen {
       const ex = x1 + PLANE_X * W - 0.06 * length, ey = py + 0.08 * length;
       for (const dy of [-3 * s, 3 * s]) c.line([[x1, ey + dy], [ex, ey + dy]], { fill: trail, width: Math.max(2, 4 * s) });
     }
-    drawPlane(c, x1 + PLANE_X * W, py, length, pitch, false, A < 0.6);
+    if (hangar !== null) this.drawHangarOutside(c, x1, gy, H, W, fullX2, hangar, "hinten");
+    drawPlane(c, x1 + (PLANE_X + planeDx) * W, py, length, pitch, false, A < 0.6);
+    if (hangar !== null) this.drawHangarOutside(c, x1, gy, H, W, fullX2, hangar, "vorn");
 
     // Höhe und Tempo
     if (["takeoff", "cruise", "landing"].includes(this.phase)) {
@@ -3221,12 +3482,18 @@ class FlightScreen extends Screen {
     if (frac > 0) c.roundRect(ix, y, ix + Math.max(14 * s, barW * frac), y + 14 * s, 7 * s, { fill: this.line.color });
 
     // Knöpfe
-    const buttons = [[this.phase === "cruise" ? "▶▶" : "▼", () => this.go(), this.phase === "gate" || this.phase === "cruise", "#F7D117", PANEL, 30],
-      ["Ding", () => this.doors(), true, "#E8483B", "white", 18],
-      ["Ansage", () => this.announce(), true, "#3D8BD4", "white", 17],
-      ["R", () => this.returnFlight(), this.phase === "arrived", "#8E6BBF", "white", 30],
-      ["U", () => this.change(), this.atAirport(), "#2F855A", "white", 30],
-      ["Ö", () => this.toggleOpen(), this.phase === "gate" || this.phase === "arrived", "#2BA59B", "white", 30]];
+    const ground = this.phase === "gate" || this.phase === "arrived";
+    const state = this.hangarState(), washing = this.planeWashT() !== null;
+    const inside = state && state[0] === "drin";
+    const buttons = state ? [["W", () => this.washPlane(), inside && !washing, "#3D8BD4", "white", 30],
+      ["H", () => this.toggleHangar(), inside && !washing, "#6B7C93", "white", 30],
+      ["Ansage", () => this.announce(), true, "#3D8BD4", "white", 17]]
+      : [[this.phase === "cruise" ? "▶▶" : "▼", () => this.go(), this.phase === "gate" || this.phase === "cruise", "#F7D117", PANEL, 30],
+        ["Ansage", () => this.announce(), true, "#3D8BD4", "white", 17],
+        ["R", () => this.returnFlight(), this.phase === "arrived", "#8E6BBF", "white", 30],
+        ["U", () => this.change(), this.atAirport(), "#2F855A", "white", 30],
+        ["Ö", () => this.toggleOpen(), ground, "#2BA59B", "white", 30],
+        ["H", () => this.toggleHangar(), ground && !this.door, "#6B7C93", "white", 30]];
     const bgap = 12 * s;
     const bsize = Math.min(84 * s, (pw - (buttons.length - 1) * bgap) / buttons.length);
     const by2 = h - 50 * s, btnY = by2 - bsize - 76 * s;
@@ -3239,7 +3506,10 @@ class FlightScreen extends Screen {
     }
     // großer Knopf unten
     let label, cb = null;
-    if (this.phase === "gate") [label, cb] = ["✈  Abflug!", () => this.go()];
+    if (state) {
+      if (washing) label = "Waschanlage läuft …";
+      else [label, cb] = ["H  Raus aus dem Hangar", inside ? () => this.toggleHangar() : null];
+    } else if (this.phase === "gate") [label, cb] = ["✈  Abflug!", () => this.go()];
     else if (this.phase === "arrived") {
       label = this.direction === 0 ? "⟲  Rückflug nach Berlin" : `✈  Nochmal nach ${this.flight.name}`;
       cb = () => this.returnFlight();
@@ -3258,6 +3528,7 @@ class FlightScreen extends Screen {
         landing: "Landeanflug", arrived: `${this.target.hello} Willkommen in ${this.target.name}!`,
       }[this.phase];
       if (this.door) text = "Tür offen – Ö schließt sie";
+      if (state) text = washing ? planeWashPhase(this.planeWashT())[0] : inside ? "W: waschen · H: hinausrollen" : "Das Flugzeug rollt …";
     }
     const boxY1 = y + 30 * s, boxY2 = btnY - 14 * s;
     if (boxY2 - boxY1 >= 40 * s) {
