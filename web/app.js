@@ -285,6 +285,10 @@ function drawBadge(c, x, y, name, color, kind, h, font, border = 0) {
   return w;
 }
 
+function minutesText(minutes) {
+  return minutes < 1 ? "< 1 Min." : `${minutes} Min.`;
+}
+
 function fitText(font, text, width) {
   if (font.measure(text) <= width) return text;
   while (text && font.measure(text + "…") > width) text = text.slice(0, -1);
@@ -1121,6 +1125,17 @@ class RideScreen extends Screen {
   get stops() { return this.line.directions[this.direction]; }
   get ring() { const st = this.stops; return st[0] === st[st.length - 1]; }
 
+  /** Fahrzeit in Minuten von Station i zur nächsten (laut VBB-Fahrplan) oder null. */
+  travelTime(i) {
+    const stops = this.stops;
+    if (i + 1 >= stops.length) return null;
+    const pairs = this.app.travelTimes(this.fullLine);
+    // fehlt der Abschnitt in dieser Richtung (z. B. nach Taste E), gilt die Gegenrichtung
+    let v = pairs.get(stops[i] + ">" + stops[i + 1]);
+    if (v === undefined) v = pairs.get(stops[i + 1] + ">" + stops[i]);
+    return v === undefined ? null : v;
+  }
+
   transferOptions(i = null) {
     const key = this.stops[i === null ? this.index : i];
     return this.app.transfers.options(key, [this.kind, this.lineIndex], this.app.transferKinds(this.kind));
@@ -1177,9 +1192,13 @@ class RideScreen extends Screen {
     }
 
     const nameFont = app.font(22), curFont = app.font(26, "bold"), miniFont = app.font(13, "bold");
+    const timeFont = app.font(12, "bold");
     stops.forEach((key, i) => {
       const y = rowY(i);
       if (y < top - rowH || y > h + rowH) return;
+      // Fahrzeit bis zur nächsten Station, klein neben der Strecke
+      const minutes = this.travelTime(i);
+      if (minutes !== null) c.text(trackX + 20 * s, y + rowH / 2, minutesText(minutes), timeFont, i < this.index ? "#B5AD9E" : "#7D766A", "w");
       const end = i === 0 || i === stops.length - 1;
       const r = (end ? 17 : 12) * s;
       c.oval(trackX - r, y - r, trackX + r, y + r, { fill: "white", outline: darker(color, 0.8), width: 5 * s });
@@ -1270,6 +1289,8 @@ class RideScreen extends Screen {
       }
     } else {
       c.text(ix, y, "NÄCHSTER HALT", labelFont, "#F7D117", "w");
+      const minutes = this.travelTime(this.index);
+      if (minutes !== null) c.text(ix + pw, y, "Fahrzeit " + minutesText(minutes), app.font(14), "#B8C4D0", "e");
       y += 22 * s;
       for (const ln of wrapText(midFont, st[stops[this.index + 1]], pw, 2)) {
         c.text(ix, y, ln, midFont, "#CFE8FF", "nw");
@@ -2247,7 +2268,11 @@ function drawCockpit(ride, c, w, h) {
   else if (text && now() < until) second = text;
   else if (ride.depot) second = `${depotName} – Pause. Zurück: Taste ${depotKey} · Waschen: W`;
   else if (last) second = ride.ring ? "Einmal rund um die Stadt!" : "Endstation – bitte alle aussteigen";
-  else second = "Nächster Halt: " + st[stops[ride.index + 1]];
+  else {
+    second = "Nächster Halt: " + st[stops[ride.index + 1]];
+    const minutes = ride.travelTime(ride.index);
+    if (minutes !== null) second += " · " + minutesText(minutes);
+  }
   c.text(tx, dy2 - 20 * s, fitText(ledSmall, second, tw), ledSmall, "#FFD27A", "w");
 
   // Kleine Knöpfe oben: Zurück und Ansicht wechseln
@@ -3879,6 +3904,7 @@ class App {
     this.animating = false;
     this.transfers = new Transfers(data);
     this.maps = {};
+    this.timeCache = new Map();
     this.settings = this.loadSettings();
     this.cockpit = false;    // Cockpit-Ansicht beim Fahren (Taste F), bleibt beim Umsteigen erhalten
     this.sound = new SoundPlayer();
@@ -3937,6 +3963,19 @@ class App {
     if (key && key in stations) return key;
     for (const [k, name] of Object.entries(stations)) if (name === DEFAULT_HOME) return k;
     return Object.keys(stations)[0];
+  }
+
+  /** "von>nach" -> Minuten für eine Linie, aus beiden Richtungen. */
+  travelTimes(line) {
+    if (!this.timeCache.has(line)) {
+      const pairs = new Map();
+      (line.times || []).forEach((row, d) => {
+        const stops = line.directions[d];
+        row.forEach((v, i) => { if (v !== null) pairs.set(stops[i] + ">" + stops[i + 1], v); });
+      });
+      this.timeCache.set(line, pairs);
+    }
+    return this.timeCache.get(line);
   }
 
   networkMap(kind) {

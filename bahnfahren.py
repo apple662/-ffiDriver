@@ -220,6 +220,10 @@ def draw_badge(c, x, y, name, color, kind, h, font, border=0):
     return w
 
 
+def minutes_text(minutes):
+    return "< 1 Min." if minutes < 1 else f"{minutes} Min."
+
+
 def fit_text(font, text, width):
     if font.measure(text) <= width:
         return text
@@ -1003,6 +1007,15 @@ class RideScreen(Screen):
     def stops(self):
         return self.line["directions"][self.direction]
 
+    def travel_time(self, i):
+        """Fahrzeit in Minuten von Station i zur nächsten (laut VBB-Fahrplan) oder None."""
+        stops = self.stops
+        if i + 1 >= len(stops):
+            return None
+        pairs = self.app.travel_times(self.full_line)
+        # fehlt der Abschnitt in dieser Richtung (z. B. nach Taste E), gilt die Gegenrichtung
+        return pairs.get((stops[i], stops[i + 1]), pairs.get((stops[i + 1], stops[i])))
+
     def transfer_options(self, i=None):
         key = self.stops[self.index if i is None else i]
         return self.app.transfers.options(key, exclude=(self.kind, self.line_index), kinds=self.app.transfer_kinds(self.kind))
@@ -1077,10 +1090,16 @@ class RideScreen(Screen):
         name_font = app.font(22)
         cur_font = app.font(26, "bold")
         mini_font = app.font(13, "bold")
+        time_font = app.font(12, "bold")
         for i, key in enumerate(stops):
             y = row_y(i)
             if y < top - row_h or y > h + row_h:
                 continue
+            # Fahrzeit bis zur nächsten Station, klein neben der Strecke
+            minutes = self.travel_time(i) if i < len(stops) - 1 else None
+            if minutes is not None:
+                c.create_text(track_x + 20 * s, y + row_h / 2, text=minutes_text(minutes), anchor="w",
+                              font=time_font, fill="#B5AD9E" if i < self.index else "#7D766A")
             end = i in (0, len(stops) - 1)
             r = (17 if end else 12) * s
             c.create_oval(track_x - r, y - r, track_x + r, y + r, fill="white", outline=darker(color, 0.8),
@@ -1170,6 +1189,10 @@ class RideScreen(Screen):
                 y += mid_font.metrics("linespace")
         else:
             c.create_text(ix, y, text="NÄCHSTER HALT", anchor="w", font=label_font, fill="#F7D117")
+            minutes = self.travel_time(self.index)
+            if minutes is not None:
+                c.create_text(ix + pw, y, text="Fahrzeit " + minutes_text(minutes), anchor="e", font=app.font(14),
+                              fill="#B8C4D0")
             y += 22 * s
             for ln in wrap_text(mid_font, st[stops[self.index + 1]], pw, 2):
                 c.create_text(ix, y, text=ln, anchor="nw", font=mid_font, fill="#CFE8FF")
@@ -2353,6 +2376,9 @@ def draw_cockpit(ride, c, w, h):
         second = "Einmal rund um die Stadt!" if ride.ring else "Endstation – bitte alle aussteigen"
     else:
         second = "Nächster Halt: " + st[stops[ride.index + 1]]
+        minutes = ride.travel_time(ride.index)
+        if minutes is not None:
+            second += " · " + minutes_text(minutes)
     c.create_text(tx, dy2 - 20 * s, text=fit_text(led_small, second, tw), anchor="w", font=led_small,
                   fill="#FFD27A")
 
@@ -4073,6 +4099,7 @@ class App:
         self.animating = False
         self.transfers = Transfers(data)
         self.maps = {}
+        self.time_cache = {}
         self.settings = self.load_settings()
         self.cockpit = False    # Cockpit-Ansicht beim Fahren (Taste F), bleibt beim Umsteigen erhalten
         self.sound = SoundPlayer()
@@ -4127,6 +4154,18 @@ class App:
             if name == DEFAULT_HOME:
                 return k
         return next(iter(stations))
+
+    def travel_times(self, line):
+        """(von, nach) -> Minuten für eine Linie, aus beiden Richtungen."""
+        key = id(line)
+        if key not in self.time_cache:
+            pairs = {}
+            for stops, row in zip(line["directions"], line.get("times", [])):
+                for a, b, v in zip(stops, stops[1:], row):
+                    if v is not None:
+                        pairs[(a, b)] = v
+            self.time_cache[key] = pairs
+        return self.time_cache[key]
 
     def network_map(self, kind):
         if kind not in self.maps:

@@ -53,6 +53,13 @@ python3 tools/build_web.py
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
 | **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht, `Ö`: Türen auf und zu (Blick in den Innenraum), an der Endhaltestelle `B`: Betriebshof (Bus, Tram) bzw. `A`: Abstellgleis (Bahnen), dort `W`: Waschanlage, `E`: Linie endet hier |
 
+**Fahrzeiten:** In der Stationsliste steht zwischen zwei Stationen klein
+neben der Strecke, wie viele Minuten die Fahrt laut Fahrplan dauert. Bei
+„< 1 Min.“ sind es weniger als eine Minute. Die Fahrzeit zur nächsten
+Station steht auch auf der Infotafel bei „Nächster Halt“ und im Cockpit in
+der Anzeige oben. Die Zahlen sind die offiziellen Fahrzeiten aus dem
+VBB-Fahrplan (siehe [Woher kommen die Daten?](#woher-kommen-die-daten)).
+
 `Esc` oder der Knopf „Zurück“ führt immer einen Schritt zurück. `F11`
 schaltet auf Vollbild. Auf der Ringbahn (S41/S42) kann man endlos im Kreis
 fahren.
@@ -455,6 +462,21 @@ Fernbahn (sonst fehlte er bei RE3, RE4, RE5, RE8, RE20, RE85, RB10 und FEX)
 und der U2-Bahnsteig von Stadtmitte.
 
 Fahrplandaten: © VBB Verkehrsverbund Berlin-Brandenburg GmbH, CC BY 4.0.
+
+**Fahrzeiten zwischen den Stationen:** Sie stammen aus demselben offiziellen
+VBB-Fahrplan (GTFS) wie die Linien, aufbereitet im npm-Paket `vbb-trips`
+(Stand März 2026). `tools/build_times.py` nimmt für jeden Abschnitt die
+Fahrzeit (Ankunft an der nächsten Station minus Abfahrt an der vorigen) aller
+Fahrten der Linie und davon den Mittelwert (Median). So sind für fast alle
+Abschnitte Zeiten da: S-Bahn, U-Bahn und Regionalbahn zu 100 %, Tram zu 99 %,
+Bus zu 98 %. Fehlende Abschnitte, etwa die gesperrte U4, kommen aus älteren
+Fahrplanständen. Der Fahrplan rechnet in ganzen Minuten. Für die ICE-Linien gibt es
+keine Fahrzeiten, weil die VBB-Daten keine Fernzüge enthalten. Das Skript
+läuft am Ende von `tools/build_data.py` automatisch mit, einzeln geht es so:
+
+```sh
+python3 tools/build_times.py
+```
 
 **Flüge:** Ziele, Flugzeiten und die gezeichneten Wahrzeichen stehen in
 `tools/make_flights.py`. Das Skript schreibt `data/flights.json`. Die
