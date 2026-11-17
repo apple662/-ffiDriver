@@ -470,8 +470,19 @@ Fahrzeit (Ankunft an der nächsten Station minus Abfahrt an der vorigen) aller
 Fahrten der Linie und davon den Mittelwert (Median). So sind für fast alle
 Abschnitte Zeiten da: S-Bahn, U-Bahn und Regionalbahn zu 100 %, Tram zu 99 %,
 Bus zu 98 %. Fehlende Abschnitte, etwa die gesperrte U4, kommen aus älteren
-Fahrplanständen. Der Fahrplan rechnet in ganzen Minuten. Für die ICE-Linien gibt es
-keine Fahrzeiten, weil die VBB-Daten keine Fernzüge enthalten. Das Skript
+Fahrplanständen. Der Fahrplan rechnet in ganzen Minuten.
+
+Die **ICE-Linien** stehen nicht im VBB-Fahrplan. Ihre Fahrzeiten kommen aus
+dem Soll-Fahrplan des Fernverkehrs (DELFI e.V., über
+[gtfs.de](https://gtfs.de), Lizenz CC BY 4.0). Die Bahnhöfe werden über ihre
+Koordinaten zugeordnet. Gezählt wird die Zeit zwischen zwei Halten der Linie
+im Spiel, auch wenn der Zug dazwischen noch öfter hält. Dieser Fahrplan gilt
+immer nur für die nächsten Wochen und enthält deshalb auch **Umleitungen
+wegen Bauarbeiten**. Beim Stand vom 14.11. bis 12.12.2026 fahren die ICE
+zwischen Nürnberg und München über Umwege (etwa 1 Std. 50 Min. statt sonst
+gut 1 Stunde), und Berlin Ostbahnhof und Wolfsburg werden nicht angefahren.
+Dort steht deshalb keine Zeit. Wer die Daten später neu baut, bekommt den
+dann gültigen Fahrplan. Das Skript
 läuft am Ende von `tools/build_data.py` automatisch mit, einzeln geht es so:
 
 ```sh

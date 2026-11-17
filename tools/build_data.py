@@ -435,9 +435,10 @@ def main():
     lines, names, coords, source = load_gtfs(args.gtfs) if args.gtfs else load_npm()
     data = build(lines, names, coords, source)
     if not args.gtfs:
-        from build_times import add_travel_times   # Fahrzeiten zwischen den Stationen (vbb-trips)
+        from build_times import add_ice_times, add_travel_times   # Fahrzeiten zwischen den Stationen
         try:
             add_travel_times(data)
+            add_ice_times(data)
         except Exception as e:  # noqa: BLE001 – ohne Fahrzeiten läuft das Spiel trotzdem
             print("Fahrzeiten konnten nicht geladen werden:", e, file=sys.stderr)
 
