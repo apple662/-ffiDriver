@@ -7,7 +7,7 @@ Enthalten sind alle S-Bahn-, U-Bahn-, Straßenbahn- und Buslinien von BVG und
 S-Bahn Berlin, alle BVG-Fähren sowie alle Regional- und ICE-Züge, die durch
 Berlin fahren (16 S-Bahn-, 9 U-Bahn-, 22 Tram-, 204 Bus-, 22 Regional-,
 8 ICE- und 6 Fährlinien).
-Dazu kommen 25 Flüge vom Flughafen BER in die ganze Welt. Das Programm läuft
+Dazu kommen 33 Flüge vom Flughafen BER in die ganze Welt. Das Programm läuft
 komplett **offline**.
 
 ## Browser-Version (ohne Installation)
@@ -246,7 +246,7 @@ getrennt“ zu beiden Gruppen (siehe [Umsteigen](#umsteigen)).
 
 ## Flugzeug
 
-Vom Flughafen BER geht es zu 25 bekannten Zielen auf allen Kontinenten:
+Vom Flughafen BER geht es zu 33 bekannten Zielen auf allen Kontinenten:
 
 | Ziel | Wahrzeichen |
 |---|---|
@@ -254,9 +254,17 @@ Vom Flughafen BER geht es zu 25 bekannten Zielen auf allen Kontinenten:
 | Kreta (HER) | Palast von Knossos mit roten Säulen und Stierfresko, Windmühle, Olivenbäume |
 | Barcelona (BCN) | Sagrada Família, Strand |
 | Teneriffa (TFS) | Vulkan Teide, Drachenbaum, schwarzer Lavastrand |
+| Lissabon (LIS) | Torre de Belém im Wasser, gelbe Straßenbahn, bunte Häuser am Hang |
 | Paris (CDG) | Eiffelturm |
 | Amsterdam (AMS) | Grachtenhäuser, Windmühle, Tulpenfeld |
 | London (LHR) | Big Ben, Parlament, London Eye, roter Doppeldeckerbus |
+| Edinburgh (EDI) | Burg auf dem Vulkanfelsen, schottische Fahne, Altstadthäuser |
+| Kopenhagen (CPH) | Bunte Häuser in Nyhavn, Segelboote, kleine Meerjungfrau |
+| Stockholm (ARN) | Rathaus mit den drei goldenen Kronen, Häuser der Altstadt, Ausflugsdampfer |
+| Zürich (ZRH) | Grossmünster und Fraumünster, Zürichsee mit Schwänen, Alpen |
+| Wien (VIE) | Stephansdom mit buntem Ziegeldach, Riesenrad im Prater |
+| Budapest (BUD) | Parlament mit roter Kuppel an der Donau, Burgberg |
+| Venedig (VCE) | Campanile, Dogenpalast, Gondel mit Gondoliere |
 | Rom (FCO) | Kolosseum, Zypressen und Pinien |
 | Athen (ATH) | Akropolis mit dem Parthenon |
 | Istanbul (IST) | Moschee mit Kuppeln und Minaretten am Bosporus |
@@ -288,7 +296,7 @@ So läuft ein Flug:
    mit Mond und Sternen. `▼` fliegt schneller.
 4. **Landung**: Das Flugzeug sinkt, das Wahrzeichen des Ziels kommt in Sicht,
    das Fahrwerk fährt aus, dann setzt es auf und bremst.
-5. **Angekommen**: Gruß in der Landessprache (z. B. „¡Hola!“, „Konnichiwa!“)
+5. **Angekommen**: Gruß in der Landessprache (z. B. „¡Hola!“, „Grüezi!“, „Konnichiwa!“)
    und etwas Wissenswertes zum Ort, auch zum Vorlesen.
 
 Rechts zeigt eine **Weltkarte** die Route auf dem kürzesten Weg über die

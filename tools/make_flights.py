@@ -825,6 +825,289 @@ def cancun():
     return s
 
 
+def gondola_wheel(cx, cy, r, n=16, rim="#C9CED6", cabin="#C8102E"):
+    """Riesenrad mit Speichen, Gondeln und A-förmigem Gestell."""
+    s = [L("#7A808A", 1.6, (cx - r * 0.5, 0), (cx, cy)), L("#7A808A", 1.6, (cx + r * 0.5, 0), (cx, cy))]
+    s.append(L(rim, 1.3, *[(cx + r * math.cos(a / 32 * 2 * math.pi), cy + r * math.sin(a / 32 * 2 * math.pi))
+                            for a in range(33)]))
+    for k in range(n):
+        a = k / n * 2 * math.pi
+        s.append(L(rim, 0.4, (cx, cy), (cx + r * math.cos(a), cy + r * math.sin(a))))
+    for k in range(n):
+        a = k / n * 2 * math.pi
+        gx, gy = cx + r * math.cos(a), cy + r * math.sin(a)
+        s.append(R(cabin, gx - 2.2, gy - 4.2, gx + 2.2, gy - 0.8))
+        s.append(R("#CFE8FF", gx - 1.6, gy - 3.2, gx + 1.6, gy - 1.8))
+    s.append(O("#5D6670", cx, cy, 2.2, 2.2))
+    return s
+
+
+def vienna():
+    s = []
+    for i, (x, w, h) in enumerate([(-150, 18, 18), (-128, 16, 22), (70, 18, 20), (92, 16, 16), (112, 20, 22)]):
+        s += tower_block(x, x + w, h, ["#E9DFC8", "#F2E7CF", "#DCCFB2"][i % 3], "#9FB4C7")
+    # Riesenrad im Prater
+    s += gondola_wheel(-80, 40, 34)
+    # Stephansdom: Kirchenschiff mit buntem Ziegeldach, hoher Südturm
+    stone, dark = "#BFB4A0", "#8C8270"
+    x0 = 10
+    s.append(R(stone, x0 - 30, 0, x0 + 34, 26))
+    s += arch_row("#6E6656", x0 - 26, x0 + 30, 4, 20, 6)
+    s.append(P("#3E6F5A", (x0 - 31, 26), (x0 + 35, 26), (x0 + 30, 48), (x0 - 26, 48)))      # Dach
+    for i in range(7):                                                # Zickzackmuster der Dachziegel
+        zx = x0 - 24 + i * 8
+        s.append(P("#E2B23A", (zx, 30), (zx + 4, 36), (zx + 8, 30), (zx + 8, 33), (zx + 4, 39), (zx, 33)))
+        s.append(P("#B5432F", (zx, 38), (zx + 4, 43), (zx + 8, 38), (zx + 8, 40), (zx + 4, 45), (zx, 40)))
+    xt = x0 + 40                                                      # Südturm
+    s.append(R(stone, xt - 7, 0, xt + 7, 44))
+    s += arch_row("#6E6656", xt - 5, xt + 5, 30, 40, 2)
+    s.append(P(stone, (xt - 7, 44), (xt + 7, 44), (xt + 4, 70), (xt + 1.5, 96), (xt, 100), (xt - 1.5, 96), (xt - 4, 70)))
+    for y in range(50, 90, 8):
+        s.append(R(dark, xt - 0.5, y, xt + 0.5, y + 4))
+    for dx in (-6, 6):
+        s.append(P(dark, (xt + dx - 1, 44), (xt + dx + 1, 44), (xt + dx, 52)))
+    s += tree(-130, 12) + tree(-40, 11) + tree(140, 12)
+    return s
+
+
+def zurich():
+    s = [P("#8E9AA8", (-170, 0), (-130, 46), (-110, 38), (-80, 58), (-50, 30), (-20, 0)),        # Alpen
+         P("#F4F6F8", (-140, 34), (-130, 46), (-118, 41), (-124, 36)),
+         P("#F4F6F8", (-92, 46), (-80, 58), (-66, 48), (-74, 44), (-80, 50), (-86, 44)),
+         P("#9AA6B3", (60, 0), (100, 40), (125, 30), (150, 50), (180, 0)),
+         P("#F4F6F8", (90, 30), (100, 40), (110, 34)),
+         P("#F4F6F8", (140, 40), (150, 50), (160, 42), (152, 38))]
+    stone = "#D9CBB0"
+    # Fraumünster: schlanker grüner Turm
+    fx = -40
+    s.append(R("#CFBFA2", fx - 16, 0, fx + 4, 20))
+    s.append(P("#8E3B2E", (fx - 17, 20), (fx + 5, 20), (fx - 6, 28)))
+    s.append(R("#CFBFA2", fx + 4, 0, fx + 11, 40))
+    s.append(P("#4E8C6E", (fx + 3.5, 40), (fx + 11.5, 40), (fx + 7.5, 66)))
+    # Grossmünster: Kirche mit zwei Türmen und Kuppelhelmen
+    x0 = 20
+    s.append(R(stone, x0 - 24, 0, x0 + 24, 26))
+    s.append(P("#8E3B2E", (x0 - 25, 26), (x0 + 25, 26), (x0 + 20, 32), (x0 - 20, 32)))
+    s += arch_row("#7A6C55", x0 - 20, x0 + 20, 4, 18, 5)
+    for tx in (x0 - 10, x0 + 10):
+        s.append(R(stone, tx - 6, 26, tx + 6, 62))
+        s += arch_row("#7A6C55", tx - 4, tx + 4, 44, 56, 2)
+        s.append(R("#BFAF93", tx - 6.5, 62, tx + 6.5, 64))
+        s.append(P("#3E3A36", (tx - 6, 64), (tx + 6, 64), (tx + 4.5, 70), (tx + 1.6, 74), (tx - 1.6, 74), (tx - 4.5, 70)))
+        s.append(O("#3E3A36", tx, 76, 1.8, 2.4))
+        s.append(L("#3E3A36", 0.6, (tx, 78), (tx, 83)))
+    s.append(water("#3E89B8", 0, -14))                               # Zürichsee
+    for bx in (-90, 70):                                             # Schwäne
+        s.append(O("#FFFFFF", bx, -6, 3.2, 1.6))
+        s.append(L("#FFFFFF", 1.0, (bx + 2.4, -5.5), (bx + 3.2, -1.8)))
+        s.append(P("#F28C28", (bx + 3.2, -1.6), (bx + 5, -2), (bx + 3.2, -2.4)))
+    return s
+
+
+def copenhagen():
+    s = []
+    colors = ["#E8B33A", "#C8442F", "#3E7CB1", "#E07A2C", "#F4E2B8", "#4F8A6A", "#D9534F", "#2F5E8A"]
+    x = -104
+    for i, col in enumerate(colors):                                  # Nyhavn: bunte Häuser am Kanal
+        w, h = 12, 22 + (i * 5) % 9
+        s.append(R(col, x, 0, x + w, h))
+        s.append(P("#7A3A2A", (x - 0.5, h), (x + w + 0.5, h), (x + w / 2, h + 6)))
+        s += windows("#F4F1EA", x + 1, x + w - 1, 3, h - 1, 3, 3, 2, 2.6)
+        x += w + 1
+    s.append(water("#3D7FA8", 0, -14))
+    for mx in (-80, -56, -32):                                        # Segelboote mit Masten
+        s.append(P("#5A3E2A", (mx - 9, -1), (mx + 9, -1), (mx + 6, -5), (mx - 6, -5)))
+        s.append(L("#5A3E2A", 0.8, (mx, -1), (mx, 30)))
+        s.append(L("#5A3E2A", 0.5, (mx, 30), (mx + 8, -1)))
+    # Die kleine Meerjungfrau auf ihrem Stein
+    mx = 62
+    s.append(O("#7D7A75", mx, -2, 20, 7))
+    s.append(O("#8E8B85", mx - 4, 3, 12, 5))
+    bronze = "#3F7F6A"
+    s.append(P(bronze, (mx - 8, 6), (mx + 2, 6), (mx + 6, 8), (mx - 2, 9), (mx - 10, 8)))         # Fischschwanz
+    s.append(P(bronze, (mx - 12, 6.5), (mx - 16, 9), (mx - 14, 5)))
+    s.append(P(bronze, (mx + 1, 7), (mx + 5, 7), (mx + 6, 17), (mx + 2, 17)))                    # Körper
+    s.append(O(bronze, mx + 4.2, 19.5, 2.4, 2.6))                                                  # Kopf
+    s.append(L(bronze, 1.0, (mx + 5, 15), (mx + 1, 10)))                                           # Arm
+    s += tree(92, 14) + tree(106, 12)
+    return s
+
+
+def stockholm():
+    s = []
+    for i, x in enumerate(range(-150, -60, 11)):                      # Gamla stan: bunte Häuser
+        col = ["#E8A33A", "#C8582F", "#F2D27A", "#D97A4A", "#B5462F", "#E9C28F", "#C96A3A", "#F0B85A", "#D9904A"][i % 9]
+        h = 20 + (i * 7) % 12
+        s.append(R(col, x, 0, x + 10, h))
+        s.append(P("#6E3A2A", (x - 0.5, h), (x + 10.5, h), (x + 5, h + 5)))
+        s += windows("#F4F1EA", x + 1, x + 9, 3, h - 1, 2, 3, 2, 2.6)
+    s.append(P("#3E6F5A", (-112, 34), (-104, 34), (-108, 56)))        # grüner Kirchturm
+    s.append(R("#C8582F", -111, 20, -105, 34))
+    # Stadshuset: rotes Backstein-Rathaus mit hohem Turm und drei goldenen Kronen
+    brick = "#A8452F"
+    x0 = 30
+    s.append(R(brick, x0 - 40, 0, x0 + 30, 24))
+    s.append(P("#3E6F5A", (x0 - 41, 24), (x0 + 31, 24), (x0 + 28, 30), (x0 - 38, 30)))
+    s += arch_row("#6E2A1E", x0 - 38, x0 + 28, 2, 12, 9)
+    s += windows("#E8D9B5", x0 - 38, x0 + 28, 14, 22, 12, 1, 1.4, 4)
+    tx = x0 + 18
+    s.append(R(brick, tx - 7, 0, tx + 7, 74))
+    s += windows("#6E2A1E", tx - 6, tx + 6, 30, 70, 3, 6, 1.3, 3)
+    s.append(R("#8E3A26", tx - 8, 74, tx + 8, 77))
+    s.append(P("#3E6F5A", (tx - 5, 77), (tx + 5, 77), (tx + 3, 86), (tx - 3, 86)))
+    s.append(L("#D9A52B", 0.8, (tx, 86), (tx, 92)))
+    for k, cy in enumerate((92, 96, 100)):                              # Tre Kronor
+        s.append(P("#E8B33A", (tx - 2.6, cy), (tx + 2.6, cy), (tx + 2.6, cy + 2.4), (tx + 1.3, cy + 1.4), (tx, cy + 2.6),
+                   (tx - 1.3, cy + 1.4), (tx - 2.6, cy + 2.4)))
+    s.append(water("#3A78A6", 0, -14))
+    s.append(P("#F4F1EA", (66, -2), (96, -2), (92, -7), (70, -7)))      # Ausflugsdampfer
+    s.append(R("#F4F1EA", 72, -2, 90, 3))
+    s += windows("#3E4A57", 73, 89, -1, 2.5, 5, 1, 2, 1.8)
+    s.append(R("#2F4E8C", 84, 3, 87, 8))
+    return s
+
+
+def edinburgh():
+    s = [P("#6E6A62", (-160, 0), (-140, 26), (-110, 40), (-60, 44), (-30, 30), (0, 0)),       # Burgfelsen
+         P("#5E5A53", (-140, 26), (-120, 18), (-95, 30), (-110, 40)),
+         P("#7FA066", (40, 0), (80, 24), (120, 34), (170, 0))]                                   # Arthur's Seat
+    wall = "#9C978C"
+    # Edinburgh Castle oben auf dem Felsen
+    s.append(R(wall, -118, 40, -40, 54))
+    for x in range(-118, -40, 4):                                     # Zinnen
+        s.append(R(wall, x, 54, x + 2, 56.5))
+    s += windows("#4A4842", -114, -44, 42, 52, 10, 2, 1.4, 2.4)
+    for tx, h in ((-112, 66), (-70, 72), (-48, 62)):
+        s.append(R("#8E897E", tx - 5, 40, tx + 5, h))
+        for x in range(tx - 5, tx + 5, 3):
+            s.append(R("#8E897E", x, h, x + 1.6, h + 2.5))
+    s.append(L("#3A3A3A", 0.6, (-70, 74.5), (-70, 86)))               # Fahne mit Andreaskreuz
+    s.append(R("#005EB8", -70, 80, -60, 86))
+    s.append(L("#FFFFFF", 0.8, (-70, 80), (-60, 86)))
+    s.append(L("#FFFFFF", 0.8, (-70, 86), (-60, 80)))
+    for i, x in enumerate(range(-10, 40, 9)):                         # Häuser der Altstadt
+        h = 16 + (i * 5) % 10
+        s.append(R(["#8E897E", "#A39C8E", "#7E7A72"][i % 3], x, 0, x + 8, h))
+        s.append(P("#4A4842", (x - 0.5, h), (x + 8.5, h), (x + 4, h + 5)))
+        s.append(R("#4A4842", x + 5, h + 1, x + 6.5, h + 6))
+        s += windows("#E8DFC4", x + 1, x + 7, 3, h - 1, 2, 3, 1.4, 2.2)
+    s += fir(130, 16) + fir(144, 14)
+    return s
+
+
+def lisbon():
+    s = []
+    for i, x in enumerate(range(-160, -40, 10)):                      # Häuser am Hang mit roten Dächern
+        y0 = (x + 160) * 0.22
+        col = ["#F4F1EA", "#F2D27A", "#E9A07A", "#9FC6E0", "#F4E2B8"][i % 5]
+        s.append(R(col, x, 0, x + 9, y0 + 12))
+        s.append(P("#C9542D", (x - 0.5, y0 + 12), (x + 9.5, y0 + 12), (x + 4.5, y0 + 16)))
+        s += windows("#5A6E85", x + 1, x + 8, y0 + 3, y0 + 11, 2, 2, 1.6, 2.2)
+    # gelbe Straßenbahn (Linie 28)
+    tx = -54
+    s.append(R("#F2C230", tx, 0.6, tx + 26, 11))
+    s.append(R("#F4F1EA", tx, 7, tx + 26, 8.5))
+    s += windows("#CFE3F2", tx + 1, tx + 25, 8.6, 10.6, 6, 1, 3, 1.8)
+    s.append(R("#3A3A3A", tx - 1, 11, tx + 27, 12))
+    s.append(L("#3A3A3A", 0.6, (tx + 13, 12), (tx + 18, 22)))
+    s.append(O("#2A2A2A", tx + 5, 0.6, 1.8, 1.8))
+    s.append(O("#2A2A2A", tx + 21, 0.6, 1.8, 1.8))
+    # Torre de Belém im Wasser
+    stone = "#E6DCC6"
+    x0 = 50
+    s.append(water("#3E8FBF", 0, -14))
+    s.append(R(stone, x0 - 22, -4, x0 + 22, 14))
+    for x in range(x0 - 22, x0 + 22, 4):
+        s.append(R(stone, x, 14, x + 2, 16.5))
+    s += arch_row("#7A6C55", x0 - 18, x0 + 18, 2, 11, 5)
+    s.append(R(stone, x0 - 10, 14, x0 + 10, 48))
+    s += arch_row("#7A6C55", x0 - 7, x0 + 7, 30, 40, 2)
+    s.append(R("#D9CDB2", x0 - 11, 48, x0 + 11, 51))
+    for x in range(x0 - 10, x0 + 10, 4):
+        s.append(R(stone, x, 51, x + 2, 53.5))
+    for dx in (-10, 10):                                              # Türmchen mit Kuppeln
+        s.append(R(stone, x0 + dx - 2, 48, x0 + dx + 2, 56))
+        s.append(O(stone, x0 + dx, 56.5, 2.4, 2.4))
+    s.append(R(stone, x0 - 4, 51, x0 + 4, 60))
+    s.append(O(stone, x0, 61, 4, 3))
+    s.append(R("#2F7F4F", x0 - 2, 22, x0 + 2, 26))
+    return s
+
+
+def venice():
+    s = []
+    brick = "#B5583E"
+    # Campanile von San Marco
+    cx = -50
+    s.append(R(brick, cx - 7, 0, cx + 7, 62))
+    for x in range(cx - 6, cx + 7, 3):
+        s.append(R("#9C4A33", x, 2, x + 1.2, 60))
+    s.append(R("#EDE3CF", cx - 7.5, 62, cx + 7.5, 74))
+    s += arch_row("#5A4A3A", cx - 6.5, cx + 6.5, 63, 73, 3)
+    s.append(R("#EDE3CF", cx - 7, 74, cx + 7, 80))
+    s.append(P("#4E8C6E", (cx - 7, 80), (cx + 7, 80), (cx, 96)))
+    s.append(O("#D9A52B", cx, 98, 1.4, 2))
+    # Dogenpalast: rosa Mauer über zwei Bogenreihen
+    x1, x2 = -20, 70
+    s.append(R("#EDE3CF", x1, 0, x2, 22))
+    s += arch_row("#5A4A3A", x1 + 1, x2 - 1, 1, 10, 10)
+    s += arch_row("#7A6A58", x1 + 1, x2 - 1, 12, 20, 18)
+    s.append(R("#E9C2B0", x1, 22, x2, 44))
+    for k in range(18):                                              # Rautenmuster
+        for j in range(4):
+            px, py = x1 + 2.5 + k * 5, 25 + j * 5
+            s.append(P("#D9A897", (px, py), (px + 1.5, py + 1.5), (px, py + 3), (px - 1.5, py + 1.5)))
+    s += windows("#5A4A3A", x1 + 2, x2 - 2, 28, 40, 6, 1, 3, 6)
+    for x in range(x1, x2, 5):
+        s.append(P("#EDE3CF", (x, 44), (x + 4, 44), (x + 2, 47)))
+    s.append(water("#3E8F96", 0, -14))
+    # Gondel mit Gondoliere
+    gx = 30
+    s.append(P("#1E1E1E", (gx - 22, -2), (gx + 20, -2), (gx + 26, 4), (gx + 22, -4), (gx - 18, -5), (gx - 24, 2)))
+    s.append(R("#B5432F", gx - 4, -2, gx + 4, 1))
+    s.append(R("#1E1E1E", gx + 13, -2, gx + 15, 7))                  # Gondoliere: Beine und Körper
+    s.append(R("#FFFFFF", gx + 12, 7, gx + 16, 13))
+    for y in (8.5, 10.5):
+        s.append(R("#1E3A8A", gx + 12, y, gx + 16, y + 0.8))
+    s.append(O("#E0AC85", gx + 14, 14.8, 1.8, 1.8))
+    s.append(R("#F2C230", gx + 11.5, 16, gx + 16.5, 17))
+    s.append(L("#6B4A2B", 0.8, (gx + 10, 14), (gx + 4, -6)))        # Ruder
+    for p in (-24, -30):                                              # Anlegepfähle
+        s.append(R("#1E3A8A", p - 0.8, -6, p + 0.8, 8))
+        s.append(R("#F4F1EA", p - 0.8, 2, p + 0.8, 4))
+    return s
+
+
+def budapest():
+    s = [P("#7FA066", (-170, 0), (-140, 22), (-110, 26), (-80, 10), (-60, 0))]              # Burgberg (Buda)
+    s.append(R("#D9CDB2", -145, 22, -105, 32))
+    s.append(O("#5E7F8E", -125, 34, 6, 6))
+    # Parlament am Donauufer
+    stone = "#EDE3CF"
+    x1, x2, xm = -64, 92, 14
+    s.append(R(stone, x1, 0, x2, 26))
+    s += arch_row("#8C7A5A", x1 + 2, x2 - 2, 2, 12, 20)
+    s += windows("#8C7A5A", x1 + 2, x2 - 2, 15, 24, 26, 1, 1.2, 6)
+    s.append(P("#B5432F", (x1, 26), (x2, 26), (x2 - 4, 32), (x1 + 4, 32)))
+    for x in range(x1 + 4, x2 - 2, 10):                               # viele kleine Spitztürmchen
+        if abs(x - xm) > 18:
+            s.append(R(stone, x - 1.2, 26, x + 1.2, 38))
+            s.append(P(stone, (x - 1.5, 38), (x + 1.5, 38), (x, 44)))
+    for tx in (x1 + 14, x2 - 14):                                     # zwei Türme an den Flügeln
+        s.append(R(stone, tx - 4, 26, tx + 4, 48))
+        s.append(P(stone, (tx - 4, 48), (tx + 4, 48), (tx, 62)))
+    s.append(R(stone, xm - 16, 26, xm + 16, 44))                      # Kuppel in der Mitte
+    s += arch_row("#8C7A5A", xm - 14, xm + 14, 30, 42, 6)
+    s.append(O("#B5432F", xm, 50, 15, 13))
+    s.append(R(stone, xm - 16, 44, xm + 16, 47))
+    s.append(P("#B5432F", (xm - 4, 60), (xm + 4, 60), (xm, 84)))
+    s.append(water("#4F7FA0", 0, -14))                                 # Donau
+    s.append(P("#F4F1EA", (40, -2), (70, -2), (66, -7), (44, -7)))      # Ausflugsschiff
+    s.append(R("#F4F1EA", 46, -2, 64, 3))
+    s += windows("#3E4A57", 47, 63, -1, 2.5, 5, 1, 2, 1.8)
+    return s
+
+
 # --------------------------------------------------------------------------
 # Ziele
 # --------------------------------------------------------------------------
@@ -847,6 +1130,30 @@ DESTINATIONS = [
     ("AMS", "Amsterdam", "Niederlande", 52.31, 4.76, 1.3, "#F36C21", "Hallo!",
      "In Amsterdam gibt es mehr Fahrräder als Menschen – und viele Grachten mit Brücken.",
      ["#7FAAD6", "#D6E6F3"], "#7FAE62", "#9CC27E", amsterdam()),
+    ("VIE", "Wien", "Österreich", 48.11, 16.57, 1.2, "#EF3340", "Servus!",
+     "Im Prater dreht sich seit 1897 das Riesenrad. Der Stephansdom hat ein buntes Dach aus Ziegeln.",
+     ["#5FA2E0", "#CDE4F5"], "#86B46C", "#A9C98F", vienna()),
+    ("ZRH", "Zürich", "Schweiz", 47.46, 8.55, 1.4, "#0F5FA8", "Grüezi!",
+     "Zürich liegt an einem großen See, und bei gutem Wetter sieht man die Alpen. Die Schweiz ist berühmt für Schokolade.",
+     ["#4C9BE3", "#CBE3F6"], "#7FAE62", "#9CC27E", zurich()),
+    ("CPH", "Kopenhagen", "Dänemark", 55.62, 12.65, 1.0, "#C60C30", "Hej!",
+     "Am Hafen sitzt die kleine Meerjungfrau auf einem Stein. Aus Dänemark kommen die LEGO-Steine.",
+     ["#7AA9D8", "#D3E5F3"], "#7FAE62", "#9CC27E", copenhagen()),
+    ("ARN", "Stockholm", "Schweden", 59.65, 17.92, 1.6, "#006AA7", "Hej!",
+     "Stockholm ist auf 14 Inseln gebaut. Im Rathaus mit den drei goldenen Kronen wird das Fest zum Nobelpreis gefeiert.",
+     ["#6FA4D8", "#D0E4F3"], "#7FAE62", "#9CC27E", stockholm()),
+    ("EDI", "Edinburgh", "Schottland (Großbritannien)", 55.95, -3.37, 2.0, "#3B2A6B", "Hello!",
+     "Die Burg von Edinburgh steht auf einem alten Vulkanfelsen. In den Straßen spielen Dudelsackspieler.",
+     ["#8FA9C2", "#D9E3EC"], "#6E9A5A", "#8EB27A", edinburgh()),
+    ("LIS", "Lissabon", "Portugal", 38.77, -9.13, 3.6, "#046A38", "Olá!",
+     "Durch die steilen Gassen von Lissabon fahren kleine gelbe Straßenbahnen. Der Turm von Belém steht im Wasser.",
+     ["#3F9AE4", "#C4E3F8"], "#B8B07A", "#D8CFA2", lisbon()),
+    ("VCE", "Venedig", "Italien", 45.51, 12.35, 1.6, "#8C1C2C", "Ciao!",
+     "In Venedig gibt es keine Autos: Statt Straßen gibt es Kanäle, und man fährt mit Booten und Gondeln.",
+     ["#4FA0E3", "#CBE5F7"], "#C9B78A", "#DCCFA8", venice()),
+    ("BUD", "Budapest", "Ungarn", 47.44, 19.26, 1.3, "#477050", "Szia!",
+     "Die Donau teilt die Stadt in Buda und Pest. Am Ufer steht das riesige Parlament mit seiner roten Kuppel.",
+     ["#5AA2DE", "#CFE5F5"], "#8DB46A", "#AFC98C", budapest()),
     ("KEF", "Reykjavík", "Island", 63.99, -22.62, 3.6, "#02529C", "Halló!",
      "Island hat Vulkane, heiße Quellen und Geysire, die Wasser hoch in die Luft spritzen.",
      ["#7C9DBA", "#D3E0EA"], "#6E7F64", "#8E9C82", reykjavik()),
@@ -978,7 +1285,8 @@ def world_map():
 NIGHT = {"RVN"}       # dort ist es bei der Ankunft Nacht (Polarlichter)
 
 # Reihenfolge in der Liste: erst Europa, dann Afrika und Asien, dann Australien und Amerika
-ORDER = ["PMI", "HER", "BCN", "TFS", "CDG", "AMS", "LHR", "FCO", "ATH", "IST", "KEF", "RVN", "CAI", "NBO", "CPT",
+ORDER = ["PMI", "HER", "BCN", "TFS", "LIS", "CDG", "AMS", "LHR", "EDI", "CPH", "ARN", "ZRH", "VIE", "BUD", "VCE",
+         "FCO", "ATH", "IST", "KEF", "RVN", "CAI", "NBO", "CPT",
          "DXB", "DEL", "BKK", "PEK", "HND", "SYD", "JFK", "SFO", "CUN", "GIG"]
 
 
