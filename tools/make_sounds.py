@@ -9,6 +9,7 @@ Die Töne sind den Berliner Fahrzeugen nachempfunden, keine Originalaufnahmen:
 - Bus:     Zischen der Druckluft, wenn die Türen aufgehen, mit leisem „Klonk“
 - Regio:   langsamere, hohe Doppelpieptöne wie bei Doppelstockzügen, dann Druckluft
 - ICE:     Dreiklang-Gong wie am Bahnsteig, dann gleichmäßige Warnpieptöne
+- Fähre:   zwei Schläge der Schiffsglocke, dann das Schiffshorn („Tuuut – tut“)
 - Flug:    „Ding-Dong“ wie in der Kabine (Anschnallzeichen)
 - Jet:     Triebwerke beim Start: anschwellendes Rauschen und Heulen
 
@@ -149,6 +150,29 @@ def ice():
     return s
 
 
+def horn(dur, volume=0.6):
+    """Schiffshorn: tiefer, voller Ton mit vielen Obertönen, weich an- und abschwellend."""
+    n = int(RATE * dur)
+    partials = (1.0, 0.9, 0.7, 0.5, 0.35, 0.2)
+    out = []
+    for i in range(n):
+        t = i / RATE
+        env = min(1.0, t / 0.08, (dur - t) / 0.15)
+        wobble = 1 + 0.004 * math.sin(2 * math.pi * 5 * t)
+        v = sum(a * math.sin(2 * math.pi * 147 * wobble * (k + 1) * t) for k, a in enumerate(partials))
+        out.append(v * env * volume / sum(partials))
+    return out
+
+
+def faehre():
+    s = []
+    mix_in(s, bell(1320, 0.9, 0.45), 0.0)       # Schiffsglocke: „Ding-ding“
+    mix_in(s, bell(1320, 0.9, 0.45), 0.3)
+    mix_in(s, horn(1.3), 1.1)                   # „Tuuut …
+    mix_in(s, horn(0.45), 2.6)                  # … tut“
+    return s
+
+
 def flug():
     s = []
     mix_in(s, bell(988, 1.2, 0.5), 0.0)      # „Ding“
@@ -183,6 +207,7 @@ def main():
     save("bus.wav", bus())
     save("regio.wav", regio())
     save("ice.wav", ice())
+    save("faehre.wav", faehre())
     save("flug.wav", flug())
     save("jet.wav", jet())
 

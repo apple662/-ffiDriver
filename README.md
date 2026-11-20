@@ -4,8 +4,9 @@ Ein einfaches Spiel für Kinder: Verkehrsmittel aussuchen, Linie wählen und
 dann Station für Station mit den Pfeiltasten durch Berlin fahren.
 
 Enthalten sind alle S-Bahn-, U-Bahn-, Straßenbahn- und Buslinien von BVG und
-S-Bahn Berlin sowie alle Regional- und ICE-Züge, die durch Berlin fahren
-(16 S-Bahn-, 9 U-Bahn-, 22 Tram-, 204 Bus-, 22 Regional- und 8 ICE-Linien).
+S-Bahn Berlin, alle BVG-Fähren sowie alle Regional- und ICE-Züge, die durch
+Berlin fahren (16 S-Bahn-, 9 U-Bahn-, 22 Tram-, 204 Bus-, 22 Regional-,
+8 ICE- und 6 Fährlinien).
 Dazu kommen 25 Flüge vom Flughafen BER in die ganze Welt. Das Programm läuft
 komplett **offline**.
 
@@ -49,9 +50,9 @@ python3 tools/build_web.py
 
 | Bildschirm | Bedienung |
 |---|---|
-| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Regionalbahn, ICE oder Flugzeug, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–7 gehen auch) |
+| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Regionalbahn, ICE, Fähre oder Flugzeug, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–8 gehen auch) |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
-| **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht, `Ö`: Türen auf und zu (Blick in den Innenraum), an der Endhaltestelle `B`: Betriebshof (Bus, Tram) bzw. `A`: Abstellgleis (Bahnen), dort `W`: Waschanlage, `E`: Linie endet hier |
+| **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht, `Ö`: Türen auf und zu (Blick in den Innenraum), an der Endhaltestelle `B`: Betriebshof (Bus, Tram) bzw. Bootshaus (Fähre) oder `A`: Abstellgleis (Bahnen), dort `W`: Waschanlage, `E`: Linie endet hier |
 
 **Fahrzeiten:** In der Stationsliste steht zwischen zwei Stationen klein
 neben der Strecke, wie viele Minuten die Fahrt laut Fahrplan dauert. Bei
@@ -71,7 +72,8 @@ türkisfarbene Knopf „Ö“, im Cockpit „Türen auf“). Die Sicht dreht sic
 zur Seite in den **Innenraum**: Sitze, Haltestangen, Griffe an der Decke und
 die Türen, die zur Seite gleiten. Draußen sieht man den Bahnsteig mit dem
 Stationsschild, im U-Bahnhof die gekachelte Wand, bei Bus und Tram die
-Straße mit dem „H“-Schild.
+Straße mit dem „H“-Schild, bei der Fähre den Anleger aus Holzbohlen, das
+Wasser und das andere Ufer.
 
 Dann **steigen Menschen ein und aus**: Einige Fahrgäste stehen auf und
 gehen hinaus, neue kommen vom Bahnsteig herein und setzen sich auf einen
@@ -81,7 +83,8 @@ Umsteigebahnhöfen steigen mehr Leute ein, an der Endstation steigen alle
 aus. Oben steht, wie viele Fahrgäste gerade an Bord sind.
 
 Ein zweites `Ö` schließt die Türen, mit dem Türsignal des Verkehrsmittels.
-Danach dreht sich die Sicht zurück und es kann weitergehen. Solange die
+Bei der Fähre tutet stattdessen das Schiffshorn. Danach dreht sich die Sicht
+zurück und es kann weitergehen. Solange die
 Türen offen sind, fährt das Fahrzeug nicht los, und solange noch jemand ein-
 oder aussteigt, bleiben sie offen. Auf Tastaturen ohne Ö geht auch `O`.
 
@@ -93,13 +96,14 @@ Abfliegen geht erst wieder, wenn die Tür zu ist.
 ## Betriebshof und Abstellgleis
 
 An einer Endhaltestelle (am Anfang oder Ende der Linie) fahren **Bus und
-Straßenbahn mit `B` auf den Betriebshof**, **S-Bahn, U-Bahn, Regionalbahn und
-ICE mit `A` aufs Abstellgleis**. Dafür gibt es auch einen lila Knopf. In der
-Stationsliste erscheint hinter der Endstation eine eigene Zeile, im Cockpit
-sieht man:
+Straßenbahn mit `B` auf den Betriebshof**, **die Fähre mit `B` ins
+Bootshaus**, **S-Bahn, U-Bahn, Regionalbahn und ICE mit `A` aufs
+Abstellgleis**. Dafür gibt es auch einen lila Knopf. In der Stationsliste
+erscheint hinter der Endstation eine eigene Zeile, im Cockpit sieht man:
 - beim Abstellgleis den rot-weißen Prellbock und daneben abgestellte Züge
   (bei der U-Bahn das Tunnelende),
-- beim Betriebshof eine Halle mit offenen Toren und wartenden Fahrzeugen.
+- beim Betriebshof eine Halle mit offenen Toren und wartenden Fahrzeugen,
+- beim Bootshaus eine Holzhalle über dem Wasser mit offenem Tor.
 
 Dort ist Pause: Weiterfahren, Umsteigen und Richtung wechseln gehen nicht.
 Ein erneuter Druck auf `B` bzw. `A` führt zurück auf die Strecke, und zwar
@@ -109,7 +113,7 @@ mitten auf der Strecke oder auf der Ringbahn, gibt es einen Hinweis.
 
 ### Waschanlage (Taste `W`)
 
-Steht das Fahrzeug auf dem Betriebshof oder Abstellgleis, fährt es mit `W`
+Steht das Fahrzeug auf dem Betriebshof, im Bootshaus oder auf dem Abstellgleis, fährt es mit `W`
 (oder dem blauen Knopf „Waschanlage“ im Cockpit bzw. der unteren Hälfte der
 Leuchtanzeige) einmal durch die Waschanlage. Im Cockpit sieht man das Tor
 mit dem Schild „Waschanlage“, dann Wasserbogen, drehende Bürsten, Schaum und
@@ -143,6 +147,9 @@ Ansicht“ zurück). Man blickt nach vorn auf die Strecke, in einfachem 3D:
 - **Straßenbahn:** auf der Straße zwischen Häusern, mit eingelassenen
   Schienen und Oberleitung.
 - **Bus:** Straße mit Mittellinie, Gehweg, Bäumen und Häusern.
+- **Fähre:** über den Bug aufs Wasser, mit Wellen, Ufern voller Bäume und
+  Schilf, roten und grünen Fahrwassertonnen und an jeder Station einem
+  Anleger mit Wartehäuschen und „H“-Schild.
 
 **Tunnel, ebenerdig oder auf dem Viadukt:** Bei den Bahnen liegt jeder
 Bahnhof auf der richtigen Ebene, dazwischen gibt es Tunnelportale und Rampen.
@@ -211,6 +218,31 @@ und danach `python3 tools/build_data.py` ausführen.
 standardmäßig angehakt): Ohne Haken werden ICE-Linien nie als Umstieg
 gezeigt, angeboten oder angesagt. Mit Haken gehört der ICE beim „Umsteigen
 getrennt“ zur Gruppe von S-Bahn, U-Bahn und Regionalbahn.
+
+## Fähre
+
+Die sechs Fährlinien der BVG, alle mit allen Funktionen der anderen
+Verkehrsmittel (Netzplan, Fahrzeiten, Umsteigen, Cockpit, Türen auf,
+Ansage, Bootshaus mit Waschanlage, eigene Endstation):
+
+| Linie | Strecke | Fahrzeit |
+|---|---|---|
+| F10 | Alt-Kladow – S Wannsee, quer über den Wannsee | 20 Min. |
+| F11 | Baumschulenstraße – Wilhelmstrand, über die Spree | 2 Min. |
+| F12 | Wassersportallee – Müggelbergallee, über die Dahme in Grünau | 2 Min. |
+| F21 | Zum Seeblick – Krampenburg, über den Seddinsee | 7 Min. |
+| F23 | Kruggasse – Neu Helgoland – Müggelhort – Müggelwerderweg, auf der Müggelspree | 25 Min. |
+| F24 | Kruggasse – Spreewiesen (Ruderfähre in Rahnsdorf, nur im Sommer) | 5 Min. |
+
+Die Fähre ist gelb mit weißem Aufbau und blauem Streifen, die Linienschilder
+sind blau. Statt „Zurückbleiben, bitte!“ heißt es „Leinen los!“, und mit `T`
+läutet die Schiffsglocke, dann tutet das Schiffshorn. Der Tacho geht bis
+25 km/h. Der Netzplan zoomt auf die Linie und zeigt zur Orientierung das
+S-Bahn-Netz, denn die Fähren liegen weit auseinander am Stadtrand.
+
+Mit der S-Bahn kommt man gut zur Fähre: An **S Wannsee** kann man mit `U`
+in die F10 nach Kladow umsteigen. Deshalb gehört die Fähre beim „Umsteigen
+getrennt“ zu beiden Gruppen (siehe [Umsteigen](#umsteigen)).
 
 ## Flugzeug
 
@@ -354,7 +386,9 @@ Man kann auch auf die Linienschilder der aktuellen Station klicken.
 **Ankreuzfeld „Umsteigen getrennt“** (unten links im Hauptmenü,
 standardmäßig angehakt): Beim Fahren mit S-Bahn, U-Bahn, Regionalbahn oder
 ICE werden nur Umstiege in diese vier gezeigt, angeboten und angesagt. Beim Tram- oder
-Busfahren gilt das Gleiche für Tram und Bus. Das macht die Liste deutlich
+Busfahren gilt das Gleiche für Tram und Bus. Die Fähre gehört zu beiden
+Gruppen: Sie wird überall angeboten, und von der Fähre aus sieht man alle
+Umstiege. Das macht die Liste deutlich
 übersichtlicher. Ohne Haken sieht man wieder alle Umstiege. Die Einstellung
 wird gespeichert. Der Start-Knopf im Hauptmenü zeigt immer alle Linien am
 Startbahnhof, weil man dort ja erst das Verkehrsmittel wählt.
@@ -374,7 +408,8 @@ Die Töne in `sounds/` sind **nachgebaut**, es sind keine Originalaufnahmen.
 Die Aufnahmen von BVG und S-Bahn sind nicht frei verfügbar.
 `tools/make_sounds.py` erzeugt sie neu. Eigene Aufnahmen kannst du einfach
 als `sounds/sbahn.wav`, `sounds/ubahn.wav`, `sounds/tram.wav`,
-`sounds/bus.wav`, `sounds/regio.wav` oder `sounds/ice.wav` ablegen. Im
+`sounds/bus.wav`, `sounds/regio.wav`, `sounds/ice.wav` oder
+`sounds/faehre.wav` (Schiffsglocke und Schiffshorn) ablegen. Im
 Flugzeug gibt es den Kabinengong `sounds/flug.wav` und beim Start das
 Triebwerksgeräusch `sounds/jet.wav`.
 
@@ -441,11 +476,12 @@ Für jede Linie wählt das Skript die typische Hin- und Rückfahrt aus. Kurze
 Fahrten, Fahrten zum Betriebshof und Ersatzverkehr lässt es weg.
 
 Der aktuelle Datenstand stammt aus dem VBB-Fahrplan vom März 2026. Die
-**U4** fehlt darin seit Februar 2026, vermutlich wegen einer Sperrung. Damit
-sie trotzdem im Spiel ist, übernimmt das Skript Linien aus der Liste
-`KEEP_LINES` (in `tools/build_data.py`) aus der letzten älteren Version, in
-der sie noch vorkommen. Für die U4 ist das der Fahrplan vom Januar 2026.
-Weitere Linien lassen sich dort einfach eintragen.
+**U4** fehlt darin seit Februar 2026, vermutlich wegen einer Sperrung, und
+die Saison-Fähre **F24** fährt nur von April bis Oktober. Damit sie trotzdem
+im Spiel sind, übernimmt das Skript Linien aus der Liste `KEEP_LINES` (in
+`tools/build_data.py`) aus der letzten älteren Version, in der sie noch
+vorkommen. Für die U4 ist das der Fahrplan vom Januar 2026, für die F24 der
+vom Oktober 2025. Weitere Linien lassen sich dort einfach eintragen.
 
 **Neue Linien**, die im VBB-Datensatz noch fehlen, stehen in
 `data/extra_lines.json`. Zurzeit ist das die **S15** (seit 15. Juni 2026,
@@ -468,9 +504,10 @@ VBB-Fahrplan (GTFS) wie die Linien, aufbereitet im npm-Paket `vbb-trips`
 (Stand März 2026). `tools/build_times.py` nimmt für jeden Abschnitt die
 Fahrzeit (Ankunft an der nächsten Station minus Abfahrt an der vorigen) aller
 Fahrten der Linie und davon den Mittelwert (Median). So sind für fast alle
-Abschnitte Zeiten da: S-Bahn, U-Bahn und Regionalbahn zu 100 %, Tram zu 99 %,
-Bus zu 98 %. Fehlende Abschnitte, etwa die gesperrte U4, kommen aus älteren
-Fahrplanständen. Der Fahrplan rechnet in ganzen Minuten.
+Abschnitte Zeiten da: S-Bahn, U-Bahn, Regionalbahn und Fähre zu 100 %, Tram
+zu 99 %, Bus zu 98 %. Fehlende Abschnitte, etwa die gesperrte U4, kommen aus
+älteren Fahrplanständen. Die Saison-Fähre F24 fehlt in allen Ständen seit
+November 2024; ihre Fahrzeit kommt aus dem Stand vom Oktober 2024. Der Fahrplan rechnet in ganzen Minuten.
 
 Die **ICE-Linien** stehen nicht im VBB-Fahrplan. Ihre Fahrzeiten kommen aus
 dem Soll-Fahrplan des Fernverkehrs (DELFI e.V., über

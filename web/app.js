@@ -29,6 +29,7 @@ const MODES = [
   ["bus", "Bus", "#A5027D", ["#F7D117", "#3A3A3A"]],
   ["regio", "Regionalbahn", "#4B5563", ["#D7001D", "#FFFFFF"]],
   ["ice", "ICE", "#EC0016", ["#F4F4F4", "#EC0016"]],
+  ["faehre", "Fähre", "#0080BA", ["#F7D117", "#FFFFFF"]],      // gelber Rumpf, weißer Aufbau
   ["flug", "Flugzeug", "#1C6DD0", ["#FFFFFF", "#1C6DD0"]],
 ];
 const MODE = Object.fromEntries(MODES.map(m => [m[0], m]));
@@ -181,6 +182,7 @@ class Painter {
 
 function drawVehicle(c, kind, cx, cy, length, flip = false) {
   if (kind === "flug") return drawPlane(c, cx, cy + length * 0.02, length * 1.05, 0, flip);
+  if (kind === "faehre") return drawFerry(c, cx, cy, length, flip);
   const [body, accent] = MODE[kind][3];
   const mx = flip ? -1 : 1;
   const T = pts => pts.map(([x, y]) => [cx + mx * x * length, cy + y * length]);
@@ -238,6 +240,43 @@ function drawVehicle(c, kind, cx, cy, length, flip = false) {
   poly(circlePoints(0.47, bottom - 0.07, 0.018, 10), { fill: "#FFF6B0" });
 }
 
+/** Fähre in Seitenansicht, im Wasser: gelber Rumpf, weißer Aufbau, Steuerhaus vorn (rechts). */
+function drawFerry(c, cx, cy, length, flip = false) {
+  const [hull, cabin] = MODE.faehre[3];
+  const blue = MODE.faehre[2];
+  const mx = flip ? -1 : 1;
+  const T = pts => pts.map(([x, y]) => [cx + mx * x * length, cy + y * length]);
+  const poly = (pts, o) => c.polygon(T(pts), o);
+  const lw = Math.max(1, length / 90);
+  const grey = "#7A808A";
+  // Fahnenmast mit blauer Fahne
+  c.line(T([[-0.3, -0.2], [-0.3, -0.37]]), { fill: "#555555", width: Math.max(1, length / 80) });
+  poly([[-0.3, -0.37], [-0.2, -0.345], [-0.3, -0.32]], { fill: blue });
+  // Aufbau mit Fensterreihe und Tür
+  poly(roundRectPoints(-0.38, -0.2, 0.24, -0.02, 0.03), { fill: cabin, outline: grey, width: lw });
+  for (const wx of [-0.34, -0.23, -0.12, -0.01]) {
+    poly(roundRectPoints(wx, -0.17, wx + 0.085, -0.09, 0.012), { fill: "#CFE8FF", outline: grey, width: lw / 2 });
+  }
+  poly([[0.1, -0.17], [0.16, -0.17], [0.16, -0.03], [0.1, -0.03]], { fill: "#E3E6EA", outline: grey, width: lw / 2 });
+  // Rettungsring
+  poly(circlePoints(0.2, -0.1, 0.026, 12), { fill: "#E8483B" });
+  poly(circlePoints(0.2, -0.1, 0.012, 10), { fill: cabin });
+  // Steuerhaus mit großer Scheibe nach vorn
+  poly(roundRectPoints(0.02, -0.3, 0.22, -0.2, 0.02), { fill: cabin, outline: grey, width: lw });
+  poly([[0.06, -0.28], [0.2, -0.28], [0.21, -0.22], [0.06, -0.22]], { fill: "#2B3440" });
+  // Reling auf dem Vordeck
+  c.line(T([[0.24, -0.06], [0.44, -0.06]]), { fill: grey, width: Math.max(1, length / 120) });
+  for (const rx of [0.29, 0.34, 0.39, 0.44]) c.line(T([[rx, -0.06], [rx, -0.02]]), { fill: grey, width: Math.max(1, length / 160) });
+  // Rumpf mit blauem Streifen, der Bug zeigt nach vorn
+  poly([[-0.48, -0.02], [0.5, -0.02], [0.43, 0.11], [-0.44, 0.11]], { fill: hull, outline: darker(hull, 0.6), width: lw });
+  poly([[-0.475, 0.015], [0.485, 0.015], [0.475, 0.04], [-0.465, 0.04]], { fill: blue });
+  // Wasser mit kleinen Wellen
+  const pts = [];
+  for (let x = 0; x <= 20; x++) pts.push([x / 20 * 1.16 - 0.58, 0.085 + 0.012 * Math.sin(x * 1.9)]);
+  poly(pts.concat([[0.58, 0.15], [-0.58, 0.15]]), { fill: "#4FA3D9" });
+  c.line(T(pts), { fill: "#BFE2F7", width: Math.max(1, length / 110) });
+}
+
 /** Das bekannte Berliner Zeichen: grünes S, blaues U, Schilder für Tram, Bus und Regionalzug. */
 function drawModeSign(c, app, kind, cx, cy, size) {
   const color = MODE[kind][2];
@@ -255,6 +294,18 @@ function drawModeSign(c, app, kind, cx, cy, size) {
   } else if (kind === "flug") {
     c.roundRect(cx - r, cy - r, cx + r, cy + r, size * 0.22, { fill: color });
     c.polygon(planeTopPoints(cx, cy, size * 0.78, Math.PI / 4), { fill: "white" });
+  } else if (kind === "faehre") {
+    // weißes Schiff auf blauen Wellen
+    c.roundRect(cx - r, cy - r, cx + r, cy + r, size * 0.22, { fill: color });
+    const P = pts => pts.map(([x, y]) => [cx + x * r, cy + y * r]);
+    c.polygon(P([[-0.12, -0.62], [0.18, -0.62], [0.18, -0.38], [-0.12, -0.38]]), { fill: "white" });
+    c.polygon(P([[-0.42, -0.4], [0.3, -0.4], [0.3, -0.12], [-0.42, -0.12]]), { fill: "white" });
+    c.polygon(P([[-0.66, -0.08], [0.7, -0.08], [0.5, 0.26], [-0.56, 0.26]]), { fill: "white" });
+    for (const wy of [0.42, 0.62]) {
+      const wave = [];
+      for (let x = 0; x <= 12; x++) wave.push([x / 12 * 1.3 - 0.65, wy + 0.07 * Math.sin(x * 1.6)]);
+      c.line(P(wave), { fill: "white", width: Math.max(1, size * 0.045), cap: "round", join: "round" });
+    }
   } else if (kind === "regio") {
     // wie die roten Zugschilder der Bahn: „RE“ in Rot auf Weiß
     c.roundRect(cx - r, cy - r, cx + r, cy + r, size * 0.22, { fill: color });
@@ -270,7 +321,7 @@ function drawModeSign(c, app, kind, cx, cy, size) {
 /** Linienschild wie an der Haltestelle. Gibt die Breite zurück. */
 function drawBadge(c, x, y, name, color, kind, h, font, border = 0) {
   const w = Math.max(h * 1.6, font.measure(name) + h * 0.6);
-  const r = { sbahn: h / 2, tram: h / 2, bus: h * 0.3 }[kind] ?? h * 0.12;
+  const r = { sbahn: h / 2, tram: h / 2, bus: h * 0.3, faehre: h * 0.3 }[kind] ?? h * 0.12;
   if (border) {
     c.roundRect(x - border, y - h / 2 - border, x + w + border, y + h / 2 + border, r + border, { fill: "white" });
   }
@@ -400,9 +451,10 @@ class SoundPlayer {
 // Umsteigen
 // --------------------------------------------------------------------------
 
-const MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "flug", "tram", "bus"];     // Reihenfolge beim Umsteigen
-// Bei „Umsteigen getrennt“ sieht man nur Umstiege innerhalb der eigenen Gruppe
-const MODE_GROUPS = [["sbahn", "ubahn", "regio", "ice", "flug"], ["tram", "bus"]];
+const MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "flug", "tram", "bus", "faehre"];     // Reihenfolge beim Umsteigen
+// Bei „Umsteigen getrennt“ sieht man nur Umstiege innerhalb der eigenen Gruppe.
+// Die Fähre gehört zu beiden: Man kommt mit der S-Bahn (z. B. Wannsee) genauso hin wie mit Bus und Tram.
+const MODE_GROUPS = [["sbahn", "ubahn", "regio", "ice", "flug", "faehre"], ["tram", "bus", "faehre"]];
 const NEAR_M = 200;          // Haltestellen in diesem Umkreis gehören zusammen
 const SAME_NAME_M = 400;     // gleichnamige Stationen (z. B. "S+U" und "U Alexanderplatz") auch etwas weiter
 
@@ -536,6 +588,14 @@ class NetworkMap {
       const s41 = data.lines.sbahn.find(l => l.name === "S41");
       if (s41) this.ring = s41.directions[0].filter(k => coords[k]).map(k => coords[k]);
     }
+    // Die wenigen Fähren liegen weit auseinander: als Orientierung das S-Bahn-Netz dazu
+    this.context = [];
+    if (kind === "faehre") {
+      for (const line of data.lines.sbahn) {
+        const pts = line.directions[0].filter(k => coords[k]).map(k => coords[k]);
+        if (pts.length >= 2) this.context.push(pts);
+      }
+    }
     let all = this.lines.flatMap(l => l[2]);
     if (!all.length) all = [[52.52, 13.40]];
     this.lat0 = all.reduce((a, p) => a + p[0], 0) / all.length;
@@ -569,8 +629,9 @@ class NetworkMap {
     c.roundRect(x1, y1, x2, y2, 16 * s, { fill: "#F6F1E4" });
     const pad = 14 * s;
     const many = this.lines.length > 30;
-    // Beim Bus (riesiges Netz) und Regionalzug (bis an die Ostsee) wäre Berlin winzig: heranzoomen
-    const zoom = many || this.kind === "regio";
+    // Beim Bus (riesiges Netz) und Regionalzug (bis an die Ostsee) wäre Berlin winzig, bei der Fähre
+    // (kurze Überfahrten am Stadtrand) die Linie: heranzoomen
+    const zoom = many || this.kind === "regio" || this.kind === "faehre";
     const bounds = zoom && path.length >= 2 ? this.zoomBounds(path) : null;
     const P = this.fit(x1 + pad, y1 + pad + 16 * s, x2 - pad, y2 - pad, bounds);
     const cx1 = x1 + 4 * s, cy1 = y1 + 4 * s, cx2 = x2 - 4 * s, cy2 = y2 - 4 * s;
@@ -583,6 +644,7 @@ class NetworkMap {
       const polyline = (pts, o) => {
         for (const piece of clipPolyline(pts.map(P), cx1, cy1, cx2, cy2)) items.push([piece, o]);
       };
+      for (const pts of this.context) polyline(pts, { fill: "#E2DACA", width: Math.max(1, 2.5 * s) });
       if (this.ring.length >= 2) polyline(this.ring, { fill: "#DDD5C2", width: Math.max(2, 5 * s) });
       for (const [name, color, pts] of this.lines) {
         if (name !== lineName) {
@@ -722,7 +784,7 @@ class HomeScreen extends Screen {
     app.hit(bx1, by1, bx2, by2, () => this.start());
 
     // Ankreuzfelder für Eltern
-    checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug / Tram, Bus",
+    checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug / Tram, Bus (Fähre bei beiden)",
       app.separateModes(), () => this.toggle("separate_modes", app.separateModes()));
     checkbox(app, c, 24 * s, h - 22 * s, "Zeige ICE-Umstiege", app.showIce(),
       () => this.toggle("show_ice", app.showIce()));
@@ -791,7 +853,7 @@ class HomeScreen extends Screen {
       return this.open(this.selected);
     } else if (k === PARENT_KEY) {
       return this.resetHome();
-    } else if (char && "1234567".slice(0, n).includes(char)) {
+    } else if (char && "123456789".slice(0, n).includes(char)) {
       return this.open(+char - 1);
     }
     if (this.selected < HomeScreen.START) this.lastTile = this.selected;
@@ -972,9 +1034,22 @@ class LinesScreen extends Screen {
   }
 }
 
-/** [Name, Taste, „wohin“] – Bus und Tram fahren auf den Betriebshof, Bahnen aufs Abstellgleis. */
+/** [Name, Taste, „wohin“] – Bus und Tram fahren auf den Betriebshof, Bahnen aufs Abstellgleis,
+ *  die Fähre ins Bootshaus. */
 function depotInfo(kind) {
-  return kind === "bus" || kind === "tram" ? ["Betriebshof", "B", "auf den Betriebshof"] : ["Abstellgleis", "A", "aufs Abstellgleis"];
+  if (kind === "bus" || kind === "tram") return ["Betriebshof", "B", "auf den Betriebshof"];
+  if (kind === "faehre") return ["Bootshaus", "B", "ins Bootshaus"];
+  return ["Abstellgleis", "A", "aufs Abstellgleis"];
+}
+
+/** „wo“: auf dem Betriebshof, auf dem Abstellgleis, im Bootshaus. */
+function depotAt(kind) {
+  return kind === "faehre" ? "im Bootshaus" : "auf dem " + depotInfo(kind)[0];
+}
+
+/** Was beim Losfahren auf der Anzeige steht. */
+function departureText(kind) {
+  return kind === "faehre" ? "Leinen los!" : "Zurückbleiben, bitte!";
 }
 
 class RideScreen extends Screen {
@@ -1021,8 +1096,8 @@ class RideScreen extends Screen {
   atTerminus() { return !this.ring && (this.index === 0 || this.index === this.stops.length - 1); }
 
   depotHint() {
-    const [name, key] = depotInfo(this.kind);
-    this.say(`Pause auf dem ${name}. Zurück auf die Strecke: Taste ${key}`, 2.5);
+    const key = depotInfo(this.kind)[1];
+    this.say(`Pause ${depotAt(this.kind)}. Zurück auf die Strecke: Taste ${key}`, 2.5);
     this.app.animate();
   }
 
@@ -1033,8 +1108,8 @@ class RideScreen extends Screen {
   wash() {
     if (this.washing) return;
     if (!this.depot) {
-      const [name, key] = depotInfo(this.kind);
-      this.say(`Gewaschen wird auf dem ${name}: an der Endstation Taste ${key}`, 3);
+      const key = depotInfo(this.kind)[1];
+      this.say(`Gewaschen wird ${depotAt(this.kind)}: an der Endstation Taste ${key}`, 3);
     } else {
       this.washStart = now();
       this.app.sound.play("bus");          // Rauschen und Zischen wie in der Waschanlage
@@ -1078,10 +1153,10 @@ class RideScreen extends Screen {
 
   /** Taste B/A: an der Endhaltestelle auf den Betriebshof bzw. aufs Abstellgleis – und wieder zurück. */
   toggleDepot(key = null) {
-    const [name, wanted, where] = depotInfo(this.kind);
+    const [, wanted, where] = depotInfo(this.kind);
     if (this.washing) return;            // erst fertig waschen
     if (key && key.toUpperCase() !== wanted) {
-      this.say(wanted === "A" ? "Bahnen fahren aufs Abstellgleis: Taste A" : `${MODE[this.kind][1]} fährt auf den Betriebshof: Taste B`, 2.5);
+      this.say(wanted === "A" ? "Bahnen fahren aufs Abstellgleis: Taste A" : `${MODE[this.kind][1]} fährt ${where}: Taste B`, 2.5);
     } else if (this.depot) {
       // zurück auf die Strecke – gewendet, also in Gegenrichtung ab derselben Endhaltestelle
       const here = this.stops[this.index];
@@ -1095,7 +1170,7 @@ class RideScreen extends Screen {
     } else if (this.ring) {
       this.say("Die Ringbahn hat keine Endhaltestelle.", 2.5);
     } else if (!this.atTerminus()) {
-      this.say(`${wanted === "A" ? "Aufs" : "Auf den"} ${name} geht es nur an der Endhaltestelle.`, 2.5);
+      this.say(`${where[0].toUpperCase()}${where.slice(1)} geht es nur an der Endhaltestelle.`, 2.5);
     } else {
       if (this.index === 0) {
         // am Anfang der Linie: erst wenden, damit der Betriebshof „hinter“ der Endstation liegt
@@ -1428,7 +1503,7 @@ class RideScreen extends Screen {
     if (this.depot) return this.depotHint();
     if (i === this.index) return;
     this.backwards = i < this.index;
-    if (this.index === 0 && i > 0) this.say("Zurückbleiben, bitte!");
+    if (this.index === 0 && i > 0) this.say(departureText(this.kind));
     this.index = i;
     this.arrived();
     this.app.animate();
@@ -1449,7 +1524,7 @@ class RideScreen extends Screen {
       this.scroll = null;
     }
     if (this.index < last) {
-      this.say("Zurückbleiben, bitte!", 1.4);
+      this.say(departureText(this.kind), 1.4);
       this.backwards = false;
       this.index++;
       this.arrived();
@@ -1473,10 +1548,11 @@ class RideScreen extends Screen {
 
   doors() {
     const speech = { sbahn: "Zurückbleiben, bitte!", ubahn: "Zurückbleiben, bitte!",
-      regio: "Bitte einsteigen. Vorsicht bei der Abfahrt!", ice: "Bitte einsteigen. Vorsicht bei der Abfahrt!" }[this.kind];
+      regio: "Bitte einsteigen. Vorsicht bei der Abfahrt!", ice: "Bitte einsteigen. Vorsicht bei der Abfahrt!",
+      faehre: "Alle an Bord? Leinen los!" }[this.kind];
     this.app.sound.play(this.kind, speech);
-    // Beim Bus zischt die Druckluft, wenn die Türen aufgehen
-    this.say(this.kind === "bus" ? "Pssscht – Türen auf!" : "Türen schließen!", 2.5);
+    // Beim Bus zischt die Druckluft, wenn die Türen aufgehen; die Fähre tutet mit dem Schiffshorn
+    this.say({ bus: "Pssscht – Türen auf!", faehre: "Tuuut! Leinen los!" }[this.kind] || "Türen schließen!", 2.5);
     this.app.animate();
   }
 
@@ -1493,7 +1569,7 @@ class RideScreen extends Screen {
     let text = spokenName(name) + ".";
     const others = this.transferOptions();
     if (others.length) {
-      const prefix = { tram: "Tram ", bus: "Bus ", flug: "Flug nach " };
+      const prefix = { tram: "Tram ", bus: "Bus ", flug: "Flug nach ", faehre: "Fähre " };
       const names = others.slice(0, 8).map(o => (prefix[o.kind] || "") + spokenLine(o.name));
       text += " Umsteigen zu " + names.join(", ") + (others.length > 8 ? " und weiteren Linien." : ".");
     }
@@ -1551,7 +1627,7 @@ class RideScreen extends Screen {
     } else if (this.washing) {
       return;
     } else if (this.depot) {
-      this.say(`Hier steigt niemand ein – wir sind auf dem ${depotInfo(this.kind)[0]}.`, 2.5);
+      this.say(`Hier steigt niemand ein – wir sind ${depotAt(this.kind)}.`, 2.5);
     } else if (Math.abs(this.pos - this.index) > 0.02) {
       this.say("Erst anhalten – dann Türen auf!", 2);
     } else {
@@ -1634,7 +1710,7 @@ class RideScreen extends Screen {
 const SEG = 60;               // so viele Meter liegen in der Szene zwischen zwei Stationen
 const CAM_H = 2.4;            // Augenhöhe des Fahrers über den Schienen bzw. der Straße
 const Z_NEAR = 1.2, Z_FAR = 140;
-const VMAX = { sbahn: 100, ubahn: 70, tram: 60, bus: 50, regio: 160, ice: 300 };   // km/h am Tacho
+const VMAX = { sbahn: 100, ubahn: 70, tram: 60, bus: 50, regio: 160, ice: 300, faehre: 25 };   // km/h am Tacho
 const COCKPIT_SPEED = 0.7;    // höchstes Tempo in Stationen pro Sekunde – ca. 1,5 s von Station zu Station
 const LED = "#FFA31A";        // Farbe der Leuchtschrift
 
@@ -1769,7 +1845,7 @@ const HBF_LOWER_NEIGHBORS = new Set(["S Südkreuz", "S+U Gesundbrunnen", "S+U Po
 function stationLevel(kind, lineName, names, i) {
   const name = names[i];
   const neighbors = [names[i - 1], names[i + 1]].filter(Boolean);
-  if (kind === "tram" || kind === "bus") return "ground";
+  if (kind === "tram" || kind === "bus" || kind === "faehre") return "ground";
   if (kind === "ubahn") {
     if (U_ELEVATED[lineName] && U_ELEVATED[lineName].has(name)) return "elevated";
     return U_GROUND[lineName] && U_GROUND[lineName].has(name) ? "ground" : "tunnel";
@@ -1960,7 +2036,156 @@ function drawPlatform(c, app, sc, ride, i, zs, za, zb, lv, name) {
 }
 
 /** Die Strecke vor dem Fahrzeug. Alles hängt von ride.pos ab – so zieht die Landschaft beim Fahren vorbei. */
+const WATER = "#3E86B5";
+const PIER = "#A47B52";        // Holzbohlen der Anleger
+const PIER_SIDE = "#6E5236";
+
+/** Fähre: Blick über den Bug aufs Wasser. Links und rechts Ufer mit Bäumen und Schilf, an jeder Station
+ *  ein Anleger (Holzsteg) rechts, hinter der Endstation das Bootshaus. */
+function drawWaterScene(ride, c, app, x1, y1, x2, y2) {
+  const s = app.s, st = app.data.stations, stops = ride.stops;
+  const cam = ride.pos * SEG;
+  const sc = new Scene(c, x1, y1, x2, y2);
+  const hy = sc.hy, W = x2 - x1, H = y2 - y1;
+  const blue = MODE.faehre[2];
+  const mod3 = k => ((k % 3) + 3) % 3;
+
+  // --- Himmel, Wald am anderen Ende des Sees, Wasser ---
+  const sky = ["#6FB6EA", "#82C0EE", "#96CAF1", "#AAD4F4", "#BFDFF6", "#D4EAF9"];
+  const band = (hy - y1) / sky.length;
+  sky.forEach((col, i) => c.rect(x1, y1 + i * band, x2, y1 + (i + 1) * band + 1, col));
+  const pts = [[x1, hy + 1]];
+  for (let k = 0; k < 25; k++) pts.push([x1 + W * k / 24, hy - (0.025 + 0.03 * rnd(k, 15)) * H]);
+  pts.push([x2, hy + 1]);
+  c.polygon(pts, { fill: "#4F7F45" });
+  for (let k = 0; k < 5; k++) {                                            // Häuschen am fernen Ufer
+    const hx = x1 + W * (0.08 + 0.2 * k + 0.08 * rnd(k, 16)), hw = W * 0.012;
+    c.rect(hx, hy - H * 0.022, hx + hw, hy + 1, ["#E8D9B5", "#F2EEE6", "#D9A68C"][k % 3]);
+    c.polygon([[hx - hw * 0.2, hy - H * 0.022], [hx + hw / 2, hy - H * 0.036], [hx + hw * 1.2, hy - H * 0.022]], { fill: "#A0483A" });
+  }
+  c.rect(x1, hy, x2, y2, WATER);
+  const far = (y2 - hy) * 0.3;                                             // hinten spiegelt das Wasser den Himmel
+  ["#8CC3E3", "#73B2DA", "#5FA3D0", "#4C95C5"].forEach((col, i) => c.rect(x1, hy + far * i / 4, x2, hy + far * (i + 1) / 4 + 1, col));
+
+  /** Positionen [Index, Abstand nach vorn] von Dingen, die alle spacing Meter wiederkehren. */
+  function periodic(spacing, offset = 0) {
+    const out = [];
+    for (let k = Math.floor((cam + Z_NEAR - offset) / spacing); ; k++) {
+      const z = k * spacing + offset - cam;
+      if (z > Z_FAR) return out;
+      if (z >= Z_NEAR - spacing) out.push([k, z]);
+    }
+  }
+
+  // --- Ufer links und rechts ---
+  const left = -26, right = 18;
+  sc.ground(-300, left, Z_NEAR, Z_FAR, "#7FAF62", 0.6);
+  sc.ground(right, 300, Z_NEAR, Z_FAR, "#7FAF62", 0.6);
+  sc.wall(left, 0, 0.6, Z_NEAR, Z_FAR, "#8C7A5A");
+  sc.wall(right, 0, 0.6, Z_NEAR, Z_FAR, "#8C7A5A");
+
+  // Wellen: kurze helle Striche, die beim Fahren vorbeiziehen
+  for (const [k, z] of periodic(5)) {
+    for (let j = 0; j < 3; j++) {
+      const X = left + 1 + (right - left - 3) * rnd(k * 3 + j, 17);
+      sc.ground(X, X + 1.4, z, z + 0.3, "#8CC6E8", 0.01);
+    }
+  }
+
+  // --- Bootshaus hinter der Endstation ---
+  let zEnd = Z_FAR + 100;
+  if (ride.depot) {
+    zEnd = stops.length * SEG - cam + 34;
+    drawBoathouse(c, app, sc, zEnd, blue);
+  }
+
+  const items = [];
+  for (const [k, z] of periodic(11, 3)) {
+    for (const side of [-1, 1]) {
+      if (rnd(k, 18 + side) < 0.3) continue;
+      const X = side > 0 ? right + 3 + 9 * rnd(k, 20 + side) : left - 3 - 9 * rnd(k, 20 + side);
+      items.push([z, () => {
+        sc.front(X - 0.2, X + 0.2, 0.6, 3.0, z, "#6B4A2E");
+        const [cx, cy] = sc.p(X, 4.6, z), r = sc.size(2.0 + 0.8 * rnd(k, 22 + side), z);
+        c.oval(cx - r, cy - r, cx + r, cy + r, { fill: ["#4F8F3F", "#5E9C46", "#477F38"][mod3(k + side)] });
+      }]);
+    }
+  }
+  for (const [k, z] of periodic(4, 1)) {                                   // Schilf am Ufer
+    for (const X of [right + 0.4, left - 0.4]) {
+      if (rnd(k, 23 + X) < 0.5) items.push([z, () => sc.front(X - 0.6, X + 0.6, 0.4, 1.5, z, "#8DA24E")]);
+    }
+  }
+  for (const [, z] of periodic(45, 20)) {                                  // Fahrwassertonnen: rot links, grün rechts
+    for (const [X, col] of [[-9, "#D23B2E"], [12, "#2F9E5B"]]) {
+      items.push([z, () => {
+        sc.front(X - 0.45, X + 0.45, 0, 0.9, z, col);
+        sc.front(X - 0.25, X + 0.25, 0.9, 1.5, z, col);
+        sc.front(X - 0.45, X + 0.45, 0.35, 0.5, z, "white");
+      }]);
+    }
+  }
+
+  // --- Anleger ---
+  for (let i = Math.floor(ride.pos) - 1; i < Math.floor(ride.pos) + 3; i++) {
+    if (i < 0 || i >= stops.length) continue;
+    const zs = i * SEG - cam, name = st[stops[i]];
+    const za = zs - 12, zb = zs + 16;
+    if (zb < Z_NEAR || za > Z_FAR) continue;
+    items.push([zb, () => {
+      sc.ground(8, right, zs + 3, zs + 6, PIER, 0.7);                       // Steg zum Ufer
+      sc.front(8, right, 0, 0.7, zs + 3, PIER_SIDE);
+      sc.ground(2.8, 8, za, zb, PIER, 0.7);                                 // Ponton
+      sc.wall(2.8, 0, 0.7, za, zb, PIER_SIDE);
+      sc.front(2.8, 8, 0, 0.7, za, PIER_SIDE);
+      if (za < 50) {
+        for (let pz = Math.trunc(za) + 1; pz < Math.trunc(zb); pz += 2) sc.ground(2.8, 8, pz, pz + 0.12, "#8A6542", 0.71);   // Bohlen
+      }
+      for (const pz of [za + 0.6, zb - 0.6]) sc.front(2.45, 2.85, 0, 2.2, pz, "#5A4632");   // Dalben, an denen die Fähre festmacht
+      for (const pz of [zs + 2, zs + 9]) sc.front(7.2, 7.4, 0.7, 3.3, pz, "#5A6470");      // Wartehäuschen
+      sc.ground(4.6, 8, zs + 2, zs + 9, "#5A6470", 3.3);
+      const poleZ = zs + 12;
+      sc.front(2.95, 3.05, 0.7, 4.3, poleZ, "#6F7378");
+      stationSign(c, app, sc, 3.1, 6.6, 2.6, 3.3, poleZ, name, blue);
+      if (poleZ > Z_NEAR && poleZ < Z_FAR) {
+        // das gelbe Haltestellenschild mit grünem H
+        const [hx, hy2] = sc.p(3.0, 4.3, poleZ), r = sc.size(0.45, poleZ);
+        c.oval(hx - r, hy2 - r, hx + r, hy2 + r, { fill: "#F7D117", outline: "#2F8F4E", width: Math.max(1, r * 0.15) });
+        if (r > 5) c.text(hx, hy2, "H", app.font(r * 1.3 / s, "bold"), "#2F8F4E");
+      }
+    }]);
+  }
+
+  for (const [, fn] of items.filter(it => it[0] < zEnd).sort((a, b) => b[0] - a[0])) fn();
+
+  // --- der eigene Bug vorn im Bild ---
+  const cx = (x1 + x2) / 2;
+  const bow = [[cx - W * 0.42, y2 + 2], [cx - W * 0.17, y2 - H * 0.17], [cx, y2 - H * 0.23], [cx + W * 0.17, y2 - H * 0.17],
+    [cx + W * 0.42, y2 + 2]];
+  c.polygon(bow, { fill: MODE.faehre[3][0] });
+  c.polygon([[cx - W * 0.35, y2 + 2], [cx - W * 0.14, y2 - H * 0.145], [cx, y2 - H * 0.195], [cx + W * 0.14, y2 - H * 0.145],
+    [cx + W * 0.35, y2 + 2]], { fill: "#D9D4C7" });
+  c.line(bow.slice(1, 4), { fill: "#7A808A", width: Math.max(2, 4 * s) });                         // Reling
+  c.line([[cx, y2 - H * 0.23], [cx, y2 - H * 0.31]], { fill: "#555555", width: Math.max(1, 3 * s) });  // Fahnenstock
+  c.polygon([[cx, y2 - H * 0.31], [cx + W * 0.03, y2 - H * 0.295], [cx, y2 - H * 0.28]], { fill: blue });
+}
+
+/** Bootshaus: Holzhalle quer über dem Wasser, mit offenem Tor, durch das die Fähre hineinfährt. */
+function drawBoathouse(c, app, sc, z, color) {
+  if (!(z > Z_NEAR && z < Z_FAR)) return;
+  sc.poly([[-44, 8, z], [0, 14, z], [44, 8, z]], "#7A3E2E");               // Giebeldach
+  sc.front(-40, -4.5, 0, 8, z, "#9C6B43");
+  sc.front(4.5, 40, 0, 8, z, "#9C6B43");
+  sc.front(-4.5, 4.5, 5.6, 8, z, "#9C6B43");
+  for (let X = -38; X < 40; X += 3) sc.front(X, X + 0.15, 0, Math.abs(X) > 5 ? 8 : 0, z, "#835735");   // Bretter
+  sc.front(-4.5, 4.5, 0, 5.6, z, "#1E2A33");                                // Tor: drinnen ist es dunkel
+  sc.front(-4.5, 4.5, 0, 0.4, z, "#2C5674");                                // Wasser im Tor
+  for (const X of [-16, -10, 10, 16]) sc.front(X - 1.6, X + 1.6, 3.0, 5.4, z, "#CFE8FF");   // Fenster
+  stationSign(c, app, sc, -5.5, 5.5, 6.0, 7.6, z, "Bootshaus", color);
+}
+
 function drawScene(ride, c, app, x1, y1, x2, y2) {
+  if (ride.kind === "faehre") return drawWaterScene(ride, c, app, x1, y1, x2, y2);
   if (ride.kind !== "tram" && ride.kind !== "bus") return drawRailScene(ride, c, app, x1, y1, x2, y2);
   // ab hier Straßenbahn und Bus: Straße zwischen Häusern
   const s = app.s, kind = ride.kind, st = app.data.stations, stops = ride.stops;
@@ -2154,10 +2379,13 @@ function drawWash(ride, c, app, x1, y1, x2, y2, t) {
   sc.wall(-3.2, 0, 4.8, za, zb, "#B9C4CC");
   sc.wall(3.2, 0, 4.8, za, zb, "#B9C4CC");
   sc.ground(-3.2, 3.2, za, zb, "#8F9BA5", 4.8);
-  sc.ground(-3.2, 3.2, za, zb, "#5E666E");
-  for (let k = 0; k < WASH_EXIT; k += 3) sc.ground(-3.2, 3.2, k - cam, k - cam + 0.25, "#4C545C", 0.01);  // nasse Rinnen
+  const ferry = ride.kind === "faehre";                            // die Fähre schwimmt durch die Waschanlage
+  sc.ground(-3.2, 3.2, za, zb, ferry ? WATER : "#5E666E");
+  for (let k = 0; k < WASH_EXIT; k += 3) {                         // nasse Rinnen im Boden bzw. Wellen
+    sc.ground(-3.2, 3.2, k - cam, k - cam + 0.25, ferry ? "#5FA3D0" : "#4C545C", 0.01);
+  }
   for (let k = 2; k < WASH_EXIT; k += 6) sc.ground(-0.6, 0.6, k - cam, k - cam + 1.5, "#E8F4FF", 4.78);   // Lampen
-  if (ride.kind !== "bus") for (const X of [-0.75, 0.75]) sc.ground(X - 0.05, X + 0.05, za, zb, "#C8C8C8", 0.06);
+  if (ride.kind !== "bus" && !ferry) for (const X of [-0.75, 0.75]) sc.ground(X - 0.05, X + 0.05, za, zb, "#C8C8C8", 0.06);
 
   const arch = (z, color) => {
     sc.front(-3.0, -2.75, 0, 4.4, z, color);
@@ -3568,6 +3796,7 @@ const INTERIOR = {   // Wand, Sitze, Haltestangen, Türflügel
   bus: ["#EEEEEE", "#2F4E8C", "#F7D117", "#D5D9DE"],
   regio: ["#ECECEC", "#2F5A9E", "#A8AEB5", "#D7001D"],
   ice: ["#F4F4F4", "#59636F", "#A8AEB5", "#D5D9DE"],
+  faehre: ["#EFE9DC", "#1F6FA8", "#B8BEC6", "#F7D117"],
 };
 
 /** Zufallszahlen, die bei gleichem Startwert immer gleich ausfallen. */
@@ -3817,7 +4046,7 @@ class Doors {
   drawOutside(c, x1, y1, x2, y2, name) {
     const ride = this.ride, app = ride.app, s = app.s, kind = ride.kind;
     const W = x2 - x1, H = y2 - y1, X = f => x1 + f * W, Y = f => y1 + f * H;
-    const level = kind !== "tram" && kind !== "bus" ? ride.levels[ride.index] : "ground";
+    const level = kind !== "tram" && kind !== "bus" && kind !== "faehre" ? ride.levels[ride.index] : "ground";
     let signBg, signFg;
     if (level === "tunnel") {
       c.rect(x1, y1, x2, Y(0.82), "#E6DFC8");
@@ -3834,6 +4063,13 @@ class Doors {
           for (const wy of [0.24, 0.38, 0.52]) for (const wx of [0.2, 0.6]) c.rect(hx + W / 8 * wx, Y(wy), hx + W / 8 * (wx + 0.2), Y(wy + 0.07), "#7E97AD");
         }
         [signBg, signFg] = ["#F2D21B", "#0F6B3A"];
+      } else if (kind === "faehre") {
+        for (let k = 0; k < 12; k++) {                             // Bäume am anderen Ufer
+          const tx = X((k + 0.3) / 12);
+          c.oval(tx - 0.05 * W, Y(0.3), tx + 0.05 * W, Y(0.54), { fill: ["#5E9C46", "#4F8F3F"][k % 2] });
+        }
+        c.rect(x1, Y(0.5), x2, Y(0.56), "#7FAF62");
+        [signBg, signFg] = ["#F2D21B", "#0F6B3A"];
       } else {
         for (let k = 0; k < 12; k++) {                             // Bäume hinter dem Bahnsteig
           const tx = X((k + 0.3) / 12);
@@ -3842,15 +4078,29 @@ class Doors {
         c.rect(x1, Y(0), x2, Y(0.05), "#6B7079");                   // Bahnsteigdach
         [signBg, signFg] = kind === "sbahn" ? ["#00703C", "white"] : ["#0A1E6E", "white"];
       }
-      c.rect(x1, Y(0.58), x2, Y(0.7), "#B9B4AA");
+      if (kind === "faehre") {                                     // Wasser mit Wellen
+        c.rect(x1, Y(0.56), x2, Y(0.7), "#4C95C5");
+        for (let k = 0; k < 16; k++) {
+          const wx = X(rnd(k, 24)), wy = Y(0.58 + 0.1 * rnd(k, 25));
+          c.line([[wx, wy], [wx + 0.05 * W, wy]], { fill: "#8CC6E8", width: Math.max(1, 3 * s) });
+        }
+      } else {
+        c.rect(x1, Y(0.58), x2, Y(0.7), "#B9B4AA");
+      }
     }
-    c.rect(x1, Y(0.7), x2, Y(0.82), "#A9A49A");                       // Bahnsteig / Gehweg
-    c.rect(x1, Y(0.8), x2, Y(0.82), level === "tunnel" || ["sbahn", "ubahn", "regio", "ice"].includes(kind) ? "#F2D21B" : "#8C877D");
+    if (kind === "faehre") {                                       // Anleger aus Holzbohlen
+      c.rect(x1, Y(0.7), x2, Y(0.82), PIER);
+      for (let k = 1; k < 40; k++) c.line([[X(k / 40), Y(0.7)], [X(k / 40), Y(0.8)]], { fill: "#8A6542", width: Math.max(1, 2 * s) });
+      c.rect(x1, Y(0.8), x2, Y(0.82), PIER_SIDE);
+    } else {
+      c.rect(x1, Y(0.7), x2, Y(0.82), "#A9A49A");                     // Bahnsteig / Gehweg
+      c.rect(x1, Y(0.8), x2, Y(0.82), level === "tunnel" || ["sbahn", "ubahn", "regio", "ice"].includes(kind) ? "#F2D21B" : "#8C877D");
+    }
     // Stationsschild, durch das große Fenster zwischen den Türen zu sehen
     const f = app.font(22, "bold"), text = fitText(f, name, 0.14 * W), tw = f.measure(text) + 24 * s, cx = X(0.46);
     c.roundRect(cx - tw / 2, Y(0.2), cx + tw / 2, Y(0.2) + 50 * s, 8 * s, { fill: signBg, outline: "white", width: 3 * s });
     c.text(cx, Y(0.2) + 25 * s, text, f, signFg);
-    if (kind === "tram" || kind === "bus") {                           // Haltestellenschild mit „H“
+    if (kind === "tram" || kind === "bus" || kind === "faehre") {      // Haltestellenschild mit „H“
       const hx = X(0.86);
       c.line([[hx, Y(0.24)], [hx, Y(0.8)]], { fill: "#8C877D", width: Math.max(2, 4 * s) });
       c.oval(hx - 22 * s, Y(0.2) - 22 * s, hx + 22 * s, Y(0.2) + 22 * s, { fill: "#F2D21B", outline: "#0F6B3A", width: 3 * s });
@@ -3951,7 +4201,8 @@ class App {
 
   /** Verkehrsmittel, in die man von kind aus umsteigen kann (null = alle). */
   transferKinds(kind) {
-    let kinds = this.separateModes() ? MODE_GROUPS.find(g => g.includes(kind)) : MODE_ORDER;
+    // alle Gruppen, zu denen das Verkehrsmittel gehört (die Fähre gehört zu beiden)
+    let kinds = this.separateModes() ? MODE_ORDER.filter(k => MODE_GROUPS.some(g => g.includes(kind) && g.includes(k))) : MODE_ORDER;
     if (!this.showIce()) kinds = kinds.filter(k => k !== "ice");
     return kinds.length === MODE_ORDER.length ? null : kinds;
   }

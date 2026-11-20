@@ -8,6 +8,8 @@ Station minus Abfahrt an der vorigen) aller Fahrten der Linie und davon den Mitt
 (Median, gewichtet mit der Zahl der Fahrten). Fehlt ein Abschnitt bei der Linie selbst,
 wird die Fahrzeit anderer Linien auf demselben Abschnitt genommen. Bleiben dann noch Lücken
 (z. B. die U4, die im neuesten Fahrplan fehlt), kommen sie aus älteren Versionen des Pakets.
+Linien ganz ohne Fahrzeit (z. B. die Saison-Fähre F24, die nur im Sommer fährt) werden aus
+noch älteren Versionen ergänzt, und zwar nur diese Linien.
 
 Die ICE-Linien stehen nicht im VBB-Fahrplan. Ihre Fahrzeiten kommen aus dem Soll-Fahrplan
 des Fernverkehrs (DELFI e.V., über gtfs.de, Lizenz CC BY 4.0). Dort tragen die Fahrten die
@@ -40,7 +42,8 @@ from build_data import NPM, fetch, station_key  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data" / "berlin_lines.json"
 FV_GTFS = "https://download.gtfs.de/germany/fv_free/latest.zip"
-PRODUCTS = {"suburban": "sbahn", "subway": "ubahn", "tram": "tram", "bus": "bus", "regional": "regio"}
+PRODUCTS = {"suburban": "sbahn", "subway": "ubahn", "tram": "tram", "bus": "bus", "regional": "regio",
+            "ferry": "faehre"}
 
 
 def load_trips(version=None):
@@ -106,8 +109,34 @@ def collect(version=None):
     return source, per_line, any_line, skipping
 
 
-def add_travel_times(data, version=None, lookback=4):
-    """Fahrzeiten eintragen; Lücken (z. B. die U4) aus bis zu ``lookback`` älteren Versionen füllen."""
+def fill_times(data, per_line, any_line, skipping, only=None):
+    """Trägt fehlende Fahrzeiten ein (``only``: nur diese Linien). Gibt die Zahl der Abschnitte zurück."""
+    filled = 0
+    for kind, lines in data["lines"].items():
+        if kind in ("ice", "flug"):
+            continue
+        for line in lines:
+            if only is not None and line["name"] not in only:
+                continue
+            times = line.setdefault("times", [[None] * (len(st) - 1) for st in line["directions"]])
+            for stops, row in zip(line["directions"], times):
+                for i, (a, b) in enumerate(zip(stops, stops[1:])):
+                    if row[i] is not None:
+                        continue
+                    counter = (per_line.get((line["name"], a, b)) or any_line.get((a, b))
+                               or skipping.get((line["name"], a, b)))
+                    if counter:
+                        row[i] = round(weighted_median(counter) / 60)
+                        filled += 1
+    return filled
+
+
+def add_travel_times(data, version=None, lookback=4, seasonal_lookback=12):
+    """Fahrzeiten eintragen; Lücken (z. B. die U4) aus bis zu ``lookback`` älteren Versionen füllen.
+
+    Linien, die dann noch gar keine Fahrzeit haben (z. B. die Saison-Fähre F24, die nur im Sommer fährt),
+    werden aus bis zu ``seasonal_lookback`` noch älteren Versionen ergänzt – nur diese Linien, damit
+    alte Fahrpläne die übrigen nicht verändern."""
     meta = json.loads(fetch(NPM.format(name="vbb-trips")))
     versions = sorted(meta["versions"], key=lambda v: meta["time"].get(v, ""), reverse=True)
     if version:
@@ -115,27 +144,24 @@ def add_travel_times(data, version=None, lookback=4):
     sources = []
     for n, ver in enumerate(versions[:1 + lookback]):
         source, per_line, any_line, skipping = collect(ver)
-        filled = 0
-        for kind, lines in data["lines"].items():
-            if kind in ("ice", "flug"):
-                continue
-            for line in lines:
-                times = line.setdefault("times", [[None] * (len(st) - 1) for st in line["directions"]])
-                for stops, row in zip(line["directions"], times):
-                    for i, (a, b) in enumerate(zip(stops, stops[1:])):
-                        if row[i] is not None:
-                            continue
-                        counter = (per_line.get((line["name"], a, b)) or any_line.get((a, b))
-                                   or skipping.get((line["name"], a, b)))
-                        if counter:
-                            row[i] = round(weighted_median(counter) / 60)
-                            filled += 1
+        filled = fill_times(data, per_line, any_line, skipping)
         if n == 0 or filled:
             sources.append(source)
         missing = sum(v is None for ls in data["lines"].values() for l in ls for r in l.get("times", []) for v in r)
         print(f"  {source}: {filled} Abschnitte, noch ohne Fahrzeit: {missing}", file=sys.stderr)
         if not missing:
             break
+    for ver in versions[1 + lookback:1 + lookback + seasonal_lookback]:
+        empty = {l["name"] for k, ls in data["lines"].items() if k not in ("ice", "flug") for l in ls
+                 if all(v is None for r in l.get("times", []) for v in r)}
+        if not empty:
+            break
+        source, per_line, any_line, skipping = collect(ver)
+        filled = fill_times(data, per_line, any_line, skipping, only=empty)
+        if filled:
+            sources.append(source + " (" + ", ".join(sorted(empty)) + ")")
+        print(f"  {source}: {filled} Abschnitte für Linien ohne Fahrzeit ({', '.join(sorted(empty))})",
+              file=sys.stderr)
     for kind, lines in data["lines"].items():
         vals = [v for l in lines for r in l.get("times", []) for v in r]
         if vals:

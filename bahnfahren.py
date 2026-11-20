@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Berlin fährt! – Ein einfaches Bahn-Spiel für Kinder.
 
-Wähle ein Verkehrsmittel (S-Bahn, U-Bahn, Straßenbahn, Bus), dann eine Linie
+Wähle ein Verkehrsmittel (S-Bahn, U-Bahn, Straßenbahn, Bus, Fähre …), dann eine Linie
 und fahre die Stationen mit den Pfeiltasten ab.
 
 Benötigt nur Python 3 mit Tkinter (auf macOS z. B. der Installer von
@@ -58,6 +58,7 @@ MODES = [
     ("bus", "Bus", "#A5027D", ("#F7D117", "#3A3A3A")),
     ("regio", "Regionalbahn", "#4B5563", ("#D7001D", "#FFFFFF")),
     ("ice", "ICE", "#EC0016", ("#F4F4F4", "#EC0016")),
+    ("faehre", "Fähre", "#0080BA", ("#F7D117", "#FFFFFF")),     # gelber Rumpf, weißer Aufbau
     ("flug", "Flugzeug", "#1C6DD0", ("#FFFFFF", "#1C6DD0")),
 ]
 MODE = {m[0]: m for m in MODES}
@@ -110,6 +111,8 @@ def draw_vehicle(c, kind, cx, cy, length, flip=False):
     """Zeichnet ein Fahrzeug in Seitenansicht; Fahrtrichtung rechts (``flip``: links)."""
     if kind == "flug":
         return draw_plane(c, cx, cy + length * 0.02, length * 1.05, flip=flip)
+    if kind == "faehre":
+        return draw_ferry(c, cx, cy, length, flip=flip)
     body, accent = MODE[kind][3]
     mx = -1 if flip else 1
 
@@ -176,6 +179,49 @@ def draw_vehicle(c, kind, cx, cy, length, flip=False):
     poly(circle_points(0.47, bottom - 0.07, 0.018, 10), fill="#FFF6B0", outline="")
 
 
+def draw_ferry(c, cx, cy, length, flip=False):
+    """Fähre in Seitenansicht, im Wasser: gelber Rumpf, weißer Aufbau, Steuerhaus vorn (rechts)."""
+    hull, cabin = MODE["faehre"][3]
+    mx = -1 if flip else 1
+
+    def T(pts):
+        out = []
+        for x, y in pts:
+            out += [cx + mx * x * length, cy + y * length]
+        return out
+
+    def poly(pts, **kw):
+        c.create_polygon(T(pts), **kw)
+
+    lw = max(1, length / 90)
+    grey = "#7A808A"
+    # Fahnenmast mit blauer Fahne
+    c.create_line(T([(-0.3, -0.2), (-0.3, -0.37)]), fill="#555555", width=max(1, length / 80))
+    poly([(-0.3, -0.37), (-0.2, -0.345), (-0.3, -0.32)], fill=MODE["faehre"][2], outline="")
+    # Aufbau mit Fensterreihe und Tür
+    poly(round_rect_points(-0.38, -0.2, 0.24, -0.02, 0.03), fill=cabin, outline=grey, width=lw)
+    for wx in (-0.34, -0.23, -0.12, -0.01):
+        poly(round_rect_points(wx, -0.17, wx + 0.085, -0.09, 0.012), fill="#CFE8FF", outline=grey, width=lw / 2)
+    poly([(0.1, -0.17), (0.16, -0.17), (0.16, -0.03), (0.1, -0.03)], fill="#E3E6EA", outline=grey, width=lw / 2)
+    # Rettungsring
+    poly(circle_points(0.2, -0.1, 0.026, 12), fill="#E8483B", outline="")
+    poly(circle_points(0.2, -0.1, 0.012, 10), fill=cabin, outline="")
+    # Steuerhaus mit großer Scheibe nach vorn
+    poly(round_rect_points(0.02, -0.3, 0.22, -0.2, 0.02), fill=cabin, outline=grey, width=lw)
+    poly([(0.06, -0.28), (0.2, -0.28), (0.21, -0.22), (0.06, -0.22)], fill="#2B3440", outline="")
+    # Reling auf dem Vordeck
+    c.create_line(T([(0.24, -0.06), (0.44, -0.06)]), fill=grey, width=max(1, length / 120))
+    for rx in (0.29, 0.34, 0.39, 0.44):
+        c.create_line(T([(rx, -0.06), (rx, -0.02)]), fill=grey, width=max(1, length / 160))
+    # Rumpf mit blauem Streifen, der Bug zeigt nach vorn
+    poly([(-0.48, -0.02), (0.5, -0.02), (0.43, 0.11), (-0.44, 0.11)], fill=hull, outline=darker(hull, 0.6), width=lw)
+    poly([(-0.475, 0.015), (0.485, 0.015), (0.475, 0.04), (-0.465, 0.04)], fill=MODE["faehre"][2], outline="")
+    # Wasser mit kleinen Wellen
+    pts = [(x / 20 * 1.16 - 0.58, 0.085 + 0.012 * math.sin(x * 1.9)) for x in range(21)]
+    poly(pts + [(0.58, 0.15), (-0.58, 0.15)], fill="#4FA3D9", outline="")
+    c.create_line(T(pts), fill="#BFE2F7", width=max(1, length / 110))
+
+
 def draw_mode_sign(c, app, kind, cx, cy, size):
     """Das bekannte Berliner Zeichen: grünes S, blaues U, Schilder für Tram und Bus."""
     color = MODE[kind][2]
@@ -192,6 +238,16 @@ def draw_mode_sign(c, app, kind, cx, cy, size):
     elif kind == "flug":
         round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
         c.create_polygon(plane_top_points(cx, cy, size * 0.78, math.pi / 4), fill="white", outline="")
+    elif kind == "faehre":
+        # weißes Schiff auf blauen Wellen
+        round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
+        P = lambda pts: [v for x, y in pts for v in (cx + x * r, cy + y * r)]
+        c.create_polygon(P([(-0.12, -0.62), (0.18, -0.62), (0.18, -0.38), (-0.12, -0.38)]), fill="white", outline="")
+        c.create_polygon(P([(-0.42, -0.4), (0.3, -0.4), (0.3, -0.12), (-0.42, -0.12)]), fill="white", outline="")
+        c.create_polygon(P([(-0.66, -0.08), (0.7, -0.08), (0.5, 0.26), (-0.56, 0.26)]), fill="white", outline="")
+        for wy in (0.42, 0.62):
+            c.create_line(P([(x / 12 * 1.3 - 0.65, wy + 0.07 * math.sin(x * 1.6)) for x in range(13)]), fill="white",
+                          width=max(1, size * 0.045), smooth=True)
     elif kind == "regio":
         # wie die roten Zugschilder der Bahn: „RE“ in Rot auf Weiß
         round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
@@ -206,7 +262,7 @@ def draw_mode_sign(c, app, kind, cx, cy, size):
 def draw_badge(c, x, y, name, color, kind, h, font, border=0):
     """Linienschild wie an der Haltestelle. Gibt die Breite zurück."""
     w = max(h * 1.6, font.measure(name) + h * 0.6)
-    r = {"sbahn": h / 2, "tram": h / 2, "bus": h * 0.3}.get(kind, h * 0.12)
+    r = {"sbahn": h / 2, "tram": h / 2, "bus": h * 0.3, "faehre": h * 0.3}.get(kind, h * 0.12)
     if border:
         round_rect(c, x - border, y - h / 2 - border, x + w + border, y + h / 2 + border, r + border,
                    fill="white", outline="")
@@ -351,9 +407,10 @@ class SoundPlayer:
 # Umsteigen
 # --------------------------------------------------------------------------
 
-MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "flug", "tram", "bus"]     # Reihenfolge beim Umsteigen
-# Bei „Umsteigen getrennt“ sieht man nur Umstiege innerhalb der eigenen Gruppe
-MODE_GROUPS = [("sbahn", "ubahn", "regio", "ice", "flug"), ("tram", "bus")]
+MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "flug", "tram", "bus", "faehre"]     # Reihenfolge beim Umsteigen
+# Bei „Umsteigen getrennt“ sieht man nur Umstiege innerhalb der eigenen Gruppe.
+# Die Fähre gehört zu beiden: Man kommt mit der S-Bahn (z. B. Wannsee) genauso hin wie mit Bus und Tram.
+MODE_GROUPS = [("sbahn", "ubahn", "regio", "ice", "flug", "faehre"), ("tram", "bus", "faehre")]
 NEAR_M = 200          # Haltestellen in diesem Umkreis gehören zusammen
 SAME_NAME_M = 400     # gleichnamige Stationen (z. B. "S+U" und "U Alexanderplatz") auch etwas weiter
 
@@ -495,6 +552,13 @@ class NetworkMap:
             for line in data["lines"]["sbahn"]:
                 if line["name"] == "S41":
                     self.ring = [coords[k] for k in line["directions"][0] if k in coords]
+        # Die wenigen Fähren liegen weit auseinander: als Orientierung das S-Bahn-Netz dazu
+        self.context = []
+        if kind == "faehre":
+            for line in data["lines"]["sbahn"]:
+                pts = [coords[k] for k in line["directions"][0] if k in coords]
+                if len(pts) >= 2:
+                    self.context.append(pts)
         all_pts = [p for _, _, pts in self.lines for p in pts] or [[52.52, 13.40]]
         self.lat0 = sum(p[0] for p in all_pts) / len(all_pts)
         xs = [self._x(p) for p in all_pts]
@@ -530,8 +594,9 @@ class NetworkMap:
         round_rect(c, x1, y1, x2, y2, 16 * s, fill="#F6F1E4", outline="")
         pad = 14 * s
         many = len(self.lines) > 30
-        # Beim Bus (riesiges Netz) und Regionalzug (bis an die Ostsee) wäre Berlin winzig: heranzoomen
-        zoom = many or self.kind == "regio"
+        # Beim Bus (riesiges Netz) und Regionalzug (bis an die Ostsee) wäre Berlin winzig, bei der Fähre
+        # (kurze Überfahrten am Stadtrand) die Linie: heranzoomen
+        zoom = many or self.kind in ("regio", "faehre")
         bounds = self.zoom_bounds(path) if zoom and len(path) >= 2 else None
         P = self.fit(x1 + pad, y1 + pad + 16 * s, x2 - pad, y2 - pad, bounds)
         cx1, cy1, cx2, cy2 = x1 + 4 * s, y1 + 4 * s, x2 - 4 * s, y2 - 4 * s
@@ -545,6 +610,8 @@ class NetworkMap:
                 for piece in clip_polyline([P(p) for p in pts], cx1, cy1, cx2, cy2):
                     items.append((piece, kw))
 
+            for pts in self.context:
+                polyline(pts, fill="#E2DACA", width=max(1, 2.5 * s))
             if len(self.ring) >= 2:
                 polyline(self.ring, fill="#DDD5C2", width=max(2, 5 * s))
             for name, color, pts in self.lines:
@@ -704,7 +771,7 @@ class HomeScreen(Screen):
         app.hit(bx1, by1, bx2, by2, self.start)
 
         # Ankreuzfelder für Eltern
-        checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug / Tram, Bus",
+        checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug / Tram, Bus (Fähre bei beiden)",
                  app.separate_modes(), lambda: self.toggle("separate_modes", app.separate_modes()))
         checkbox(app, c, 24 * s, h - 22 * s, "Zeige ICE-Umstiege", app.show_ice(),
                  lambda: self.toggle("show_ice", app.show_ice()))
@@ -781,7 +848,7 @@ class HomeScreen(Screen):
         elif k == PARENT_KEY:
             self.reset_home()
             return
-        elif char and char in "1234567"[:len(MODES)]:
+        elif char and char in "123456789"[:len(MODES)]:
             self.open(int(char) - 1)
             return
         if self.selected < self.START:
@@ -972,10 +1039,23 @@ class LinesScreen(Screen):
 
 
 def depot_info(kind):
-    """(Name, Taste, „wohin“) – Bus und Tram fahren auf den Betriebshof, Bahnen aufs Abstellgleis."""
+    """(Name, Taste, „wohin“) – Bus und Tram fahren auf den Betriebshof, Bahnen aufs Abstellgleis,
+    die Fähre ins Bootshaus."""
     if kind in ("bus", "tram"):
         return "Betriebshof", "B", "auf den Betriebshof"
+    if kind == "faehre":
+        return "Bootshaus", "B", "ins Bootshaus"
     return "Abstellgleis", "A", "aufs Abstellgleis"
+
+
+def depot_at(kind):
+    """„wo“: auf dem Betriebshof, auf dem Abstellgleis, im Bootshaus."""
+    return "im Bootshaus" if kind == "faehre" else "auf dem " + depot_info(kind)[0]
+
+
+def departure_text(kind):
+    """Was beim Losfahren auf der Anzeige steht."""
+    return "Leinen los!" if kind == "faehre" else "Zurückbleiben, bitte!"
 
 
 class RideScreen(Screen):
@@ -1333,7 +1413,7 @@ class RideScreen(Screen):
             return
         self.backwards = i < self.index
         if self.index == 0 and i > 0:
-            self.say("Zurückbleiben, bitte!")
+            self.say(departure_text(self.kind))
         self.index = i
         self.arrived()
         self.app.animate()
@@ -1361,8 +1441,8 @@ class RideScreen(Screen):
         return not self.ring and self.index in (0, len(self.stops) - 1)
 
     def depot_hint(self):
-        name, key, _ = depot_info(self.kind)
-        self.say(f"Pause auf dem {name}. Zurück auf die Strecke: Taste {key}", 2.5)
+        key = depot_info(self.kind)[1]
+        self.say(f"Pause {depot_at(self.kind)}. Zurück auf die Strecke: Taste {key}", 2.5)
         self.app.animate()
 
     @property
@@ -1378,8 +1458,8 @@ class RideScreen(Screen):
         if self.washing:
             return
         if not self.depot:
-            name, key, _ = depot_info(self.kind)
-            self.say(f"Gewaschen wird auf dem {name}: an der Endstation Taste {key}", 3)
+            key = depot_info(self.kind)[1]
+            self.say(f"Gewaschen wird {depot_at(self.kind)}: an der Endstation Taste {key}", 3)
         else:
             self.wash_start = time.monotonic()
             self.app.sound.play(SOUND_DIR / "bus.wav")         # Rauschen und Zischen wie in der Waschanlage
@@ -1425,7 +1505,7 @@ class RideScreen(Screen):
             return                      # erst fertig waschen
         if key and key.upper() != wanted:
             self.say("Bahnen fahren aufs Abstellgleis: Taste A" if wanted == "A"
-                     else f"{MODE[self.kind][1]} fährt auf den Betriebshof: Taste B", 2.5)
+                     else f"{MODE[self.kind][1]} fährt {where}: Taste B", 2.5)
         elif self.depot:
             # zurück auf die Strecke – gewendet, also in Gegenrichtung ab derselben Endhaltestelle
             here = self.stops[self.index]
@@ -1440,7 +1520,7 @@ class RideScreen(Screen):
         elif self.ring:
             self.say("Die Ringbahn hat keine Endhaltestelle.", 2.5)
         elif not self.at_terminus():
-            self.say(f"{'Aufs' if wanted == 'A' else 'Auf den'} {name} geht es nur an der Endhaltestelle.", 2.5)
+            self.say(f"{where[0].upper()}{where[1:]} geht es nur an der Endhaltestelle.", 2.5)
         else:
             if self.index == 0:
                 # am Anfang der Linie: erst wenden, damit der Betriebshof „hinter“ der Endstation liegt
@@ -1467,7 +1547,7 @@ class RideScreen(Screen):
             self.index = self.pos = 0
             self.scroll = None
         if self.index < last:
-            self.say("Zurückbleiben, bitte!", 1.4)
+            self.say(departure_text(self.kind), 1.4)
             self.backwards = False
             self.index += 1
             self.arrived()
@@ -1488,10 +1568,11 @@ class RideScreen(Screen):
     def doors(self):
         speech = {"sbahn": "Zurückbleiben, bitte!", "ubahn": "Zurückbleiben, bitte!",
                   "regio": "Bitte einsteigen. Vorsicht bei der Abfahrt!",
-                  "ice": "Bitte einsteigen. Vorsicht bei der Abfahrt!"}.get(self.kind)
+                  "ice": "Bitte einsteigen. Vorsicht bei der Abfahrt!",
+                  "faehre": "Alle an Bord? Leinen los!"}.get(self.kind)
         self.app.sound.play(SOUND_DIR / f"{self.kind}.wav", speech)
-        # Beim Bus zischt die Druckluft, wenn die Türen aufgehen
-        self.say("Pssscht – Türen auf!" if self.kind == "bus" else "Türen schließen!", 2.5)
+        # Beim Bus zischt die Druckluft, wenn die Türen aufgehen; die Fähre tutet mit dem Schiffshorn
+        self.say({"bus": "Pssscht – Türen auf!", "faehre": "Tuuut! Leinen los!"}.get(self.kind, "Türen schließen!"), 2.5)
         self.app.animate()
 
     def announce(self):
@@ -1507,7 +1588,7 @@ class RideScreen(Screen):
         text = spoken_name(name) + "."
         others = self.transfer_options()
         if others:
-            prefix = {"tram": "Tram ", "bus": "Bus ", "flug": "Flug nach "}
+            prefix = {"tram": "Tram ", "bus": "Bus ", "flug": "Flug nach ", "faehre": "Fähre "}
             names = [prefix.get(o["kind"], "") + spoken_line(o["name"]) for o in others[:8]]
             text += " Umsteigen zu " + ", ".join(names) + (" und weiteren Linien." if len(others) > 8 else ".")
         if self.index == len(stops) - 1 and not self.ring:
@@ -1566,7 +1647,7 @@ class RideScreen(Screen):
         elif self.washing:
             return
         elif self.depot:
-            self.say(f"Hier steigt niemand ein – wir sind auf dem {depot_info(self.kind)[0]}.", 2.5)
+            self.say(f"Hier steigt niemand ein – wir sind {depot_at(self.kind)}.", 2.5)
         elif abs(self.pos - self.index) > 0.02:
             self.say("Erst anhalten – dann Türen auf!", 2)
         else:
@@ -1658,7 +1739,7 @@ class RideScreen(Screen):
 SEG = 60.0              # so viele Meter liegen in der Szene zwischen zwei Stationen
 CAM_H = 2.4             # Augenhöhe des Fahrers über den Schienen bzw. der Straße
 Z_NEAR, Z_FAR = 1.2, 140.0
-VMAX = {"sbahn": 100, "ubahn": 70, "tram": 60, "bus": 50, "regio": 160, "ice": 300}   # km/h am Tacho
+VMAX = {"sbahn": 100, "ubahn": 70, "tram": 60, "bus": 50, "regio": 160, "ice": 300, "faehre": 25}   # km/h am Tacho
 COCKPIT_SPEED = 0.7     # höchstes Tempo in Stationen pro Sekunde – ca. 1,5 s von Station zu Station
 LED = "#FFA31A"         # Farbe der Leuchtschrift
 
@@ -1703,7 +1784,7 @@ def station_level(kind, line_name, names, i):
     """'tunnel', 'ground' oder 'elevated' für Bahnhof ``i`` der Liste ``names``."""
     name = names[i]
     neighbors = {names[j] for j in (i - 1, i + 1) if 0 <= j < len(names)}
-    if kind in ("tram", "bus"):
+    if kind in ("tram", "bus", "faehre"):
         return "ground"
     if kind == "ubahn":
         if name in U_ELEVATED.get(line_name, ()):
@@ -1762,6 +1843,8 @@ class Scene:
 
 def draw_scene(ride, c, app, x1, y1, x2, y2):
     """Die Strecke vor dem Fahrzeug. Alles hängt von ride.pos ab – so zieht die Landschaft beim Fahren vorbei."""
+    if ride.kind == "faehre":
+        return draw_water_scene(ride, c, app, x1, y1, x2, y2)
     if ride.kind not in ("tram", "bus"):
         return draw_rail_scene(ride, c, app, x1, y1, x2, y2)
     # ab hier Straßenbahn und Bus: Straße zwischen Häusern
@@ -1891,6 +1974,169 @@ def draw_scene(ride, c, app, x1, y1, x2, y2):
     items = [it for it in items if it[0] < z_end]
     for z, fn in sorted(houses, key=lambda it: -it[0]) + sorted(items, key=lambda it: -it[0]):
         fn()
+
+
+WATER = "#3E86B5"
+PIER = "#A47B52"        # Holzbohlen der Anleger
+PIER_SIDE = "#6E5236"
+
+
+def draw_water_scene(ride, c, app, x1, y1, x2, y2):
+    """Fähre: Blick über den Bug aufs Wasser. Links und rechts Ufer mit Bäumen und Schilf, an jeder Station
+    ein Anleger (Holzsteg) rechts, hinter der Endstation das Bootshaus."""
+    s = app.s
+    st = app.data["stations"]
+    stops = ride.stops
+    cam = ride.pos * SEG
+    sc = Scene(c, x1, y1, x2, y2)
+    hy = sc.hy
+    W, H = x2 - x1, y2 - y1
+
+    # --- Himmel, Wald am anderen Ende des Sees, Wasser ---
+    sky = ["#6FB6EA", "#82C0EE", "#96CAF1", "#AAD4F4", "#BFDFF6", "#D4EAF9"]
+    band = (hy - y1) / len(sky)
+    for i, col in enumerate(sky):
+        c.create_rectangle(x1, y1 + i * band, x2, y1 + (i + 1) * band + 1, fill=col, outline="")
+    pts = [(x1, hy + 1)]
+    for k in range(25):
+        pts.append((x1 + W * k / 24, hy - (0.025 + 0.03 * rnd(k, 15)) * H))
+    pts.append((x2, hy + 1))
+    c.create_polygon([v for p in pts for v in p], fill="#4F7F45", outline="", smooth=True)
+    for k in range(5):                                                  # Häuschen am fernen Ufer
+        hx = x1 + W * (0.08 + 0.2 * k + 0.08 * rnd(k, 16))
+        hw = W * 0.012
+        c.create_rectangle(hx, hy - H * 0.022, hx + hw, hy + 1, fill=["#E8D9B5", "#F2EEE6", "#D9A68C"][k % 3],
+                           outline="")
+        c.create_polygon(hx - hw * 0.2, hy - H * 0.022, hx + hw / 2, hy - H * 0.036, hx + hw * 1.2, hy - H * 0.022,
+                         fill="#A0483A", outline="")
+    c.create_rectangle(x1, hy, x2, y2, fill=WATER, outline="")
+    far = (y2 - hy) * 0.3                                               # hinten spiegelt das Wasser den Himmel
+    for i, col in enumerate(["#8CC3E3", "#73B2DA", "#5FA3D0", "#4C95C5"]):
+        c.create_rectangle(x1, hy + far * i / 4, x2, hy + far * (i + 1) / 4 + 1, fill=col, outline="")
+
+    def periodic(spacing, offset=0.0):
+        """Positionen (Index, Abstand nach vorn) von Dingen, die alle ``spacing`` Meter wiederkehren."""
+        k = math.floor((cam + Z_NEAR - offset) / spacing)
+        while True:
+            z = k * spacing + offset - cam
+            if z > Z_FAR:
+                return
+            if z >= Z_NEAR - spacing:
+                yield k, z
+            k += 1
+
+    # --- Ufer links und rechts ---
+    left, right = -26.0, 18.0
+    sc.ground(-300, left, Z_NEAR, Z_FAR, "#7FAF62", y=0.6)
+    sc.ground(right, 300, Z_NEAR, Z_FAR, "#7FAF62", y=0.6)
+    sc.wall(left, 0, 0.6, Z_NEAR, Z_FAR, "#8C7A5A")
+    sc.wall(right, 0, 0.6, Z_NEAR, Z_FAR, "#8C7A5A")
+
+    # Wellen: kurze helle Striche, die beim Fahren vorbeiziehen
+    for k, z in periodic(5.0):
+        for j in range(3):
+            X = left + 1 + (right - left - 3) * rnd(k * 3 + j, 17)
+            sc.ground(X, X + 1.4, z, z + 0.3, "#8CC6E8", y=0.01)
+
+    # --- Bootshaus hinter der Endstation ---
+    z_end = Z_FAR + 100
+    if ride.depot:
+        z_end = len(stops) * SEG - cam + 34
+        draw_boathouse(c, app, sc, z_end, MODE["faehre"][2])
+
+    items = []
+    for k, z in periodic(11.0, 3.0):
+        for side in (-1, 1):
+            if rnd(k, 18 + side) < 0.3:
+                continue
+            X = (right + 3 + 9 * rnd(k, 20 + side)) if side > 0 else (left - 3 - 9 * rnd(k, 20 + side))
+
+            def tree(z=z, X=X, k=k, side=side):
+                sc.front(X - 0.2, X + 0.2, 0.6, 3.0, z, "#6B4A2E")
+                cx, cy = sc.p(X, 4.6, z)
+                r = sc.size(2.0 + 0.8 * rnd(k, 22 + side), z)
+                c.create_oval(cx - r, cy - r, cx + r, cy + r, fill=["#4F8F3F", "#5E9C46", "#477F38"][(k + side) % 3],
+                              outline="")
+            items.append((z, tree))
+    for k, z in periodic(4.0, 1.0):                                     # Schilf am Ufer
+        for X in (right + 0.4, left - 0.4):
+            if rnd(k, 23 + X) < 0.5:
+                items.append((z, lambda z=z, X=X: sc.front(X - 0.6, X + 0.6, 0.4, 1.5, z, "#8DA24E")))
+    for k, z in periodic(45.0, 20.0):                                   # Fahrwassertonnen: rot links, grün rechts
+        for X, col in ((-9.0, "#D23B2E"), (12.0, "#2F9E5B")):
+            def buoy(z=z, X=X, col=col):
+                sc.front(X - 0.45, X + 0.45, 0, 0.9, z, col)
+                sc.front(X - 0.25, X + 0.25, 0.9, 1.5, z, col)
+                sc.front(X - 0.45, X + 0.45, 0.35, 0.5, z, "white")
+            items.append((z, buoy))
+
+    # --- Anleger ---
+    for i in range(math.floor(ride.pos) - 1, math.floor(ride.pos) + 3):
+        if not 0 <= i < len(stops):
+            continue
+        zs = i * SEG - cam
+        za, zb = zs - 12, zs + 16
+        if zb < Z_NEAR or za > Z_FAR:
+            continue
+
+        def pier(zs=zs, za=za, zb=zb, name=st[stops[i]]):
+            sc.ground(8.0, right, zs + 3, zs + 6, PIER, y=0.7)             # Steg zum Ufer
+            sc.front(8.0, right, 0, 0.7, zs + 3, PIER_SIDE)
+            sc.ground(2.8, 8.0, za, zb, PIER, y=0.7)                       # Ponton
+            sc.wall(2.8, 0, 0.7, za, zb, PIER_SIDE)
+            sc.front(2.8, 8.0, 0, 0.7, za, PIER_SIDE)
+            if za < 50:
+                for pz in range(int(za) + 1, int(zb), 2):                  # Bohlen
+                    sc.ground(2.8, 8.0, pz, pz + 0.12, "#8A6542", y=0.71)
+            for pz in (za + 0.6, zb - 0.6):                                # Dalben, an denen die Fähre festmacht
+                sc.front(2.45, 2.85, 0, 2.2, pz, "#5A4632")
+            for pz in (zs + 2, zs + 9):                                    # Wartehäuschen
+                sc.front(7.2, 7.4, 0.7, 3.3, pz, "#5A6470")
+            sc.ground(4.6, 8.0, zs + 2, zs + 9, "#5A6470", y=3.3)
+            pole_z = zs + 12
+            sc.front(2.95, 3.05, 0.7, 4.3, pole_z, "#6F7378")
+            station_sign(c, app, sc, 3.1, 6.6, 2.6, 3.3, pole_z, name, MODE["faehre"][2])
+            if Z_NEAR < pole_z < Z_FAR:
+                # das gelbe Haltestellenschild mit grünem H
+                hx, hy2 = sc.p(3.0, 4.3, pole_z)
+                r = sc.size(0.45, pole_z)
+                c.create_oval(hx - r, hy2 - r, hx + r, hy2 + r, fill="#F7D117", outline="#2F8F4E", width=max(1, r * 0.15))
+                if r > 5:
+                    c.create_text(hx, hy2, text="H", fill="#2F8F4E", font=app.font(r * 1.3 / s, "bold"))
+        items.append((zb, pier))
+
+    for z, fn in sorted((it for it in items if it[0] < z_end), key=lambda it: -it[0]):
+        fn()
+
+    # --- der eigene Bug vorn im Bild ---
+    cx = (x1 + x2) / 2
+    bow = [(cx - W * 0.42, y2 + 2), (cx - W * 0.17, y2 - H * 0.17), (cx, y2 - H * 0.23), (cx + W * 0.17, y2 - H * 0.17),
+           (cx + W * 0.42, y2 + 2)]
+    c.create_polygon([v for p in bow for v in p], fill=MODE["faehre"][3][0], outline="")
+    deck = [(cx - W * 0.35, y2 + 2), (cx - W * 0.14, y2 - H * 0.145), (cx, y2 - H * 0.195), (cx + W * 0.14, y2 - H * 0.145),
+            (cx + W * 0.35, y2 + 2)]
+    c.create_polygon([v for p in deck for v in p], fill="#D9D4C7", outline="")
+    c.create_line([v for p in bow[1:4] for v in p], fill="#7A808A", width=max(2, 4 * s))   # Reling
+    c.create_line(cx, y2 - H * 0.23, cx, y2 - H * 0.31, fill="#555555", width=max(1, 3 * s))  # Fahnenstock
+    c.create_polygon(cx, y2 - H * 0.31, cx + W * 0.03, y2 - H * 0.295, cx, y2 - H * 0.28, fill=MODE["faehre"][2],
+                     outline="")
+
+
+def draw_boathouse(c, app, sc, z, color):
+    """Bootshaus: Holzhalle quer über dem Wasser, mit offenem Tor, durch das die Fähre hineinfährt."""
+    if not Z_NEAR < z < Z_FAR:
+        return
+    sc.poly([(-44, 8.0, z), (0, 14.0, z), (44, 8.0, z)], "#7A3E2E")       # Giebeldach
+    sc.front(-40, -4.5, 0, 8.0, z, "#9C6B43")
+    sc.front(4.5, 40, 0, 8.0, z, "#9C6B43")
+    sc.front(-4.5, 4.5, 5.6, 8.0, z, "#9C6B43")
+    for X in range(-38, 40, 3):                                            # Bretter
+        sc.front(X, X + 0.15, 0, 8.0 if abs(X) > 5 else 0, z, "#835735")
+    sc.front(-4.5, 4.5, 0, 5.6, z, "#1E2A33")                               # Tor: drinnen ist es dunkel
+    sc.front(-4.5, 4.5, 0, 0.4, z, "#2C5674")                               # Wasser im Tor
+    for X in (-16, -10, 10, 16):                                           # Fenster
+        sc.front(X - 1.6, X + 1.6, 3.0, 5.4, z, "#CFE8FF")
+    station_sign(c, app, sc, -5.5, 5.5, 6.0, 7.6, z, "Bootshaus", color)
 
 
 def draw_rail_scene(ride, c, app, x1, y1, x2, y2):
@@ -2243,12 +2489,13 @@ def draw_wash(ride, c, app, x1, y1, x2, y2, t):
     sc.wall(-3.2, 0, 4.8, za, zb, "#B9C4CC")
     sc.wall(3.2, 0, 4.8, za, zb, "#B9C4CC")
     sc.ground(-3.2, 3.2, za, zb, "#8F9BA5", y=4.8)
-    sc.ground(-3.2, 3.2, za, zb, "#5E666E")
-    for k in range(0, int(WASH_EXIT), 3):                           # nasse Rinnen im Boden
-        sc.ground(-3.2, 3.2, k - cam, k - cam + 0.25, "#4C545C", y=0.01)
+    ferry = ride.kind == "faehre"                                   # die Fähre schwimmt durch die Waschanlage
+    sc.ground(-3.2, 3.2, za, zb, WATER if ferry else "#5E666E")
+    for k in range(0, int(WASH_EXIT), 3):                           # nasse Rinnen im Boden bzw. Wellen
+        sc.ground(-3.2, 3.2, k - cam, k - cam + 0.25, "#5FA3D0" if ferry else "#4C545C", y=0.01)
     for k in range(2, int(WASH_EXIT), 6):                           # Lampen an der Decke
         sc.ground(-0.6, 0.6, k - cam, k - cam + 1.5, "#E8F4FF", y=4.78)
-    if ride.kind != "bus":
+    if ride.kind not in ("bus", "faehre"):
         for X in (-0.75, 0.75):
             sc.ground(X - 0.05, X + 0.05, za, zb, "#C8C8C8", y=0.06)
 
@@ -3752,6 +3999,7 @@ INTERIOR = {   # Wand, Sitze, Haltestangen, Türflügel
     "bus": ("#EEEEEE", "#2F4E8C", "#F7D117", "#D5D9DE"),
     "regio": ("#ECECEC", "#2F5A9E", "#A8AEB5", "#D7001D"),
     "ice": ("#F4F4F4", "#59636F", "#A8AEB5", "#D5D9DE"),
+    "faehre": ("#EFE9DC", "#1F6FA8", "#B8BEC6", "#F7D117"),
 }
 
 
@@ -3999,7 +4247,7 @@ class Doors:
         W, H = x2 - x1, y2 - y1
         X = lambda f: x1 + f * W
         Y = lambda f: y1 + f * H
-        level = ride.levels[ride.index] if kind not in ("tram", "bus") else "ground"
+        level = ride.levels[ride.index] if kind not in ("tram", "bus", "faehre") else "ground"
         if level == "tunnel":
             c.create_rectangle(x1, y1, x2, Y(0.82), fill="#E6DFC8", outline="")
             for k in range(0, 60):
@@ -4021,16 +4269,37 @@ class Doors:
                             c.create_rectangle(hx + W / 8 * wx, Y(wy), hx + W / 8 * (wx + 0.2), Y(wy + 0.07),
                                                fill="#7E97AD", outline="")
                 sign_bg, sign_fg = "#F2D21B", "#0F6B3A"
+            elif kind == "faehre":
+                for k in range(12):                              # Bäume am anderen Ufer
+                    tx = X((k + 0.3) / 12)
+                    c.create_oval(tx - 0.05 * W, Y(0.3), tx + 0.05 * W, Y(0.54), fill=["#5E9C46", "#4F8F3F"][k % 2],
+                                  outline="")
+                c.create_rectangle(x1, Y(0.5), x2, Y(0.56), fill="#7FAF62", outline="")
+                sign_bg, sign_fg = "#F2D21B", "#0F6B3A"
             else:
                 for k in range(12):                              # Bäume hinter dem Bahnsteig
                     tx = X((k + 0.3) / 12)
                     c.create_oval(tx - 0.05 * W, Y(0.36), tx + 0.05 * W, Y(0.6), fill="#6E9E58", outline="")
                 c.create_rectangle(x1, Y(0.0), x2, Y(0.05), fill="#6B7079", outline="")      # Bahnsteigdach
                 sign_bg, sign_fg = ("#00703C", "white") if kind == "sbahn" else ("#0A1E6E", "white")
-            c.create_rectangle(x1, Y(0.58), x2, Y(0.7), fill="#B9B4AA", outline="")
-        c.create_rectangle(x1, Y(0.7), x2, Y(0.82), fill="#A9A49A", outline="")              # Bahnsteig / Gehweg
-        c.create_rectangle(x1, Y(0.80), x2, Y(0.82), fill="#F2D21B" if level == "tunnel" or kind in ("sbahn", "ubahn", "regio", "ice") else "#8C877D",
-                           outline="")
+            if kind == "faehre":                                 # Wasser mit Wellen
+                c.create_rectangle(x1, Y(0.56), x2, Y(0.7), fill="#4C95C5", outline="")
+                for k in range(16):
+                    wx = X(rnd(k, 24))
+                    c.create_line(wx, Y(0.58 + 0.1 * rnd(k, 25)), wx + 0.05 * W, Y(0.58 + 0.1 * rnd(k, 25)),
+                                  fill="#8CC6E8", width=max(1, 3 * s))
+            else:
+                c.create_rectangle(x1, Y(0.58), x2, Y(0.7), fill="#B9B4AA", outline="")
+        if kind == "faehre":                                     # Anleger aus Holzbohlen
+            c.create_rectangle(x1, Y(0.7), x2, Y(0.82), fill=PIER, outline="")
+            for k in range(1, 40):
+                c.create_line(X(k / 40), Y(0.7), X(k / 40), Y(0.8), fill="#8A6542", width=max(1, 2 * s))
+            c.create_rectangle(x1, Y(0.80), x2, Y(0.82), fill=PIER_SIDE, outline="")
+        else:
+            c.create_rectangle(x1, Y(0.7), x2, Y(0.82), fill="#A9A49A", outline="")          # Bahnsteig / Gehweg
+            c.create_rectangle(x1, Y(0.80), x2, Y(0.82),
+                               fill="#F2D21B" if level == "tunnel" or kind in ("sbahn", "ubahn", "regio", "ice") else "#8C877D",
+                               outline="")
         # Stationsschild, durch das mittlere Fenster zu sehen
         f = app.font(22, "bold")
         text = fit_text(f, name, 0.14 * W)
@@ -4039,7 +4308,7 @@ class Doors:
         round_rect(c, cx - tw / 2, Y(0.2), cx + tw / 2, Y(0.2) + 50 * s, 8 * s, fill=sign_bg, outline="white",
                    width=3 * s)
         c.create_text(cx, Y(0.2) + 25 * s, text=text, font=f, fill=sign_fg)
-        if kind in ("tram", "bus"):                    # Haltestellenschild mit „H“
+        if kind in ("tram", "bus", "faehre"):          # Haltestellenschild mit „H“
             hx = X(0.86)
             c.create_line(hx, Y(0.24), hx, Y(0.8), fill="#8C877D", width=max(2, 4 * s))
             c.create_oval(hx - 22 * s, Y(0.2) - 22 * s, hx + 22 * s, Y(0.2) + 22 * s, fill="#F2D21B", outline="#0F6B3A",
@@ -4139,7 +4408,9 @@ class App:
 
     def transfer_kinds(self, kind):
         """Verkehrsmittel, in die man von ``kind`` aus umsteigen kann (None = alle)."""
-        kinds = next(g for g in MODE_GROUPS if kind in g) if self.separate_modes() else MODE_ORDER
+        # alle Gruppen, zu denen das Verkehrsmittel gehört (die Fähre gehört zu beiden)
+        kinds = [k for k in MODE_ORDER if any(kind in g and k in g for g in MODE_GROUPS)] \
+            if self.separate_modes() else MODE_ORDER
         if not self.show_ice():
             kinds = [k for k in kinds if k != "ice"]
         return None if len(kinds) == len(MODE_ORDER) else kinds

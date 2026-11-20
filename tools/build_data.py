@@ -41,10 +41,10 @@ OPERATORS = {"1", "796"}
 
 # Linien, die im neuesten Fahrplan fehlen dürfen (z. B. wegen Bauarbeiten gesperrt), aber trotzdem ins
 # Spiel sollen. Sie werden dann aus der letzten älteren Version übernommen, in der sie noch vorkommen.
-# Die U4 fehlt seit Februar 2026 im VBB-Datensatz.
-KEEP_LINES = ["U4"]
+# Die U4 fehlt seit Februar 2026 im VBB-Datensatz, die Saison-Fähre F24 (nur April bis Oktober) seit Oktober 2025.
+KEEP_LINES = ["U4", "F24"]
 MAX_LOOKBACK = 12   # so viele ältere Versionen werden höchstens durchsucht
-PRODUCTS = ("sbahn", "ubahn", "tram", "bus", "regio", "ice")
+PRODUCTS = ("sbahn", "ubahn", "tram", "bus", "regio", "ice", "faehre")
 # ICE-Linien stehen nicht im VBB-Fahrplan; sie kommen aus dieser Datei (von Hand gepflegt)
 ICE_FILE = ROOT / "data" / "ice_lines.json"
 # Neue Linien, die im VBB-Datensatz noch fehlen (z. B. die S15), von Hand gepflegt
@@ -61,8 +61,10 @@ ROUTE_TYPES = {
     "400": "ubahn", "1": "ubahn",
     "900": "tram", "0": "tram",
     "700": "bus", "3": "bus",
+    "1000": "faehre", "4": "faehre",
 }
-NPM_PRODUCTS = {"suburban": "sbahn", "subway": "ubahn", "tram": "tram", "bus": "bus", "regional": "regio"}
+NPM_PRODUCTS = {"suburban": "sbahn", "subway": "ubahn", "tram": "tram", "bus": "bus", "regional": "regio",
+                "ferry": "faehre"}
 
 # Offizielle Linienfarben (BVG / S-Bahn Berlin)
 LINE_COLORS = {
@@ -75,7 +77,7 @@ LINE_COLORS = {
     "S75": "#816DA6", "S8": "#66AA22", "S85": "#66AA22", "S9": "#992746",
 }
 DEFAULT_COLORS = {"sbahn": "#008D4F", "ubahn": "#115D91", "tram": "#CC0A22", "bus": "#A5027D",
-                  "regio": "#E2001A", "ice": "#EC0016"}
+                  "regio": "#E2001A", "ice": "#EC0016", "faehre": "#0080BA"}
 
 STATION_ID = re.compile(r"900\d{6}")
 
