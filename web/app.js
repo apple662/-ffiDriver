@@ -31,6 +31,7 @@ const MODES = [
   ["ice", "ICE", "#EC0016", ["#F4F4F4", "#EC0016"]],
   ["faehre", "Fähre", "#0080BA", ["#F7D117", "#FFFFFF"]],      // gelber Rumpf, weißer Aufbau
   ["flug", "Flugzeug", "#1C6DD0", ["#FFFFFF", "#1C6DD0"]],
+  ["schiff", "Kreuzfahrt", "#1F3A68", ["#FFFFFF", "#1F3A68"]],
 ];
 const MODE = Object.fromEntries(MODES.map(m => [m[0], m]));
 
@@ -183,6 +184,15 @@ class Painter {
 function drawVehicle(c, kind, cx, cy, length, flip = false) {
   if (kind === "flug") return drawPlane(c, cx, cy + length * 0.02, length * 1.05, 0, flip);
   if (kind === "faehre") return drawFerry(c, cx, cy, length, flip);
+  if (kind === "schiff") {
+    const wy = cy + 0.12 * length;
+    drawCruiseShip(c, cx, wy, length, SHIP_COLORS[1], 0, flip);
+    const pts = [];
+    for (let x = 0; x <= 20; x++) pts.push([cx + (x / 20 * 1.16 - 0.58) * length, wy + (0.01 + 0.012 * Math.sin(x * 1.9)) * length]);
+    c.polygon(pts.concat([[cx + 0.58 * length, wy + 0.06 * length], [cx - 0.58 * length, wy + 0.06 * length]]), { fill: "#4FA3D9" });
+    c.line(pts, { fill: "#BFE2F7", width: Math.max(1, length / 110) });
+    return;
+  }
   const [body, accent] = MODE[kind][3];
   const mx = flip ? -1 : 1;
   const T = pts => pts.map(([x, y]) => [cx + mx * x * length, cy + y * length]);
@@ -294,6 +304,9 @@ function drawModeSign(c, app, kind, cx, cy, size) {
   } else if (kind === "flug") {
     c.roundRect(cx - r, cy - r, cx + r, cy + r, size * 0.22, { fill: color });
     c.polygon(planeTopPoints(cx, cy, size * 0.78, Math.PI / 4), { fill: "white" });
+  } else if (kind === "schiff") {
+    c.roundRect(cx - r, cy - r, cx + r, cy + r, size * 0.22, { fill: color });
+    drawAnchor(c, cx, cy, r, "white", Math.max(2, size * 0.07));
   } else if (kind === "faehre") {
     // weißes Schiff auf blauen Wellen
     c.roundRect(cx - r, cy - r, cx + r, cy + r, size * 0.22, { fill: color });
@@ -321,7 +334,7 @@ function drawModeSign(c, app, kind, cx, cy, size) {
 /** Linienschild wie an der Haltestelle. Gibt die Breite zurück. */
 function drawBadge(c, x, y, name, color, kind, h, font, border = 0) {
   const w = Math.max(h * 1.6, font.measure(name) + h * 0.6);
-  const r = { sbahn: h / 2, tram: h / 2, bus: h * 0.3, faehre: h * 0.3 }[kind] ?? h * 0.12;
+  const r = { sbahn: h / 2, tram: h / 2, bus: h * 0.3, faehre: h * 0.3, schiff: h * 0.3 }[kind] ?? h * 0.12;
   if (border) {
     c.roundRect(x - border, y - h / 2 - border, x + w + border, y + h / 2 + border, r + border, { fill: "white" });
   }
@@ -451,10 +464,10 @@ class SoundPlayer {
 // Umsteigen
 // --------------------------------------------------------------------------
 
-const MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "flug", "tram", "bus", "faehre"];     // Reihenfolge beim Umsteigen
+const MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "flug", "schiff", "tram", "bus", "faehre"];     // Reihenfolge beim Umsteigen
 // Bei „Umsteigen getrennt“ sieht man nur Umstiege innerhalb der eigenen Gruppe.
 // Die Fähre gehört zu beiden: Man kommt mit der S-Bahn (z. B. Wannsee) genauso hin wie mit Bus und Tram.
-const MODE_GROUPS = [["sbahn", "ubahn", "regio", "ice", "flug", "faehre"], ["tram", "bus", "faehre"]];
+const MODE_GROUPS = [["sbahn", "ubahn", "regio", "ice", "flug", "schiff", "faehre"], ["tram", "bus", "faehre"]];
 const NEAR_M = 200;          // Haltestellen in diesem Umkreis gehören zusammen
 const SAME_NAME_M = 400;     // gleichnamige Stationen (z. B. "S+U" und "U Alexanderplatz") auch etwas weiter
 
@@ -784,7 +797,7 @@ class HomeScreen extends Screen {
     app.hit(bx1, by1, bx2, by2, () => this.start());
 
     // Ankreuzfelder für Eltern
-    checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug / Tram, Bus (Fähre bei beiden)",
+    checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug, Schiff / Tram, Bus (Fähre bei beiden)",
       app.separateModes(), () => this.toggle("separate_modes", app.separateModes()));
     checkbox(app, c, 24 * s, h - 22 * s, "Zeige ICE-Umstiege", app.showIce(),
       () => this.toggle("show_ice", app.showIce()));
@@ -930,10 +943,18 @@ class LinesScreen extends Screen {
       const tw = x2 - tx - 18 * s;
       const d0 = line.directions[0];
       const first = d0[0], last = d0[d0.length - 1];
-      c.text(tx, y1 + 40 * s, fitText(nameFont, stations[first], tw), nameFont, TEXT, "w");
-      if (first === last) {
+      if (kind === "schiff") {
+        const cr = app.data.cruises.cruises[i];
+        const pn = cr.ports.map(p => app.data.cruises.ports[p].name);
+        const via = pn[0] === pn[pn.length - 1] ? "↻  " + pn.slice(1, -1).join(", ") : "→  " + pn.slice(1).join(", ");
+        c.text(tx, y1 + 40 * s, fitText(nameFont, cr.title, tw), nameFont, TEXT, "w");
+        c.text(tx, y1 + 66 * s, fitText(smallFont, "ab " + pn[0], tw), smallFont, MUTED, "w");
+        c.text(tx, y1 + 92 * s, fitText(smallFont, via, tw), smallFont, TEXT, "w");
+      } else if (first === last) {
+        c.text(tx, y1 + 40 * s, fitText(nameFont, stations[first], tw), nameFont, TEXT, "w");
         c.text(tx, y1 + 90 * s, "↻  Ringfahrt", nameFont, TEXT, "w");
       } else {
+        c.text(tx, y1 + 40 * s, fitText(nameFont, stations[first], tw), nameFont, TEXT, "w");
         c.text(tx, y1 + 65 * s, "⇅", smallFont, MUTED, "w");
         c.text(tx, y1 + 90 * s, fitText(nameFont, stations[last], tw), nameFont, TEXT, "w");
       }
@@ -946,7 +967,7 @@ class LinesScreen extends Screen {
     let left;
     [hh, left] = header(app, c, w, color, () => this.back());
     drawModeSign(c, app, kind, left + 60 * s, hh / 2, 62 * s);
-    const question = this.kind === "flug" ? "Wohin fliegst du?" : "Welche Linie nimmst du?";
+    const question = { flug: "Wohin fliegst du?", schiff: "Welche Reise machst du?" }[this.kind] || "Welche Linie nimmst du?";
     c.text(left + 105 * s, hh / 2, `${label}: ${question}`, app.font(30, "bold"), "white", "w");
     if (maxScroll > 0) {
       const barH = Math.max(40 * s, viewH * viewH / contentH);
@@ -979,6 +1000,7 @@ class LinesScreen extends Screen {
   open(i) {
     this.selected = i;
     if (this.kind === "flug") this.app.show(new FlightScreen(this.app, i, 0, this));
+    else if (this.kind === "schiff") this.app.show(new CruiseScreen(this.app, i, 0, this));
     else this.app.show(new RideScreen(this.app, this.kind, i, this));
   }
 
@@ -1569,7 +1591,7 @@ class RideScreen extends Screen {
     let text = spokenName(name) + ".";
     const others = this.transferOptions();
     if (others.length) {
-      const prefix = { tram: "Tram ", bus: "Bus ", flug: "Flug nach ", faehre: "Fähre " };
+      const prefix = { tram: "Tram ", bus: "Bus ", flug: "Flug nach ", faehre: "Fähre ", schiff: "Kreuzfahrt " };
       const names = others.slice(0, 8).map(o => (prefix[o.kind] || "") + spokenLine(o.name));
       text += " Umsteigen zu " + names.join(", ") + (others.length > 8 ? " und weiteren Linien." : ".");
     }
@@ -2601,6 +2623,14 @@ function drawCockpit(ride, c, w, h) {
 /** In die Linie opt (aus Transfers.options) einsteigen, an der passenden Haltestelle. */
 function board(app, opt, message) {
   const linesScreen = new LinesScreen(app, opt.kind, opt.index);
+  if (opt.kind === "schiff") {
+    const cruise = new CruiseScreen(app, opt.index, opt.direction, linesScreen, opt.stop);
+    cruise.say(message, 2.5);
+    app.sound.stop();
+    app.show(cruise);
+    app.animate();
+    return;
+  }
   if (opt.kind === "flug") {
     const flight = new FlightScreen(app, opt.index, opt.direction, linesScreen);
     flight.say(message, 2.5);
@@ -2971,12 +3001,16 @@ function drawPlane(c, cx, cy, length, pitch = 0, flip = false, gear = true, colo
 }
 
 /** Wahrzeichen aus flights.json zeichnen: Ursprung (ox, oy) am Boden, k Pixel pro Einheit. */
-function drawShapes(c, shapes, ox, oy, k) {
+function drawShapes(c, shapes, ox, oy, k, clamp = null) {
   const P = pts => { const out = []; for (let i = 0; i + 1 < pts.length; i += 2) out.push([ox + pts[i] * k, oy - pts[i + 1] * k]); return out; };
   for (const sh of shapes) {
     const [kind, fill] = sh;
     if (kind === "p") c.polygon(P(sh[2]), { fill });
-    else if (kind === "r") c.rect(ox + sh[2] * k, oy - sh[5] * k, ox + sh[4] * k, oy - sh[3] * k, fill);
+    else if (kind === "r") {
+      // clamp = [links, rechts] in Einheiten: breite Flächen (Wasser, Strand) enden dort
+      const rx1 = clamp ? Math.max(sh[2], clamp[0]) : sh[2], rx2 = clamp ? Math.min(sh[4], clamp[1]) : sh[4];
+      if (rx1 < rx2) c.rect(ox + rx1 * k, oy - sh[5] * k, ox + rx2 * k, oy - sh[3] * k, fill);
+    }
     else if (kind === "o") {
       const [, , cx, cy, rx, ry] = sh;
       c.oval(ox + (cx - rx) * k, oy - (cy + ry) * k, ox + (cx + rx) * k, oy - (cy - ry) * k, { fill });
@@ -3773,6 +3807,733 @@ class FlightScreen extends Screen {
 }
 
 // --------------------------------------------------------------------------
+// Kreuzfahrt ab Hamburg, Kiel oder Warnemünde
+// --------------------------------------------------------------------------
+
+const LEAVE_T = 5.0;           // Sekunden zum Ablegen (das Schiff fährt an, der Hafen gleitet aus dem Bild)
+const ARRIVE_T = 6.0;          // Sekunden zum Einlaufen und Anlegen
+const SAIL_V = 0.6;            // Tempo auf See (Fensterbreiten pro Sekunde)
+const ARRIVE_X = SAIL_V * ARRIVE_T / 2;
+const SHIP_X = 0.3;            // hier liegt das Schiff im Bild (Anteil der Breite)
+const SEA_Y = 0.6;             // Horizont bzw. Uferlinie (Anteil der Höhe)
+const WL_Y = 0.84;             // Wasserlinie des Schiffs
+const LAND_W = 0.95;           // so weit reicht das Ufer links und rechts vom Wahrzeichen (Fensterbreiten)
+const SHIP_COLORS = ["#FFFFFF", "#1F3A68"];
+
+/** Kreuzfahrten aus data.cruises als Linien eintragen (Häfen als Haltestellen). Ein Hafen mit Bahnhof
+ *  (Hamburg: Hamburg-Altona) bekommt dessen Schlüssel – so kann man dort zwischen ICE und Schiff umsteigen. */
+function addCruises(data) {
+  if (data.lines.schiff) return;
+  const cruises = data.cruises || { ports: {}, cruises: [] };
+  data.cruises = cruises;
+  const stations = data.stations;
+  const byName = {};
+  for (const [k, n] of Object.entries(stations)) byName[n] = k;
+  const keys = {};
+  for (const [code, port] of Object.entries(cruises.ports)) {
+    let key = port.station ? byName[port.station] : undefined;
+    if (!key) {
+      key = "PORT:" + code;
+      stations[key] = port.name;
+    }
+    keys[code] = key;
+  }
+  data.portKeys = keys;
+  data.lines.schiff = cruises.cruises.map(cr => ({
+    name: cr.name, color: cr.color,
+    directions: [cr.ports.map(p => keys[p]), cr.ports.slice().reverse().map(p => keys[p])],
+  }));
+}
+
+/** Fahrzeit auf See: „5 Std.“ oder „3 Tage 4 Std.“. */
+function daysText(hours, spoken = false) {
+  let h = Math.round(hours);
+  const d = Math.floor(h / 24);
+  h -= d * 24;
+  if (!d) return spoken ? `${h} Stunde${h === 1 ? "" : "n"}` : `${h} Std.`;
+  const day = d === 1 ? "Tag" : "Tage";
+  if (!h) return `${d} ${day}`;
+  return spoken ? `${d} ${day} und ${h} Stunden` : `${d} ${day} ${h} Std.`;
+}
+
+/** Kreuzfahrtschiff von der Seite, Bug rechts (flip: links); wy = Wasserlinie. */
+function drawCruiseShip(c, cx, wy, length, funnel = SHIP_COLORS[1], night = 0, flip = false) {
+  const mx = flip ? -1 : 1;
+  const T = pts => pts.map(([x, y]) => [cx + mx * x * length, wy + y * length]);
+  const poly = (pts, fill, outline) => c.polygon(T(pts), { fill, outline, width: Math.max(1, length / 260) });
+  const lit = night > 0.35;
+  const win = lit ? "#FFE08A" : "#2B3A4A";
+  // Flagge am Heck
+  c.line(T([[-0.485, -0.1], [-0.485, -0.16]]), { fill: "#5A5A5A", width: Math.max(1, length / 300) });
+  ["#1E1E1E", "#DD0000", "#FFCE00"].forEach((col, k) => poly([[-0.485, -0.16 + k * 0.01], [-0.445, -0.16 + k * 0.01],
+    [-0.445, -0.15 + k * 0.01], [-0.485, -0.15 + k * 0.01]], col));
+  // Schornstein, Mast und Wasserrutsche auf dem Oberdeck
+  poly([[-0.31, -0.24], [-0.19, -0.24], [-0.21, -0.32], [-0.32, -0.32]], funnel);
+  poly([[-0.32, -0.32], [-0.21, -0.32], [-0.212, -0.31], [-0.318, -0.31]], "#1E1E1E");
+  c.line(T([[0.2, -0.24], [0.2, -0.31]]), { fill: "#7A808A", width: Math.max(1, length / 260) });
+  c.line(T([[0.17, -0.29], [0.23, -0.29]]), { fill: "#7A808A", width: Math.max(1, length / 300) });
+  const slide = [];
+  for (let a = 0; a < 17; a++) slide.push([-0.12 + 0.05 * Math.cos(a / 8 * 2 * Math.PI) + a * 0.012, -0.275 + 0.025 * Math.sin(a / 8 * 2 * Math.PI)]);
+  c.line(T(slide), { fill: "#F2C230", width: Math.max(2, length / 110), cap: "round", join: "round" });
+  c.line(T([[-0.12, -0.24], [-0.12, -0.3]]), { fill: "#7A808A", width: Math.max(1, length / 260) });
+  // Decks: jedes etwas kürzer, vorn schräg
+  const decks = [[-0.47, 0.41, -0.1, -0.14], [-0.45, 0.37, -0.14, -0.175], [-0.42, 0.33, -0.175, -0.21], [-0.36, 0.27, -0.21, -0.24]];
+  decks.forEach(([a, b, yb, yt], i) => {
+    poly([[a, yb], [b + 0.03, yb], [b, yt], [a, yt]], "#F7F8FA", "#C9CED6");
+    poly([[a + 0.01, yb - 0.012], [b + 0.012, yb - 0.012], [b + 0.006, yt + 0.01], [a + 0.01, yt + 0.01]], lit ? "#6B5A3A" : "#5E7A93");
+    const n = Math.floor((b - a) / 0.022);
+    for (let k = 0; k < n; k++) {
+      const x = a + 0.016 + k * 0.022;
+      if (lit && rnd(k, 140 + i) < 0.25) continue;
+      poly([[x, yb - 0.01], [x + 0.012, yb - 0.01], [x + 0.012, yt + 0.012], [x, yt + 0.012]], win);
+    }
+  });
+  poly([[0.19, -0.237], [0.27, -0.237], [0.275, -0.226], [0.19, -0.226]], "#2B3440");    // Brücke
+  for (let k = 0; k < 9; k++) {                                                         // Rettungsboote
+    const x = -0.38 + k * 0.085;
+    poly(roundRectPoints(x, -0.136, x + 0.06, -0.114, 0.008), "#F28C28", "#C96A12");
+  }
+  // Rumpf mit Bullaugen, Zierstreifen und dunklem Unterwasserschiff
+  poly([[-0.5, -0.1], [0.46, -0.1], [0.53, -0.13], [0.47, 0.03], [-0.46, 0.03], [-0.5, -0.03]], "#FFFFFF", "#9AA4AD");
+  poly([[-0.5, -0.032], [0.495, -0.032], [0.492, -0.02], [-0.499, -0.02]], funnel);
+  poly([[-0.497, -0.004], [0.485, -0.004], [0.47, 0.03], [-0.46, 0.03]], "#1F3A68");
+  for (let k = 0; k < 27; k++) poly(circlePoints(-0.44 + k * 0.034, -0.065, 0.0075, 8), win);
+  poly(circlePoints(0.48, -0.075, 0.012, 10), "#3A3A3A");                               // Anker
+}
+
+/** Anker für das Schild der Kreuzfahrt. */
+function drawAnchor(c, cx, cy, r, color, width) {
+  c.oval(cx - 0.13 * r, cy - 0.68 * r, cx + 0.13 * r, cy - 0.42 * r, { outline: color, width });
+  c.line([[cx, cy - 0.42 * r], [cx, cy + 0.6 * r]], { fill: color, width });
+  c.line([[cx - 0.3 * r, cy - 0.26 * r], [cx + 0.3 * r, cy - 0.26 * r]], { fill: color, width, cap: "round" });
+  const arc = [];
+  for (let a = 10; a <= 170; a += 10) arc.push([cx + 0.55 * r * Math.cos(a * Math.PI / 180), cy + 0.05 * r + 0.55 * r * Math.sin(a * Math.PI / 180)]);
+  c.line(arc, { fill: color, width, join: "round" });
+  for (const sx of [-1, 1]) {
+    const ex = cx + sx * 0.55 * r * Math.cos(10 * Math.PI / 180), ey = cy + 0.05 * r + 0.55 * r * Math.sin(10 * Math.PI / 180);
+    c.polygon([[ex - 0.12 * r, ey + 0.02 * r], [ex + 0.12 * r, ey + 0.02 * r], [ex + sx * 0.05 * r, ey - 0.2 * r]], { fill: color });
+  }
+}
+
+/** Springender Delfin: Körper als Bogen, phase 0…1 durch den Sprung. */
+function drawDolphin(c, x, y, size, phase, color = "#6E8496") {
+  const top = [], bot = [];
+  for (let k = 0; k <= 10; k++) {
+    const u = k / 10, a = Math.PI * (0.15 + 0.7 * u);
+    const px = x + (u - 0.5) * size;
+    const py = y - Math.sin(a) * size * 0.35 * Math.sin(Math.PI * phase) - size * 0.05;
+    const th = size * 0.07 * Math.sin(Math.PI * u) + size * 0.01;
+    top.push([px, py - th]);
+    bot.push([px, py + th]);
+  }
+  c.polygon(top.concat(bot.slice().reverse()), { fill: color });
+  const [hx, hy] = top[5];
+  c.polygon([[hx - size * 0.04, hy + size * 0.02], [hx + size * 0.04, hy + size * 0.02], [hx - size * 0.02, hy - size * 0.1]], { fill: color });
+  const [tx, ty] = top[0];
+  c.polygon([[tx, ty], [tx - size * 0.08, ty - size * 0.05], [tx - size * 0.06, ty + size * 0.06]], { fill: color });
+}
+
+/** Anfang der Linie xy bis zum Anteil frac der Länge. */
+function partOfLine(xy, frac) {
+  const lens = [];
+  for (let i = 0; i + 1 < xy.length; i++) lens.push(Math.hypot(xy[i + 1][0] - xy[i][0], xy[i + 1][1] - xy[i][1]));
+  let goal = lens.reduce((a, b) => a + b, 0) * frac;
+  const out = [xy[0]];
+  for (let i = 0; i < lens.length; i++) {
+    const a = xy[i], b = xy[i + 1], d = lens[i];
+    if (goal >= d) { out.push(b); goal -= d; } else {
+      const f = d ? goal / d : 0;
+      out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]);
+      break;
+    }
+  }
+  return out;
+}
+
+/** Karte mit der ganzen Seeroute einer Kreuzfahrt (Landflächen wie bei den Flügen). */
+class SeaMap {
+  constructor(land) {
+    this.land = land.map(r => { const out = []; for (let i = 0; i + 1 < r.length; i += 2) out.push([r[i], r[i + 1]]); return out; });
+    this.cacheKey = null;
+    this.cacheItems = [];
+  }
+
+  draw(c, legs, x1, y1, x2, y2, s, leg, frac, ports, font) {
+    const pts = legs.flat();
+    const lats = pts.map(p => p[0]), lons = pts.map(p => p[1]);
+    const pad = Math.max(2.5, 0.15 * Math.max(Math.max(...lats) - Math.min(...lats), Math.max(...lons) - Math.min(...lons)));
+    const la1 = Math.min(...lats) - pad, la2 = Math.max(...lats) + pad, lo1 = Math.min(...lons) - pad, lo2 = Math.max(...lons) + pad;
+    const cosM = Math.cos((la1 + la2) / 2 * Math.PI / 180);
+    const scale = Math.min((x2 - x1) / ((lo2 - lo1) * cosM), (y2 - y1) / (la2 - la1));
+    const latC = (la1 + la2) / 2, lonC = (lo1 + lo2) / 2, cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+    const proj = (lat, lon) => [cx + (lon - lonC) * cosM * scale, cy - (lat - latC) * scale];
+    const key = [pts[0].join(), pts.length, Math.round(x1), Math.round(y1), Math.round(x2), Math.round(y2)].join("|");
+    if (this.cacheKey !== key) {
+      this.cacheItems = [];
+      for (const ring of this.land) {
+        const p = clipPolygon(ring.map(([lon, lat]) => proj(lat, lon)), x1, y1, x2, y2);
+        if (p.length >= 3) this.cacheItems.push(p);
+      }
+      this.cacheKey = key;
+    }
+    c.rect(x1, y1, x2, y2, "#AFD7EE");
+    for (const p of this.cacheItems) c.polygon(p, { fill: "#F1E9D2", outline: "#D2C6A5", width: 1 });
+    legs.forEach((lg, k) => {                                // gefahrene Abschnitte durchgezogen, sonst Punkte
+      const xy = lg.map(p => proj(p[0], p[1]));
+      if (k < leg || (k === leg && frac >= 1)) {
+        c.line(xy, { fill: "#1F3A68", width: Math.max(2, 3 * s), cap: "round", join: "round" });
+        return;
+      }
+      for (let j = 0; j + 1 < xy.length; j++) {
+        const a = xy[j], b = xy[j + 1];
+        const n = Math.max(1, Math.floor(Math.hypot(b[0] - a[0], b[1] - a[1]) / (6 * s)));
+        for (let i = 0; i < n; i++) {
+          const x = a[0] + (b[0] - a[0]) * i / n, y = a[1] + (b[1] - a[1]) * i / n;
+          c.oval(x - 1.6 * s, y - 1.6 * s, x + 1.6 * s, y + 1.6 * s, { fill: "#1F3A68" });
+        }
+      }
+      if (k === leg && frac > 0) c.line(partOfLine(xy, frac), { fill: "#1F3A68", width: Math.max(2, 3 * s), cap: "round", join: "round" });
+    });
+    ports.forEach(([lat, lon, label], i) => {
+      const [x, y] = proj(lat, lon);
+      c.oval(x - 5 * s, y - 5 * s, x + 5 * s, y + 5 * s, { fill: "#E8483B", outline: "white", width: 2 * s });
+      const tw = font.measure(label);
+      const lx = Math.min(Math.max(x, x1 + tw / 2 + 4 * s), x2 - tw / 2 - 4 * s);
+      const ly = (i % 2 === 0 && y - 22 * s > y1) || y + 22 * s > y2 ? y - 14 * s : y + 14 * s;
+      c.text(lx, ly, label, font, "#1E2A38");
+    });
+    const xy = legs[Math.min(leg, legs.length - 1)].map(p => proj(p[0], p[1]));
+    const part = partOfLine(xy, Math.min(1, frac));
+    const [px, py] = part[part.length - 1];
+    let [ax, ay] = part.length >= 2 ? part[part.length - 2] : xy[0];
+    if (part.length < 2 || (Math.abs(px - ax) < 0.01 && Math.abs(py - ay) < 0.01)) [ax, ay] = xy[0];
+    drawCruiseShip(c, px, py + 2 * s, 30 * s, SHIP_COLORS[1], 0, px < ax);
+  }
+}
+
+class CruiseScreen extends Screen {
+  constructor(app, index, direction = 0, linesScreen = null, start = 0) {
+    super(app);
+    this.kind = "schiff";
+    this.index = index;
+    this.linesScreen = linesScreen;
+    this.line = app.data.lines.schiff[index];
+    this.cruise = app.data.cruises.cruises[index];
+    this.portsInfo = app.data.cruises.ports;
+    this.direction = direction;
+    this.stop = start;
+    this.startPort("Willkommen an Bord! Drücke ▼ zum Ablegen.");
+  }
+
+  startPort(message) {
+    this.phase = "port";
+    this.t0 = now();
+    this.boost = 0;
+    this.gangway = null;
+    this.message = [message, now() + 4];
+  }
+
+  // --- Route ---
+  get codes() { return this.direction === 0 ? this.cruise.ports : this.cruise.ports.slice().reverse(); }
+  port(i) { return this.portsInfo[this.codes[i]]; }
+  leg(k) {
+    const n = this.cruise.legs.length;
+    const raw = this.cruise.legs[this.direction === 0 ? k : n - 1 - k];
+    const pts = [];
+    for (let i = 0; i + 1 < raw.length; i += 2) pts.push([raw[i], raw[i + 1]]);
+    return this.direction === 0 ? pts : pts.reverse();
+  }
+  hours(k) { const n = this.cruise.hours.length; return this.cruise.hours[this.direction === 0 ? k : n - 1 - k]; }
+  get last() { return this.stop === this.codes.length - 1; }
+  get roundTrip() { const p = this.codes; return p[0] === p[p.length - 1]; }
+  /** Hafen, an dem das Schiff liegt bzw. von dem es gerade kommt. */
+  get here() { return this.port(this.stop); }
+  get target() { return ["leave", "sea", "arrive"].includes(this.phase) ? this.port(this.stop + 1) : null; }
+  get t() { return now() - this.t0 + (this.phase === "sea" ? this.boost : 0); }
+  seaLen() { return Math.max(6, Math.min(18, 5 + 0.06 * this.hours(this.stop))); }
+
+  hopProgress() {
+    const t = this.t;
+    if (this.phase === "leave") return 0.05 * Math.min(1, t / LEAVE_T);
+    if (this.phase === "sea") return 0.05 + 0.9 * Math.min(1, t / this.seaLen());
+    if (this.phase === "arrive") return 0.95 + 0.05 * Math.min(1, t / ARRIVE_T);
+    return 0;
+  }
+
+  /** [Weg in Fensterbreiten seit dem Ablegen, Tempo 0…1]. */
+  sail() {
+    let t = this.t;
+    if (this.phase === "leave") return [SAIL_V * t * t / (2 * LEAVE_T), Math.min(1, t / LEAVE_T)];
+    if (this.phase === "sea") return [SAIL_V * LEAVE_T / 2 + SAIL_V * t, 1];
+    if (this.phase === "arrive") {
+      t = Math.min(t, ARRIVE_T);
+      return [SAIL_V * (t - t * t / (2 * ARRIVE_T)), 1 - t / ARRIVE_T];
+    }
+    return [0, 0];
+  }
+
+  /** [Lage des Ufers mit Wahrzeichen (Anteil der Breite), Hafen] oder null auf hoher See. */
+  shore() {
+    const [X] = this.sail();
+    const [sx, port] = ["port", "leave", "sea"].includes(this.phase) ? [SCENE_X - X, this.here] : [SCENE_X + ARRIVE_X - X, this.target];
+    return sx - LAND_W < 1.6 && sx + LAND_W > -0.2 ? [sx, port] : null;
+  }
+
+  night() {
+    if (this.phase !== "sea" || this.hours(this.stop) < 20) return 0;
+    return 0.85 * Math.sin(Math.PI * Math.min(1, this.t / this.seaLen())) ** 2;
+  }
+
+  say(text, seconds = 2.5) { this.message = [text, now() + seconds]; }
+
+  setPhase(phase) {
+    this.phase = phase;
+    this.t0 = now();
+    this.boost = 0;
+  }
+
+  /** Bahnhof am Hafen (zum Umsteigen), sonst null. */
+  stationKey() {
+    if (this.phase !== "port" || !this.here.station) return null;
+    return this.app.data.portKeys[this.here.code] || null;
+  }
+
+  // --- Aktionen ---
+  /** ▼ / Leertaste: ablegen; auf See schneller fahren. */
+  go() {
+    if (this.gangway) this.say("Erst die Gangway einholen: Taste Ö", 2);
+    else if (this.phase === "port") {
+      if (this.last) this.say("Die Reise ist zu Ende. Nochmal? Drücke R.", 2.5);
+      else {
+        this.setPhase("leave");
+        this.say(`Leinen los! Kurs auf ${this.target.name}.`, 3);
+        this.app.sound.play("schiff");
+      }
+    } else if (this.phase === "sea") {
+      this.boost += 0.15 * this.seaLen();
+      this.say("Volle Fahrt voraus!", 1.5);
+    }
+    this.app.animate();
+  }
+
+  horn() {
+    this.app.sound.play("schiff");
+    this.say("Tuuuuut!", 2);
+    this.app.animate();
+  }
+
+  /** Taste Ö: Gangway ausfahren – Passagiere gehen an bzw. von Bord – und wieder einholen. */
+  toggleOpen() {
+    const t = now();
+    if (this.phase !== "port") this.say("Auf See bleibt die Gangway eingeholt!", 2);
+    else if (this.gangway) {
+      if (this.gangway.closing !== null) return;
+      if (t < this.gangway.done) this.say("Moment – es gehen noch Leute an und von Bord!", 2);
+      else {
+        this.gangway.closing = t;
+        this.say("Gangway eingeholt.", 2);
+      }
+    } else {
+      const rng = seededRandom(`${this.cruise.name}-${this.direction}-${this.stop}`);
+      let ways, text;
+      if (this.stop === 0) [ways, text] = [Array(6).fill("in"), "Einschiffung! Die Passagiere kommen an Bord."];
+      else if (this.last) [ways, text] = [Array(6).fill("out"), "Ausschiffung! Alle gehen von Bord."];
+      else [ways, text] = [["out", "out", "out", "in", "in", "in"], "Landgang! Einige gehen an Land, andere kommen zurück."];
+      const people = ways.map((way, k) => [randomLook(rng), 0.8 * k, way]);
+      this.gangway = { t0: t, closing: null, people, done: t + 0.8 + 0.8 * 5 + 3.6 };
+      this.say(text, 3);
+    }
+    this.app.animate();
+  }
+
+  announce() {
+    const tg = this.target;
+    let text, show;
+    if (this.phase === "port") {
+      if (this.stop === 0) {
+        let rest = [];
+        for (let i = 1; i < this.codes.length; i++) rest.push(this.port(i).name);
+        if (this.roundTrip) rest = rest.slice(0, -1);
+        const list = rest.length > 1 ? rest.slice(0, -1).join(", ") + " und " + rest[rest.length - 1] : rest[0];
+        text = `Willkommen an Bord! Unsere Kreuzfahrt ${this.cruise.title} geht nach ${list}.`;
+        show = this.cruise.title;
+      } else {
+        text = this.welcomeText();
+        show = `Willkommen in ${this.here.name}!`;
+      }
+    } else if (this.phase === "leave") text = show = `Leinen los! Wir legen ab und fahren nach ${tg.name}.`;
+    else if (this.phase === "sea") {
+      const rest = this.hours(this.stop) * (1 - Math.min(1, this.t / this.seaLen()));
+      text = `Hier spricht Ihr Kapitän. Noch etwa ${daysText(Math.max(rest, 1), true)} bis ${tg.name}.`;
+      show = `Noch ${daysText(Math.max(rest, 1))} bis ${tg.name}`;
+    } else text = show = `Wir laufen gleich in ${tg.name} ein. Bitte nicht über die Reling lehnen!`;
+    this.app.sound.speak(text);
+    this.say(show, 3);
+    this.app.animate();
+  }
+
+  welcomeText() {
+    const p = this.here;
+    if (this.last && this.roundTrip) return `Willkommen zurück in ${p.name}! Die Kreuzfahrt ist zu Ende. Bitte alle von Bord gehen.`;
+    return `Willkommen in ${p.name}! ${p.hello} ${p.fact}` + (this.last ? " Hier endet die Kreuzfahrt." : "");
+  }
+
+  /** Taste R: am Ende der Reise noch einmal (Rundreise) bzw. zurück (Reise in eine Richtung). */
+  again() {
+    if (!(this.phase === "port" && this.last)) {
+      this.say("Erst am Ende der Reise – dann geht es noch einmal los.", 2.5);
+      this.app.animate();
+      return;
+    }
+    this.app.sound.stop();
+    if (!this.roundTrip) this.direction = 1 - this.direction;
+    this.stop = 0;
+    this.startPort("Neue Reise! Drücke ▼ zum Ablegen.");
+    this.app.redraw();
+    this.app.animate();
+  }
+
+  /** Taste U: im Hafen mit Bahnhof (Hamburg) in die Bahn umsteigen. */
+  change() {
+    const app = this.app, key = this.stationKey();
+    if (!key) {
+      this.say("Umsteigen in die Bahn geht nur im Hafen Hamburg.", 2.5);
+      app.animate();
+      return;
+    }
+    const kinds = (app.transferKinds("schiff") || MODE_ORDER).filter(k => k !== "schiff");
+    const options = app.transfers.options(key, null, kinds);
+    if (options.length) {
+      app.sound.stop();
+      app.show(new ChangeScreen(app, `Im Hafen ${this.here.name} umsteigen`, options, () => app.show(this)));
+    }
+  }
+
+  back() {
+    this.app.sound.stop();
+    this.app.show(this.linesScreen || new LinesScreen(this.app, "schiff", this.index));
+  }
+
+  key(k, char) {
+    const ch = (char || "").toLowerCase();
+    if (DOOR_KEYS.has(char)) this.toggleOpen();
+    else if (KEYS_NEXT.has(k) || KEYS_OK.has(k)) this.go();
+    else if (KEYS_BACK.has(k)) this.back();
+    else if (ch === "t") this.horn();
+    else if (ch === "v") this.announce();
+    else if (ch === "r") this.again();
+    else if (ch === "u") this.change();
+  }
+
+  tick() {
+    const t = this.t;
+    if (this.gangway) {
+      if (this.gangway.closing !== null && now() - this.gangway.closing > 0.85) this.gangway = null;
+      return true;
+    }
+    if (this.phase === "leave" && t >= LEAVE_T) {
+      this.setPhase("sea");
+      this.say(`Auf hoher See. Gute Fahrt nach ${this.target.name}!`, 3);
+    } else if (this.phase === "sea" && t >= this.seaLen()) {
+      this.setPhase("arrive");
+      this.say(`Land in Sicht! Wir laufen in ${this.target.name} ein.`, 3);
+    } else if (this.phase === "arrive" && t >= ARRIVE_T) {
+      this.stop += 1;
+      this.startPort(`Willkommen in ${this.here.name}!`);
+      this.app.sound.speak(this.welcomeText());
+    }
+    return ["leave", "sea", "arrive"].includes(this.phase) || now() < this.message[1];
+  }
+
+  // --- Zeichnen ---
+  draw(c, w, h) {
+    const app = this.app, s = app.s;
+    const panelW = Math.min(430 * s, w * 0.38);
+    this.drawScene(c, 0, HEADER_H * s, w - panelW, h, w);
+    const color = this.line.color;
+    const [hh, left] = header(app, c, w, color, () => this.back());
+    const bx = left + 30 * s;
+    const bw = drawBadge(c, bx, hh / 2, this.line.name, color, "schiff", 64 * s, app.font(34, "bold"), 5 * s);
+    const tf = app.font(28, "bold");
+    const title = this.phase === "port" ? this.cruise.title : `${this.here.name} → ${this.target.name}`;
+    c.text(bx + bw + 30 * s, hh / 2, fitText(tf, title, w - (bx + bw + 60 * s)), tf, textColorFor(color), "w");
+    this.drawPanel(c, w, h, w - panelW, hh);
+  }
+
+  drawScene(c, x1, y1, x2, y2, fullX2) {
+    const app = this.app, s = app.s;
+    const W = x2 - x1, H = y2 - y1;
+    const [X, v] = this.sail();
+    const tNow = now();
+    const night = this.night();
+    const frac = this.hopProgress();
+    const here = this.here, tg = this.target;
+    const skyA = tg === null ? here.sky : [0, 1].map(i => mix(here.sky[i], tg.sky[i], frac));
+    const top = mix(skyA[0], "#0B1633", night), bottom = mix(skyA[1], "#3B3F6E", night);
+    const hy = y1 + SEA_Y * H;
+    const bands = 8;
+    for (let i = 0; i < bands; i++) {
+      c.rect(x1, y1 + (hy - y1) * i / bands, fullX2, y1 + (hy - y1) * (i + 1) / bands + 1, mix(top, bottom, i / (bands - 1)));
+    }
+    if (night > 0.35) {
+      for (let i = 0; i < 50; i++) {
+        const sx = x1 + (fullX2 - x1) * rnd(i, 41), sy = y1 + (hy - y1) * 0.85 * rnd(i, 42), r = (1 + 1.5 * rnd(i, 43)) * s;
+        c.oval(sx - r, sy - r, sx + r, sy + r, { fill: "#FFF7D6" });
+      }
+      const mx = x1 + W * 0.82, my = y1 + H * 0.14;
+      c.oval(mx - 26 * s, my - 26 * s, mx + 26 * s, my + 26 * s, { fill: "#F4EFD2" });
+      c.oval(mx - 12 * s, my - 30 * s, mx + 36 * s, my + 18 * s, { fill: mix(top, bottom, 0.15) });
+    } else {
+      const sx = x1 + W * 0.86, sy = y1 + H * 0.13;
+      c.oval(sx - 30 * s, sy - 30 * s, sx + 30 * s, sy + 30 * s, { fill: "#FFE27A" });
+    }
+    const clTop = mix("#FFFFFF", "#6B7398", night), clBottom = mix("#E2E9F0", "#4E5679", night);
+    let first = Math.floor((X * 0.2 - 0.4) / 0.35);
+    for (let i = first; i < first + Math.floor((fullX2 - x1) / W / 0.35) + 4; i++) {
+      if (rnd(i, 7) < 0.4) continue;
+      drawCloud(c, x1 + (i * 0.35 - X * 0.2) * W, y1 + (0.08 + 0.2 * rnd(i, 5)) * H, (0.03 + 0.025 * rnd(i, 6)) * H, clTop, clBottom);
+    }
+
+    // Meer bis zum Horizont
+    const seaTop = mix("#7FB6DA", "#1E2E52", night), seaBottom = mix("#1F5F8E", "#0B1633", night);
+    const wl = y1 + WL_Y * H;
+    for (let i = 0; i < bands; i++) c.rect(x1, hy + (y2 - hy) * i / bands, fullX2, hy + (y2 - hy) * (i + 1) / bands + 1, mix(seaTop, seaBottom, i / (bands - 1)));
+    const k = SCENE_SCALE * H;
+    const sh = this.shore();
+    if (sh === null && this.phase === "sea") {
+      // weit draußen: Inseln und andere Schiffe am Horizont
+      first = Math.floor(X * 0.15 / 0.9) - 1;
+      for (let i = first; i < first + 4; i++) {
+        if (rnd(i, 120) < 0.45) continue;
+        const ix = x1 + (i * 0.9 + 0.3 - X * 0.15) * W, iw = (0.12 + 0.15 * rnd(i, 121)) * W, ih = (0.02 + 0.03 * rnd(i, 122)) * H;
+        c.polygon([[ix, hy + 1], [ix + iw * 0.3, hy - ih], [ix + iw * 0.7, hy - ih * 0.8], [ix + iw, hy + 1]], { fill: mix("#7E9A86", "#2A3550", night) });
+      }
+      first = Math.floor(X * 0.3 / 1.3) - 1;
+      for (let i = first; i < first + 3; i++) {
+        if (rnd(i, 125) < 0.5) continue;
+        const bx = x1 + (i * 1.3 + 0.5 - X * 0.3) * W, u = 0.022 * H;
+        c.polygon([[bx, hy - u * 0.2], [bx + u * 3, hy - u * 0.2], [bx + u * 2.7, hy + u * 0.3], [bx + u * 0.2, hy + u * 0.3]], { fill: mix("#5A6470", "#1E2533", night) });
+        c.rect(bx + u * 0.3, hy - u * 0.9, bx + u * 2.2, hy - u * 0.2, mix("#C8442F", "#3A2A33", night));
+      }
+    }
+    if (sh !== null) {
+      const [sx, port] = sh;
+      const lx1 = x1 + (sx - LAND_W) * W, lx2 = x1 + (sx + LAND_W) * W;
+      c.rect(lx1, hy - 0.05 * H, lx2, hy + 0.012 * H, port.far);
+      drawShapes(c, port.scene, x1 + sx * W, hy, k, [-LAND_W * W / k, LAND_W * W / k]);
+      c.rect(lx1, hy - 0.004 * H, lx2, hy + 0.012 * H, port.ground);
+      c.polygon([[lx1, hy + 0.012 * H], [lx1 - 0.04 * W, hy + 0.012 * H], [lx1, hy - 0.05 * H]], { fill: port.far });
+      c.polygon([[lx2, hy + 0.012 * H], [lx2 + 0.04 * W, hy + 0.012 * H], [lx2, hy - 0.05 * H]], { fill: port.far });
+    }
+    // Wellen: weiter hinten langsamer und kleiner
+    const wave = mix("#A9D3EE", "#4A5A80", night);
+    for (let j = 0; j < 6; j++) {
+      const f = (j + 1) / 7, y = hy + (wl - hy) * f * f, speed = 0.15 + 0.85 * f * f, sp = 0.12 + 0.1 * f;
+      first = Math.floor(X * speed / sp) - 1;
+      for (let i = first; i < first + Math.floor((fullX2 - x1) / W / sp) + 3; i++) {
+        const wx = x1 + (i * sp + rnd(i, 130 + j) * sp * 0.6 - X * speed) * W;
+        c.line([[wx, y], [wx + (0.02 + 0.03 * f) * W, y]], { fill: wave, width: Math.max(1, (1 + 2 * f) * s) });
+      }
+    }
+
+    // Möwen in Hafennähe
+    if (sh !== null && night < 0.3) {
+      for (let i = 0; i < 5; i++) {
+        const gx = x1 + (((rnd(i, 150) + tNow * 0.03 * (0.6 + rnd(i, 151))) % 1.2) - 0.1) * W;
+        const gy = y1 + (0.12 + 0.25 * rnd(i, 152)) * H + Math.sin(tNow * 2 + i) * 4 * s;
+        const wing = 8 * s * (0.8 + 0.4 * Math.abs(Math.sin(tNow * 6 + i)));
+        c.line([[gx - wing, gy - wing * 0.4], [gx, gy], [gx + wing, gy - wing * 0.4]], { fill: "#F4F4F4", width: Math.max(1, 2 * s), join: "round" });
+      }
+    }
+
+    // Delfine auf hoher See
+    if (this.phase === "sea" && night < 0.5) {
+      first = Math.floor(X / 1.7) - 1;
+      for (let i = first; i < first + 3; i++) {
+        if (rnd(i, 160) < 0.4) continue;
+        const dx = x1 + (i * 1.7 + 0.6 - X) * W, u = (dx - x1) / W;
+        if (u > 0.5 && u < 1.0) {
+          const phase = (u - 0.5) / 0.5;
+          for (let kk = 0; kk < 2; kk++) drawDolphin(c, dx + kk * 0.07 * W, hy + (wl - hy) * (0.55 + 0.1 * kk), 0.07 * W, (phase * 2 + kk * 0.3) % 1);
+        }
+      }
+    }
+
+    // Schiff mit Bugwelle und Kielwasser
+    const length = Math.min(0.46 * W, 0.95 * H);
+    const bob = this.phase !== "port" ? Math.sin(tNow * 1.3) * 2.5 * s : 0;
+    const sxp = x1 + SHIP_X * W;
+    if (v > 0.02) {
+      const foam = mix("#FFFFFF", "#8090B0", night);
+      for (let kk = 0; kk < 3; kk++) c.line([[x1, wl + (2 + kk * 5) * s], [sxp - 0.48 * length, wl + (2 + kk * 3) * s]], { fill: foam, width: Math.max(1, (3 - kk) * s) });
+      const bx = sxp + 0.5 * length;
+      c.polygon([[bx - 0.04 * length, wl], [bx + 0.03 * length, wl - 0.025 * length * v], [bx + 0.08 * length, wl + 3 * s]], { fill: foam });
+    }
+    drawCruiseShip(c, sxp, wl + bob, length, this.line.color, night);
+    // Wasser vor dem Rumpf
+    const nearTop = mix("#2F78A8", "#152247", night);
+    for (let i = 0; i < 3; i++) c.rect(x1, wl + 0.004 * H + (y2 - wl) * i / 3, fullX2, wl + 0.004 * H + (y2 - wl) * (i + 1) / 3 + 1, mix(nearTop, seaBottom, i / 2));
+    for (let i = Math.floor(X / 0.18) - 1; i < Math.floor(X / 0.18) + Math.floor((fullX2 - x1) / W / 0.18) + 3; i++) {
+      const wx = x1 + (i * 0.18 + rnd(i, 170) * 0.08 - X) * W, yy = wl + (0.02 + 0.08 * rnd(i, 171)) * H;
+      c.line([[wx, yy], [wx + 0.05 * W, yy]], { fill: wave, width: Math.max(1, 3 * s) });
+    }
+    this.geo = [sxp, wl, length, W, H];
+
+    // Kai im Vordergrund (im Hafen), mit Pollern
+    if (sh !== null) {
+      const qx1 = x1 + Math.max(sh[0] - SCENE_X + SHIP_X - 1.1, sh[0] - LAND_W) * W;     // der Kai endet mit dem Ufer
+      const qx2 = x1 + (sh[0] - SCENE_X + SHIP_X + 1.0) * W;
+      const qy = wl + 0.03 * H;
+      if (qx2 > x1 && qx1 < fullX2) {
+        c.rect(qx1, qy, qx2, y2, "#A3A8AE");
+        c.rect(qx1, qy, qx2, qy + 0.012 * H, "#C9CED6");
+        c.rect(qx1, qy + 0.012 * H, qx2, qy + 0.018 * H, "#F2D21B");
+        for (let bx = qx1 + 0.05 * W; bx < qx2; bx += 0.22 * W) {
+          c.rect(bx - 5 * s, qy - 6 * s, bx + 5 * s, qy + 2 * s, "#3A3A3A");
+          c.oval(bx - 7 * s, qy - 9 * s, bx + 7 * s, qy - 4 * s, { fill: "#3A3A3A" });
+        }
+        if (this.phase === "port") {                                    // Leinen zum Poller
+          for (const fx of [-0.42, 0.42]) {
+            c.line([[sxp + fx * length, wl - 0.1 * length], [sxp + fx * length + 0.05 * W, qy - 6 * s]], { fill: "#E9DCC0", width: Math.max(1, 2 * s) });
+          }
+        }
+      }
+    }
+    if (this.gangway) this.drawGangway(c, wl + 0.03 * H);
+
+    // Fahrt-Anzeige oben links
+    if (["leave", "sea", "arrive"].includes(this.phase)) {
+      const kn = Math.round(18 * v);
+      const text = `${kn} Knoten  ·  ${Math.round(kn * 1.852)} km/h`;
+      const f = app.font(17, "bold"), tw = f.measure(text) + 30 * s;
+      c.roundRect(x1 + 20 * s, y1 + 18 * s, x1 + 20 * s + tw, y1 + 58 * s, 20 * s, { fill: "#1E2A38" });
+      c.text(x1 + 20 * s + tw / 2, y1 + 38 * s, text, f, LED);
+    }
+  }
+
+  /** Gangway von der Tür im Rumpf hinunter auf den Kai, mit Passagieren. */
+  drawGangway(c, qy) {
+    const s = this.app.s;
+    const [sxp, wl, length, W] = this.geo;
+    const g = this.gangway, t = now();
+    let out = 1 - (g.closing !== null ? Math.min(1, (t - g.closing) / 0.8) : 0);
+    out *= Math.min(1, (t - g.t0) / 0.8);
+    const dx = sxp + 0.2 * length, dy = wl - 0.07 * length;
+    c.rect(dx - 0.012 * length, dy - 0.025 * length, dx + 0.012 * length, dy + 0.012 * length, "#2B3440");
+    const ex = dx + 0.16 * length * out, ey = dy + (qy - dy) * out;
+    c.polygon([[dx, dy + 0.012 * length], [ex, ey], [ex, ey - 4 * s], [dx, dy + 0.012 * length - 4 * s]], { fill: "#C9CED6", outline: "#7D8794" });
+    c.line([[dx, dy - 0.02 * length], [ex, ey - 0.03 * length]], { fill: "#7D8794", width: Math.max(1, 2 * s) });
+    if (out < 1) return;
+    const far = ex + 0.35 * W, tAll = t - g.t0 - 0.8;
+    for (const [look, start, way] of g.people) {
+      const tt = tAll - start;
+      if (tt < 0) continue;
+      const deck = [dx, dy + 0.012 * length, 1];
+      const segs = way === "in"
+        ? [[2.0, [far, qy, 1], [ex, qy, 1], "walk"], [1.2, [ex, qy, 1], deck, "walk"]]
+        : [[1.2, deck, [ex, qy, 1], "walk"], [2.2, [ex, qy, 1], [far, qy, 1], "walk"]];
+      const pos = follow(segs, tt);
+      if (pos) drawPerson(c, pos[0], pos[1], 0.07 * length, look, "walk", tt * 9 + start);
+    }
+  }
+
+  drawPanel(c, w, h, px1, top) {
+    const app = this.app, s = app.s;
+    const px2 = w - 24 * s, py = top + 24 * s, pw = px2 - px1 - 48 * s;
+    c.roundRect(px1 + 5 * s, py + 7 * s, px2 + 5 * s, h - 24 * s + 7 * s, 26 * s, { fill: SHADOW });
+    c.roundRect(px1, py, px2, h - 24 * s, 26 * s, { fill: PANEL });
+    const ix = px1 + 24 * s;
+    const labelFont = app.font(14, "bold"), bigFont = app.font(26, "bold"), midFont = app.font(17, "bold");
+
+    // Karte mit der Seeroute
+    if (!app.seaMap) app.seaMap = new SeaMap(app.data.flights.land);
+    const n = this.codes.length;
+    const legs = [];
+    for (let kk = 0; kk < n - 1; kk++) legs.push(this.leg(kk));
+    const ports = [];
+    for (let i = 0; i < n - (this.roundTrip ? 1 : 0); i++) { const p = this.port(i); ports.push([p.lat, p.lon, p.name]); }
+    const mapH = Math.min(pw * 0.68, (h - top) * 0.3);
+    const mx1 = ix - 8 * s, my1 = py + 16 * s, mx2 = ix + pw + 8 * s, my2 = py + 16 * s + mapH;
+    const cur = Math.min(this.stop, n - 2);
+    const frac = this.phase !== "port" ? this.hopProgress() : (this.stop > cur ? 1 : 0);
+    app.seaMap.draw(c, legs, mx1, my1, mx2, my2, s, cur, frac, ports, app.font(11, "bold"));
+    let y = my2 + 24 * s;
+
+    c.text(ix, y, "KREUZFAHRT", labelFont, "#F7D117", "w");
+    c.text(ix + pw, y, `Hafen ${this.stop + 1} von ${n}`, app.font(14), "#B8C4D0", "e");
+    y += 22 * s;
+    const tg = this.target;
+    let info;
+    if (this.phase === "port") {
+      c.text(ix, y, fitText(bigFont, this.here.name, pw), bigFont, "white", "nw");
+      y += bigFont.linespace();
+      c.text(ix, y, fitText(midFont, this.here.country, pw), midFont, "#CFE8FF", "nw");
+      y += midFont.linespace();
+      info = this.last ? "Ende der Reise" : `Nächster Hafen: ${this.port(this.stop + 1).name} · ${daysText(this.hours(this.stop))}`;
+    } else {
+      c.text(ix, y, fitText(bigFont, "Nach " + tg.name, pw), bigFont, "white", "nw");
+      y += bigFont.linespace();
+      const km = this.cruise.km[this.direction === 0 ? this.stop : this.cruise.km.length - 1 - this.stop];
+      c.text(ix, y, fitText(midFont, `${tg.country} · ${km.toLocaleString("de-DE")} km`, pw), midFont, "#CFE8FF", "nw");
+      y += midFont.linespace();
+      info = `Auf See ca. ${daysText(this.hours(this.stop))}`;
+    }
+    c.text(ix, y, fitText(midFont, info, pw), midFont, "#9FE3B0", "nw");
+    y += midFont.linespace() + 10 * s;
+    const barW = px2 - px1 - 48 * s;
+    c.roundRect(ix, y, ix + barW, y + 14 * s, 7 * s, { fill: "#3A4A5C" });
+    const total = (this.stop + (this.phase !== "port" ? this.hopProgress() : 0)) / Math.max(1, n - 1);
+    if (total > 0) c.roundRect(ix, y, ix + Math.max(14 * s, barW * total), y + 14 * s, 7 * s, { fill: this.line.color });
+
+    // Knöpfe
+    const inPort = this.phase === "port";
+    const buttons = [[this.phase === "sea" ? "▶▶" : "▼", () => this.go(), (inPort && !this.last) || this.phase === "sea", "#F7D117", PANEL, 30],
+      ["Ansage", () => this.announce(), true, "#3D8BD4", "white", 17],
+      ["T", () => this.horn(), true, "#E8483B", "white", 30],
+      ["Ö", () => this.toggleOpen(), inPort, "#2BA59B", "white", 30],
+      ["U", () => this.change(), !!this.stationKey(), "#2F855A", "white", 30],
+      ["R", () => this.again(), inPort && this.last, "#8E6BBF", "white", 30]];
+    const bgap = 12 * s;
+    const bsize = Math.min(84 * s, (pw - (buttons.length - 1) * bgap) / buttons.length);
+    const by2 = h - 50 * s, btnY = by2 - bsize - 76 * s;
+    let bx1 = (px1 + px2) / 2 - (buttons.length * bsize + (buttons.length - 1) * bgap) / 2;
+    for (const [sym, cb, enabled, bg, fg, size] of buttons) {
+      c.roundRect(bx1, btnY, bx1 + bsize, btnY + bsize, 24 * s, { fill: enabled ? bg : "#3A4A5C" });
+      c.text(bx1 + bsize / 2, btnY + bsize / 2, sym, app.font(size, "bold"), enabled ? fg : "#5A6A7C");
+      if (enabled) app.hit(bx1, btnY, bx1 + bsize, btnY + bsize, cb);
+      bx1 += bsize + bgap;
+    }
+    // großer Knopf unten
+    let label, cb = null;
+    if (inPort && !this.last) [label, cb] = [`⚓  Leinen los – nach ${this.port(this.stop + 1).name}`, () => this.go()];
+    else if (inPort) [label, cb] = [this.roundTrip ? "⟲  Nochmal: " + this.cruise.title : `⟲  Zurück nach ${this.port(0).name}`, () => this.again()];
+    else label = "Gute Fahrt!";
+    const rbw = px2 - px1 - 48 * s, rbh = 56 * s, rby = by2 - rbh;
+    c.roundRect(ix, rby, ix + rbw, rby + rbh, 28 * s, { fill: cb ? "white" : "#3A4A5C" });
+    const bf = app.font(20, "bold");
+    c.text(ix + rbw / 2, rby + rbh / 2, fitText(bf, label, rbw - 20 * s), bf, cb ? PANEL : "#8A9AAC");
+    if (cb) app.hit(ix, rby, ix + rbw, rby + rbh, cb);
+
+    // Leuchtanzeige
+    let [text, until] = this.message;
+    if (!(text && now() < until)) {
+      if (this.gangway) text = "Gangway draußen – Ö holt sie ein";
+      else if (inPort) text = this.last ? "Ö: Gangway · R: nochmal" : "Ö: Gangway · ▼: Ablegen";
+      else text = { leave: "Ablegen …", sea: "Auf hoher See – ▼ fährt schneller", arrive: `Einlaufen in ${tg.name}` }[this.phase];
+    }
+    const boxY1 = y + 30 * s, boxY2 = btnY - 14 * s;
+    if (boxY2 - boxY1 >= 40 * s) {
+      c.roundRect(ix, boxY1, ix + pw, boxY2, 14 * s, { fill: "#11181F", outline: "#3A4A5C", width: 2 * s });
+      const mf = app.font(boxY2 - boxY1 > 70 * s ? 22 : 19, "bold");
+      const lines = wrapText(mf, text, pw - 24 * s, 2);
+      const lh = mf.linespace();
+      let ty = (boxY1 + boxY2) / 2 - lh * (lines.length - 1) / 2;
+      for (const ln of lines) { c.text((px1 + px2) / 2, ty, ln, mf, "#FFB000"); ty += lh; }
+    }
+  }
+}
+
+// --------------------------------------------------------------------------
 // Türen auf (Taste Ö): Blick in den Innenraum, Fahrgäste steigen ein und aus
 // --------------------------------------------------------------------------
 
@@ -4145,6 +4906,7 @@ class App {
     this.ctx = canvas.getContext("2d");
     this.painter = new Painter(this.ctx);
     addFlights(data);
+    addCruises(data);
     this.data = data;
     this.s = 1;
     this.width = 1280;

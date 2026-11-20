@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Bereitet die Browser-Version in ``web/`` vor.
 
-- ``web/data.js``    Fahrplandaten aus ``data/berlin_lines.json``, Flüge aus ``data/flights.json``
+- ``web/data.js``    Fahrplandaten aus ``data/berlin_lines.json``, Flüge aus ``data/flights.json``,
+                     Kreuzfahrten aus ``data/cruises.json``
 - ``web/sounds.js``  Türsignale und Flugzeuggeräusche aus ``sounds/*.wav`` (eingebettet)
 - ``web/berlin-faehrt.html``  alles in einer einzigen Datei, zum Weitergeben
   (z. B. per Mail oder USB-Stick; öffnet sich per Doppelklick im Browser)
@@ -31,6 +32,9 @@ def main():
     flights = ROOT / "data" / "flights.json"
     if flights.exists():
         data["flights"] = json.loads(flights.read_text(encoding="utf-8"))
+    cruises = ROOT / "data" / "cruises.json"
+    if cruises.exists():
+        data["cruises"] = json.loads(cruises.read_text(encoding="utf-8"))
     data_js = "window.BERLIN_DATA = " + js_value(data) + ";\n"
     (WEB / "data.js").write_text(data_js, encoding="utf-8")
 

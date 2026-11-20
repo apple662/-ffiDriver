@@ -60,6 +60,7 @@ MODES = [
     ("ice", "ICE", "#EC0016", ("#F4F4F4", "#EC0016")),
     ("faehre", "Fähre", "#0080BA", ("#F7D117", "#FFFFFF")),     # gelber Rumpf, weißer Aufbau
     ("flug", "Flugzeug", "#1C6DD0", ("#FFFFFF", "#1C6DD0")),
+    ("schiff", "Kreuzfahrt", "#1F3A68", ("#FFFFFF", "#1F3A68")),
 ]
 MODE = {m[0]: m for m in MODES}
 
@@ -113,6 +114,14 @@ def draw_vehicle(c, kind, cx, cy, length, flip=False):
         return draw_plane(c, cx, cy + length * 0.02, length * 1.05, flip=flip)
     if kind == "faehre":
         return draw_ferry(c, cx, cy, length, flip=flip)
+    if kind == "schiff":
+        wy = cy + 0.12 * length
+        draw_cruise_ship(c, cx, wy, length, flip=flip)
+        pts = [(cx + (x / 20 * 1.16 - 0.58) * length, wy + (0.01 + 0.012 * math.sin(x * 1.9)) * length) for x in range(21)]
+        c.create_polygon([v for p in pts + [(cx + 0.58 * length, wy + 0.06 * length), (cx - 0.58 * length, wy + 0.06 * length)]
+                          for v in p], fill="#4FA3D9", outline="")
+        c.create_line([v for p in pts for v in p], fill="#BFE2F7", width=max(1, length / 110))
+        return
     body, accent = MODE[kind][3]
     mx = -1 if flip else 1
 
@@ -238,6 +247,9 @@ def draw_mode_sign(c, app, kind, cx, cy, size):
     elif kind == "flug":
         round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
         c.create_polygon(plane_top_points(cx, cy, size * 0.78, math.pi / 4), fill="white", outline="")
+    elif kind == "schiff":
+        round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
+        draw_anchor(c, cx, cy, r, "white", max(2, size * 0.07))
     elif kind == "faehre":
         # weißes Schiff auf blauen Wellen
         round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
@@ -262,7 +274,7 @@ def draw_mode_sign(c, app, kind, cx, cy, size):
 def draw_badge(c, x, y, name, color, kind, h, font, border=0):
     """Linienschild wie an der Haltestelle. Gibt die Breite zurück."""
     w = max(h * 1.6, font.measure(name) + h * 0.6)
-    r = {"sbahn": h / 2, "tram": h / 2, "bus": h * 0.3, "faehre": h * 0.3}.get(kind, h * 0.12)
+    r = {"sbahn": h / 2, "tram": h / 2, "bus": h * 0.3, "faehre": h * 0.3, "schiff": h * 0.3}.get(kind, h * 0.12)
     if border:
         round_rect(c, x - border, y - h / 2 - border, x + w + border, y + h / 2 + border, r + border,
                    fill="white", outline="")
@@ -407,10 +419,10 @@ class SoundPlayer:
 # Umsteigen
 # --------------------------------------------------------------------------
 
-MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "flug", "tram", "bus", "faehre"]     # Reihenfolge beim Umsteigen
+MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "flug", "schiff", "tram", "bus", "faehre"]     # Reihenfolge beim Umsteigen
 # Bei „Umsteigen getrennt“ sieht man nur Umstiege innerhalb der eigenen Gruppe.
 # Die Fähre gehört zu beiden: Man kommt mit der S-Bahn (z. B. Wannsee) genauso hin wie mit Bus und Tram.
-MODE_GROUPS = [("sbahn", "ubahn", "regio", "ice", "flug", "faehre"), ("tram", "bus", "faehre")]
+MODE_GROUPS = [("sbahn", "ubahn", "regio", "ice", "flug", "schiff", "faehre"), ("tram", "bus", "faehre")]
 NEAR_M = 200          # Haltestellen in diesem Umkreis gehören zusammen
 SAME_NAME_M = 400     # gleichnamige Stationen (z. B. "S+U" und "U Alexanderplatz") auch etwas weiter
 
@@ -771,7 +783,7 @@ class HomeScreen(Screen):
         app.hit(bx1, by1, bx2, by2, self.start)
 
         # Ankreuzfelder für Eltern
-        checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug / Tram, Bus (Fähre bei beiden)",
+        checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug, Schiff / Tram, Bus (Fähre bei beiden)",
                  app.separate_modes(), lambda: self.toggle("separate_modes", app.separate_modes()))
         checkbox(app, c, 24 * s, h - 22 * s, "Zeige ICE-Umstiege", app.show_ice(),
                  lambda: self.toggle("show_ice", app.show_ice()))
@@ -940,11 +952,23 @@ class LinesScreen(Screen):
             tx = x1 + 22 * s + bw + 22 * s
             tw = x2 - tx - 18 * s
             first, last = line["directions"][0][0], line["directions"][0][-1]
-            c.create_text(tx, y1 + 40 * s, text=fit_text(name_font, stations[first], tw), anchor="w",
-                          font=name_font, fill=TEXT)
-            if first == last:
+            if kind == "schiff":
+                cr = app.data["cruises"]["cruises"][i]
+                pn = [app.data["cruises"]["ports"][p]["name"] for p in cr["ports"]]
+                via = ("↻  " + ", ".join(pn[1:-1])) if pn[0] == pn[-1] else "→  " + ", ".join(pn[1:])
+                c.create_text(tx, y1 + 40 * s, text=fit_text(name_font, cr["title"], tw), anchor="w",
+                              font=name_font, fill=TEXT)
+                c.create_text(tx, y1 + 66 * s, text=fit_text(small_font, "ab " + pn[0], tw), anchor="w",
+                              font=small_font, fill=MUTED)
+                c.create_text(tx, y1 + 92 * s, text=fit_text(small_font, via, tw), anchor="w", font=small_font,
+                              fill=TEXT)
+            elif first == last:
+                c.create_text(tx, y1 + 40 * s, text=fit_text(name_font, stations[first], tw), anchor="w",
+                              font=name_font, fill=TEXT)
                 c.create_text(tx, y1 + 90 * s, text="↻  Ringfahrt", anchor="w", font=name_font, fill=TEXT)
             else:
+                c.create_text(tx, y1 + 40 * s, text=fit_text(name_font, stations[first], tw), anchor="w",
+                              font=name_font, fill=TEXT)
                 c.create_text(tx, y1 + 65 * s, text="⇅", anchor="w", font=small_font, fill=MUTED)
                 c.create_text(tx, y1 + 90 * s, text=fit_text(name_font, stations[last], tw), anchor="w",
                               font=name_font, fill=TEXT)
@@ -956,7 +980,7 @@ class LinesScreen(Screen):
         c.create_rectangle(0, hh, w, top - 4 * s, fill=BG, outline="")
         hh, left = header(app, c, w, color, self.back)
         draw_mode_sign(c, app, kind, left + 60 * s, hh / 2, 62 * s)
-        question = "Wohin fliegst du?" if kind == "flug" else "Welche Linie nimmst du?"
+        question = {"flug": "Wohin fliegst du?", "schiff": "Welche Reise machst du?"}.get(kind, "Welche Linie nimmst du?")
         c.create_text(left + 105 * s, hh / 2, text=f"{label}: {question}", anchor="w",
                       font=app.font(30, "bold"), fill="white")
         if max_scroll > 0:
@@ -987,6 +1011,8 @@ class LinesScreen(Screen):
         self.selected = i
         if self.kind == "flug":
             self.app.show(FlightScreen(self.app, i, 0, self))
+        elif self.kind == "schiff":
+            self.app.show(CruiseScreen(self.app, i, 0, self))
         else:
             self.app.show(RideScreen(self.app, self.kind, i, self))
 
@@ -1588,7 +1614,7 @@ class RideScreen(Screen):
         text = spoken_name(name) + "."
         others = self.transfer_options()
         if others:
-            prefix = {"tram": "Tram ", "bus": "Bus ", "flug": "Flug nach ", "faehre": "Fähre "}
+            prefix = {"tram": "Tram ", "bus": "Bus ", "flug": "Flug nach ", "faehre": "Fähre ", "schiff": "Kreuzfahrt "}
             names = [prefix.get(o["kind"], "") + spoken_line(o["name"]) for o in others[:8]]
             text += " Umsteigen zu " + ", ".join(names) + (" und weiteren Linien." if len(others) > 8 else ".")
         if self.index == len(stops) - 1 and not self.ring:
@@ -2736,6 +2762,13 @@ def draw_cockpit(ride, c, w, h):
 def board(app, opt, message):
     """In die Linie ``opt`` (aus Transfers.options) einsteigen, an der passenden Haltestelle."""
     lines_screen = LinesScreen(app, opt["kind"], opt["index"])
+    if opt["kind"] == "schiff":
+        cruise = CruiseScreen(app, opt["index"], opt["direction"], lines_screen, start=opt["stop"])
+        cruise.say(message, 2.5)
+        app.sound.stop()
+        app.show(cruise)
+        app.animate()
+        return
     if opt["kind"] == "flug":
         flight = FlightScreen(app, opt["index"], opt["direction"], lines_screen)
         flight.say(message, 2.5)
@@ -3107,10 +3140,16 @@ def draw_plane(c, cx, cy, length, pitch=0.0, flip=False, gear=True, colors=PLANE
     poly([(0.1, 0.06), (0.115, 0.06), (0.115, 0.1), (0.1, 0.1)], "#3A4450")
 
 
-def draw_shapes(c, shapes, ox, oy, k):
-    """Wahrzeichen aus flights.json zeichnen: Ursprung (ox, oy) am Boden, k Pixel pro Einheit."""
+def draw_shapes(c, shapes, ox, oy, k, clamp=None):
+    """Wahrzeichen aus flights.json zeichnen: Ursprung (ox, oy) am Boden, k Pixel pro Einheit.
+
+    ``clamp`` = (links, rechts) in Einheiten: breite Flächen (Wasser, Strand) enden dort."""
     for sh in shapes:
         kind, fill = sh[0], sh[1]
+        if clamp and kind == "r":
+            sh = sh[:2] + [max(sh[2], clamp[0]), sh[3], min(sh[4], clamp[1]), sh[5]]
+            if sh[2] >= sh[4]:
+                continue
         if kind == "p":
             pts = sh[2]
             c.create_polygon([ox + v * k if i % 2 == 0 else oy - v * k for i, v in enumerate(pts)],
@@ -3976,6 +4015,829 @@ class FlightScreen(Screen):
 
 
 # --------------------------------------------------------------------------
+# Kreuzfahrt ab Hamburg, Kiel oder Warnemünde
+# --------------------------------------------------------------------------
+
+CRUISES_FILE = BASE / "data" / "cruises.json"
+LEAVE_T = 5.0           # Sekunden zum Ablegen (das Schiff fährt an, der Hafen gleitet aus dem Bild)
+ARRIVE_T = 6.0          # Sekunden zum Einlaufen und Anlegen
+SAIL_V = 0.6            # Tempo auf See (Fensterbreiten pro Sekunde)
+ARRIVE_X = SAIL_V * ARRIVE_T / 2
+SHIP_X = 0.3            # hier liegt das Schiff im Bild (Anteil der Breite)
+SEA_Y = 0.6             # Horizont bzw. Uferlinie (Anteil der Höhe)
+WL_Y = 0.84             # Wasserlinie des Schiffs
+LAND_W = 0.95           # so weit reicht das Ufer links und rechts vom Wahrzeichen (Fensterbreiten)
+SHIP_COLORS = ("#FFFFFF", "#1F3A68")
+
+
+def add_cruises(data):
+    """Kreuzfahrten aus ``data/cruises.json`` als Linien eintragen (Häfen als Haltestellen).
+
+    Ein Hafen mit Bahnhof (Hamburg: Hamburg-Altona) bekommt dessen Schlüssel – so kann man dort
+    zwischen ICE und Schiff umsteigen."""
+    if "schiff" in data["lines"]:
+        return
+    try:
+        cruises = json.loads(CRUISES_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cruises = {"ports": {}, "cruises": []}
+    data["cruises"] = cruises
+    stations = data["stations"]
+    by_name = {n: k for k, n in stations.items()}
+    keys = {}
+    for code, port in cruises["ports"].items():
+        key = by_name.get(port.get("station"))
+        if not key:
+            key = "PORT:" + code
+            stations[key] = port["name"]
+        keys[code] = key
+    data["port_keys"] = keys
+    data["lines"]["schiff"] = [{"name": cr["name"], "color": cr["color"],
+                                "directions": [[keys[p] for p in cr["ports"]], [keys[p] for p in cr["ports"][::-1]]]}
+                               for cr in cruises["cruises"]]
+
+
+def days_text(hours, spoken=False):
+    """Fahrzeit auf See: „5 Std.“ oder „3 Tage 4 Std.“."""
+    h = int(round(hours))
+    d, h = divmod(h, 24)
+    if not d:
+        return f"{h} Stunde" + ("" if h == 1 else "n") if spoken else f"{h} Std."
+    day = ("Tag" if d == 1 else "Tage")
+    if not h:
+        return f"{d} {day}"
+    return f"{d} {day} und {h} Stunden" if spoken else f"{d} {day} {h} Std."
+
+
+def draw_cruise_ship(c, cx, wy, length, funnel=SHIP_COLORS[1], night=0.0, flip=False):
+    """Kreuzfahrtschiff von der Seite, Bug rechts (``flip``: links); ``wy`` = Wasserlinie."""
+    mx = -1 if flip else 1
+
+    def T(pts):
+        out = []
+        for x, y in pts:
+            out += [cx + mx * x * length, wy + y * length]
+        return out
+
+    def poly(pts, fill, outline=""):
+        c.create_polygon(T(pts), fill=fill, outline=outline, width=max(1, length / 260))
+
+    lit = night > 0.35
+    win = "#FFE08A" if lit else "#2B3A4A"
+    # Flagge am Heck
+    c.create_line(T([(-0.485, -0.1), (-0.485, -0.16)]), fill="#5A5A5A", width=max(1, length / 300))
+    for k, col in enumerate(("#1E1E1E", "#DD0000", "#FFCE00")):
+        poly([(-0.485, -0.16 + k * 0.01), (-0.445, -0.16 + k * 0.01), (-0.445, -0.15 + k * 0.01),
+              (-0.485, -0.15 + k * 0.01)], col)
+    # Schornstein, Mast und Wasserrutsche auf dem Oberdeck
+    poly([(-0.31, -0.24), (-0.19, -0.24), (-0.21, -0.32), (-0.32, -0.32)], funnel)
+    poly([(-0.32, -0.32), (-0.21, -0.32), (-0.212, -0.31), (-0.318, -0.31)], "#1E1E1E")
+    c.create_line(T([(0.2, -0.24), (0.2, -0.31)]), fill="#7A808A", width=max(1, length / 260))
+    c.create_line(T([(0.17, -0.29), (0.23, -0.29)]), fill="#7A808A", width=max(1, length / 300))
+    slide = [(-0.12 + 0.05 * math.cos(a / 8 * 2 * math.pi) + a * 0.012, -0.275 + 0.025 * math.sin(a / 8 * 2 * math.pi))
+             for a in range(17)]
+    c.create_line(T(slide), fill="#F2C230", width=max(2, length / 110), smooth=True)
+    c.create_line(T([(-0.12, -0.24), (-0.12, -0.3)]), fill="#7A808A", width=max(1, length / 260))
+    # Decks: jedes etwas kürzer, vorn schräg
+    decks = [(-0.47, 0.41, -0.1, -0.14), (-0.45, 0.37, -0.14, -0.175), (-0.42, 0.33, -0.175, -0.21),
+             (-0.36, 0.27, -0.21, -0.24)]
+    for i, (a, b, yb, yt) in enumerate(decks):
+        poly([(a, yb), (b + 0.03, yb), (b, yt), (a, yt)], "#F7F8FA", "#C9CED6")
+        poly([(a + 0.01, yb - 0.012), (b + 0.012, yb - 0.012), (b + 0.006, yt + 0.01), (a + 0.01, yt + 0.01)],
+             "#5E7A93" if not lit else "#6B5A3A")
+        n = int((b - a) / 0.022)
+        for k in range(n):
+            x = a + 0.016 + k * 0.022
+            if lit and rnd(k, 140 + i) < 0.25:
+                continue
+            poly([(x, yb - 0.01), (x + 0.012, yb - 0.01), (x + 0.012, yt + 0.012), (x, yt + 0.012)], win)
+    poly([(0.19, -0.237), (0.27, -0.237), (0.275, -0.226), (0.19, -0.226)], "#2B3440")    # Brücke
+    # Rettungsboote
+    for k in range(9):
+        x = -0.38 + k * 0.085
+        poly(round_rect_points(x, -0.136, x + 0.06, -0.114, 0.008), "#F28C28", "#C96A12")
+    # Rumpf mit Bullaugen, Zierstreifen und dunklem Unterwasserschiff
+    poly([(-0.5, -0.1), (0.46, -0.1), (0.53, -0.13), (0.47, 0.03), (-0.46, 0.03), (-0.5, -0.03)], "#FFFFFF", "#9AA4AD")
+    poly([(-0.5, -0.032), (0.495, -0.032), (0.492, -0.02), (-0.499, -0.02)], funnel)
+    poly([(-0.497, -0.004), (0.485, -0.004), (0.47, 0.03), (-0.46, 0.03)], "#1F3A68")
+    for k in range(27):
+        x = -0.44 + k * 0.034
+        poly(circle_points(x, -0.065, 0.0075, 8), win)
+    poly(circle_points(0.48, -0.075, 0.012, 10), "#3A3A3A")                                # Anker
+
+
+def draw_anchor(c, cx, cy, r, color, width):
+    """Anker für das Schild der Kreuzfahrt."""
+    c.create_oval(cx - 0.13 * r, cy - 0.68 * r, cx + 0.13 * r, cy - 0.42 * r, outline=color, width=width)
+    c.create_line(cx, cy - 0.42 * r, cx, cy + 0.6 * r, fill=color, width=width)
+    c.create_line(cx - 0.3 * r, cy - 0.26 * r, cx + 0.3 * r, cy - 0.26 * r, fill=color, width=width, capstyle="round")
+    arc = [(cx + 0.55 * r * math.cos(math.radians(a)), cy + 0.05 * r + 0.55 * r * math.sin(math.radians(a)))
+           for a in range(10, 171, 10)]
+    c.create_line([v for p in arc for v in p], fill=color, width=width, smooth=True)
+    for sx in (-1, 1):
+        ex, ey = cx + sx * 0.55 * r * math.cos(math.radians(10)), cy + 0.05 * r + 0.55 * r * math.sin(math.radians(10))
+        c.create_polygon(ex - 0.12 * r, ey + 0.02 * r, ex + 0.12 * r, ey + 0.02 * r, ex + sx * 0.05 * r, ey - 0.2 * r,
+                         fill=color, outline="")
+
+
+def draw_dolphin(c, x, y, size, phase, color="#6E8496"):
+    """Springender Delfin: Körper als Bogen, ``phase`` 0…1 durch den Sprung."""
+    pts_top, pts_bot = [], []
+    for k in range(11):
+        u = k / 10
+        a = math.pi * (0.15 + 0.7 * u)
+        px = x + (u - 0.5) * size
+        py = y - math.sin(a) * size * 0.35 * math.sin(math.pi * phase) - size * 0.05
+        th = size * 0.07 * math.sin(math.pi * u) + size * 0.01
+        pts_top.append((px, py - th))
+        pts_bot.append((px, py + th))
+    c.create_polygon([v for p in pts_top + pts_bot[::-1] for v in p], fill=color, outline="", smooth=True)
+    hx, hy = pts_top[5]
+    c.create_polygon(hx - size * 0.04, hy + size * 0.02, hx + size * 0.04, hy + size * 0.02, hx - size * 0.02,
+                     hy - size * 0.1, fill=color, outline="")                                  # Rückenflosse
+    tx, ty = pts_top[0]
+    c.create_polygon(tx, ty, tx - size * 0.08, ty - size * 0.05, tx - size * 0.06, ty + size * 0.06, fill=color,
+                     outline="")                                                               # Schwanzflosse
+
+
+class SeaMap:
+    """Karte mit der ganzen Seeroute einer Kreuzfahrt (Landflächen wie bei den Flügen)."""
+
+    def __init__(self, land):
+        self.land = [[(r[i], r[i + 1]) for i in range(0, len(r), 2)] for r in land]
+        self.cache = {}
+
+    def draw(self, c, legs, x1, y1, x2, y2, s, leg, frac, ports, font):
+        pts = [p for lg in legs for p in lg]
+        lats = [p[0] for p in pts]
+        lons = [p[1] for p in pts]
+        pad = max(2.5, 0.15 * max(max(lats) - min(lats), max(lons) - min(lons)))
+        la1, la2, lo1, lo2 = min(lats) - pad, max(lats) + pad, min(lons) - pad, max(lons) + pad
+        cos_m = math.cos(math.radians((la1 + la2) / 2))
+        scale = min((x2 - x1) / ((lo2 - lo1) * cos_m), (y2 - y1) / (la2 - la1))
+        lat_c, lon_c = (la1 + la2) / 2, (lo1 + lo2) / 2
+        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+
+        def proj(lat, lon):
+            return cx + (lon - lon_c) * cos_m * scale, cy - (lat - lat_c) * scale
+        key = (tuple(pts[:2]), len(pts), round(x1), round(y1), round(x2), round(y2))
+        if key not in self.cache:
+            polys = []
+            for ring in self.land:
+                p = clip_polygon([proj(lat, lon) for lon, lat in ring], x1, y1, x2, y2)
+                if len(p) >= 3:
+                    polys.append([v for q in p for v in q])
+            self.cache = {key: polys}
+        c.create_rectangle(x1, y1, x2, y2, fill="#AFD7EE", outline="")
+        for poly in self.cache[key]:
+            c.create_polygon(poly, fill="#F1E9D2", outline="#D2C6A5", width=1)
+        for k, lg in enumerate(legs):                             # gefahrene Abschnitte durchgezogen, sonst Punkte
+            xy = [proj(*p) for p in lg]
+            if k < leg or (k == leg and frac >= 1):
+                c.create_line([v for p in xy for v in p], fill="#1F3A68", width=max(2, 3 * s), capstyle="round",
+                              joinstyle="round")
+                continue
+            for a, b in zip(xy, xy[1:]):
+                n = max(1, int(math.hypot(b[0] - a[0], b[1] - a[1]) / (6 * s)))
+                for i in range(n):
+                    x, y = a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n
+                    c.create_oval(x - 1.6 * s, y - 1.6 * s, x + 1.6 * s, y + 1.6 * s, fill="#1F3A68", outline="")
+            if k == leg and frac > 0:
+                c.create_line([v for p in self.part(xy, frac) for v in p], fill="#1F3A68", width=max(2, 3 * s),
+                              capstyle="round", joinstyle="round")
+        for i, (lat, lon, label) in enumerate(ports):
+            x, y = proj(lat, lon)
+            c.create_oval(x - 5 * s, y - 5 * s, x + 5 * s, y + 5 * s, fill="#E8483B", outline="white", width=2 * s)
+            tw = font.measure(label)
+            lx = min(max(x, x1 + tw / 2 + 4 * s), x2 - tw / 2 - 4 * s)
+            ly = y - 14 * s if (i % 2 == 0 and y - 22 * s > y1) or y + 22 * s > y2 else y + 14 * s
+            c.create_text(lx, ly, text=label, font=font, fill="#1E2A38")
+        xy = [proj(*p) for p in legs[min(leg, len(legs) - 1)]]
+        part = self.part(xy, min(1.0, frac))
+        px, py = part[-1]
+        ax, ay = part[-2] if len(part) >= 2 else xy[0]
+        if len(part) < 2 or (abs(px - ax) < 0.01 and abs(py - ay) < 0.01):
+            ax, ay = xy[0]
+        flip = px < ax
+        draw_cruise_ship(c, px, py + 2 * s, 30 * s, flip=flip)
+
+    @staticmethod
+    def part(xy, frac):
+        """Anfang der Linie ``xy`` bis zum Anteil ``frac`` der Länge."""
+        lens = [math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(xy, xy[1:])]
+        goal = sum(lens) * frac
+        out = [xy[0]]
+        for (a, b), d in zip(zip(xy, xy[1:]), lens):
+            if goal >= d:
+                out.append(b)
+                goal -= d
+            else:
+                f = goal / d if d else 0
+                out.append((a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f))
+                break
+        return out
+
+
+class CruiseScreen(Screen):
+    """Eine Kreuzfahrt Hafen für Hafen: im Hafen liegen, ablegen, Seefahrt, einlaufen."""
+
+    def __init__(self, app, index, direction=0, lines_screen=None, start=0):
+        super().__init__(app)
+        self.kind = "schiff"
+        self.index = index
+        self.lines_screen = lines_screen
+        self.line = app.data["lines"]["schiff"][index]
+        self.cruise = app.data["cruises"]["cruises"][index]
+        self.ports_info = app.data["cruises"]["ports"]
+        self.direction = direction
+        self.stop = start
+        self.start_port(f"Willkommen an Bord! Drücke ▼ zum Ablegen.")
+
+    def start_port(self, message):
+        self.phase = "port"
+        self.t0 = time.monotonic()
+        self.boost = 0.0
+        self.gangway = None
+        self.message = (message, time.monotonic() + 4)
+
+    # --- Route ---
+    @property
+    def codes(self):
+        p = self.cruise["ports"]
+        return p if self.direction == 0 else p[::-1]
+
+    def port(self, i):
+        return self.ports_info[self.codes[i]]
+
+    def leg(self, k):
+        n = len(self.cruise["legs"])
+        raw = self.cruise["legs"][k if self.direction == 0 else n - 1 - k]
+        pts = [(raw[i], raw[i + 1]) for i in range(0, len(raw), 2)]
+        return pts if self.direction == 0 else pts[::-1]
+
+    def hours(self, k):
+        n = len(self.cruise["hours"])
+        return self.cruise["hours"][k if self.direction == 0 else n - 1 - k]
+
+    @property
+    def last(self):
+        return self.stop == len(self.codes) - 1
+
+    @property
+    def round_trip(self):
+        return self.codes[0] == self.codes[-1]
+
+    @property
+    def here(self):
+        """Hafen, an dem das Schiff liegt bzw. von dem es gerade kommt."""
+        return self.port(self.stop)
+
+    @property
+    def target(self):
+        return self.port(self.stop + 1) if self.phase in ("leave", "sea", "arrive") else None
+
+    @property
+    def t(self):
+        return time.monotonic() - self.t0 + (self.boost if self.phase == "sea" else 0.0)
+
+    def sea_len(self):
+        return max(6.0, min(18.0, 5 + 0.06 * self.hours(self.stop)))
+
+    def hop_progress(self):
+        t = self.t
+        if self.phase == "leave":
+            return 0.05 * min(1.0, t / LEAVE_T)
+        if self.phase == "sea":
+            return 0.05 + 0.9 * min(1.0, t / self.sea_len())
+        if self.phase == "arrive":
+            return 0.95 + 0.05 * min(1.0, t / ARRIVE_T)
+        return 0.0
+
+    def sail(self):
+        """(Weg in Fensterbreiten seit dem Ablegen, Tempo 0…1)."""
+        t = self.t
+        if self.phase == "leave":
+            return SAIL_V * t * t / (2 * LEAVE_T), min(1.0, t / LEAVE_T)
+        if self.phase == "sea":
+            return SAIL_V * LEAVE_T / 2 + SAIL_V * t, 1.0
+        if self.phase == "arrive":
+            t = min(t, ARRIVE_T)
+            return SAIL_V * (t - t * t / (2 * ARRIVE_T)), 1 - t / ARRIVE_T
+        return 0.0, 0.0
+
+    def shore(self):
+        """Lage des Ufers mit Wahrzeichen (Anteil der Breite) und welcher Hafen, oder None auf hoher See."""
+        X, _ = self.sail()
+        if self.phase in ("port", "leave", "sea"):
+            sx, port = SCENE_X - X, self.here
+        else:
+            sx, port = SCENE_X + ARRIVE_X - X, self.target
+        return (sx, port) if sx - LAND_W < 1.6 and sx + LAND_W > -0.2 else None
+
+    def night(self):
+        if self.phase != "sea" or self.hours(self.stop) < 20:
+            return 0.0
+        return 0.85 * math.sin(math.pi * min(1.0, self.t / self.sea_len())) ** 2
+
+    def say(self, text, seconds=2.5):
+        self.message = (text, time.monotonic() + seconds)
+
+    def set_phase(self, phase):
+        self.phase = phase
+        self.t0 = time.monotonic()
+        self.boost = 0.0
+
+    def station_key(self):
+        """Bahnhof am Hafen (zum Umsteigen), sonst None."""
+        if self.phase != "port" or "station" not in self.here:
+            return None
+        return self.app.data["port_keys"].get(self.here["code"])
+
+    # --- Aktionen ---
+    def go(self):
+        """▼ / Leertaste: ablegen; auf See schneller fahren."""
+        app = self.app
+        if self.gangway:
+            self.say("Erst die Gangway einholen: Taste Ö", 2)
+        elif self.phase == "port":
+            if self.last:
+                self.say("Die Reise ist zu Ende. Nochmal? Drücke R.", 2.5)
+            else:
+                self.set_phase("leave")
+                self.say(f"Leinen los! Kurs auf {self.target['name']}.", 3)
+                app.sound.play(SOUND_DIR / "schiff.wav")
+        elif self.phase == "sea":
+            self.boost += 0.15 * self.sea_len()
+            self.say("Volle Fahrt voraus!", 1.5)
+        app.animate()
+
+    def horn(self):
+        self.app.sound.play(SOUND_DIR / "schiff.wav")
+        self.say("Tuuuuut!", 2)
+        self.app.animate()
+
+    def toggle_open(self):
+        """Taste Ö: Gangway ausfahren – Passagiere gehen an bzw. von Bord – und wieder einholen."""
+        now = time.monotonic()
+        if self.phase != "port":
+            self.say("Auf See bleibt die Gangway eingeholt!", 2)
+        elif self.gangway:
+            if self.gangway["closing"] is not None:
+                return
+            if now < self.gangway["done"]:
+                self.say("Moment – es gehen noch Leute an und von Bord!", 2)
+            else:
+                self.gangway["closing"] = now
+                self.say("Gangway eingeholt.", 2)
+        else:
+            rng = random.Random(f"{self.cruise['name']}-{self.direction}-{self.stop}")
+            if self.stop == 0:
+                ways = ["in"] * 6
+                text = "Einschiffung! Die Passagiere kommen an Bord."
+            elif self.last:
+                ways = ["out"] * 6
+                text = "Ausschiffung! Alle gehen von Bord."
+            else:
+                ways = ["out"] * 3 + ["in"] * 3
+                text = "Landgang! Einige gehen an Land, andere kommen zurück."
+            people = [(random_look(rng), 0.8 * k, way) for k, way in enumerate(ways)]
+            self.gangway = {"t0": now, "closing": None, "people": people, "done": now + 0.8 + 0.8 * 5 + 3.6}
+            self.say(text, 3)
+        self.app.animate()
+
+    def announce(self):
+        tg = self.target
+        if self.phase == "port":
+            here = self.here
+            if self.stop == 0:
+                rest = [self.port(i)["name"] for i in range(1, len(self.codes))]
+                if self.round_trip:
+                    rest = rest[:-1]
+                text = (f"Willkommen an Bord! Unsere Kreuzfahrt {self.cruise['title']} geht nach "
+                        f"{', '.join(rest[:-1]) + ' und ' if len(rest) > 1 else ''}{rest[-1]}.")
+                show = self.cruise["title"]
+            else:
+                text = self.welcome_text()
+                show = f"Willkommen in {here['name']}!"
+        elif self.phase == "leave":
+            text = show = f"Leinen los! Wir legen ab und fahren nach {tg['name']}."
+        elif self.phase == "sea":
+            rest = self.hours(self.stop) * (1 - min(1.0, self.t / self.sea_len()))
+            text = f"Hier spricht Ihr Kapitän. Noch etwa {days_text(max(rest, 1), True)} bis {tg['name']}."
+            show = f"Noch {days_text(max(rest, 1))} bis {tg['name']}"
+        else:
+            text = show = f"Wir laufen gleich in {tg['name']} ein. Bitte nicht über die Reling lehnen!"
+        self.app.sound.speak(text)
+        self.say(show, 3)
+        self.app.animate()
+
+    def welcome_text(self):
+        p = self.here
+        if self.last and self.round_trip:
+            return f"Willkommen zurück in {p['name']}! Die Kreuzfahrt ist zu Ende. Bitte alle von Bord gehen."
+        text = f"Willkommen in {p['name']}! {p['hello']} {p['fact']}"
+        return text + (" Hier endet die Kreuzfahrt." if self.last else "")
+
+    def again(self):
+        """Taste R: am Ende der Reise noch einmal (Rundreise) bzw. zurück (Reise in eine Richtung)."""
+        if not (self.phase == "port" and self.last):
+            self.say("Erst am Ende der Reise – dann geht es noch einmal los.", 2.5)
+            self.app.animate()
+            return
+        self.app.sound.stop()
+        if not self.round_trip:
+            self.direction = 1 - self.direction
+        self.stop = 0
+        self.start_port("Neue Reise! Drücke ▼ zum Ablegen.")
+        self.app.redraw()
+        self.app.animate()
+
+    def change(self):
+        """Taste U: im Hafen mit Bahnhof (Hamburg) in die Bahn umsteigen."""
+        app = self.app
+        key = self.station_key()
+        if not key:
+            self.say("Umsteigen in die Bahn geht nur im Hafen Hamburg.", 2.5)
+            app.animate()
+            return
+        kinds = app.transfer_kinds("schiff") or MODE_ORDER
+        options = app.transfers.options(key, kinds=[k for k in kinds if k != "schiff"])
+        if options:
+            app.sound.stop()
+            app.show(ChangeScreen(app, f"Im Hafen {self.here['name']} umsteigen", options, lambda: app.show(self)))
+
+    def back(self):
+        self.app.sound.stop()
+        self.app.show(self.lines_screen or LinesScreen(self.app, "schiff", self.index))
+
+    def key(self, k, char):
+        ch = (char or "").lower()
+        if char in DOOR_KEYS or k == "odiaeresis":
+            self.toggle_open()
+        elif k in KEYS_NEXT or k in KEYS_OK:
+            self.go()
+        elif k in KEYS_BACK:
+            self.back()
+        elif ch == "t":
+            self.horn()
+        elif ch == "v":
+            self.announce()
+        elif ch == "r":
+            self.again()
+        elif ch == "u":
+            self.change()
+
+    def tick(self):
+        t = self.t
+        if self.gangway:
+            if self.gangway["closing"] is not None and time.monotonic() - self.gangway["closing"] > 0.85:
+                self.gangway = None
+            return True
+        if self.phase == "leave" and t >= LEAVE_T:
+            self.set_phase("sea")
+            self.say(f"Auf hoher See. Gute Fahrt nach {self.target['name']}!", 3)
+        elif self.phase == "sea" and t >= self.sea_len():
+            self.set_phase("arrive")
+            self.say(f"Land in Sicht! Wir laufen in {self.target['name']} ein.", 3)
+        elif self.phase == "arrive" and t >= ARRIVE_T:
+            self.stop += 1
+            self.start_port(f"Willkommen in {self.here['name']}!")
+            self.app.sound.speak(self.welcome_text())
+        return self.phase in ("leave", "sea", "arrive") or time.monotonic() < self.message[1]
+
+    # --- Zeichnen ---
+    def draw(self, c, w, h):
+        app, s = self.app, self.app.s
+        hh = HEADER_H * s
+        panel_w = min(430 * s, w * 0.38)
+        self.draw_scene(c, 0, hh, w - panel_w, h, w)
+        color = self.line["color"]
+        hh, left = header(app, c, w, color, self.back)
+        bx = left + 30 * s
+        bw = draw_badge(c, bx, hh / 2, self.line["name"], color, "schiff", 64 * s, app.font(34, "bold"), border=5 * s)
+        tf = app.font(28, "bold")
+        title = self.cruise["title"] if self.phase == "port" else f"{self.here['name']} → {self.target['name']}"
+        c.create_text(bx + bw + 30 * s, hh / 2, text=fit_text(tf, title, w - (bx + bw + 60 * s)), anchor="w",
+                      font=tf, fill=text_color_for(color))
+        self.draw_panel(c, w, h, w - panel_w, hh)
+
+    def draw_scene(self, c, x1, y1, x2, y2, full_x2):
+        app, s = self.app, self.app.s
+        W, H = x2 - x1, y2 - y1
+        X, v = self.sail()
+        t_now = time.monotonic()
+        night = self.night()
+        frac = self.hop_progress()
+        here, tg = self.here, self.target
+        sky_a = here["sky"] if tg is None else [mix(here["sky"][i], tg["sky"][i], frac) for i in (0, 1)]
+        top, bottom = mix(sky_a[0], "#0B1633", night), mix(sky_a[1], "#3B3F6E", night)
+        hy = y1 + SEA_Y * H
+        bands = 8
+        for i in range(bands):
+            c.create_rectangle(x1, y1 + (hy - y1) * i / bands, full_x2, y1 + (hy - y1) * (i + 1) / bands + 1,
+                               fill=mix(top, bottom, i / (bands - 1)), outline="")
+        if night > 0.35:
+            for i in range(50):
+                sx_, sy_ = x1 + (full_x2 - x1) * rnd(i, 41), y1 + (hy - y1) * 0.85 * rnd(i, 42)
+                r = (1 + 1.5 * rnd(i, 43)) * s
+                c.create_oval(sx_ - r, sy_ - r, sx_ + r, sy_ + r, fill="#FFF7D6", outline="")
+            mx_, my_ = x1 + W * 0.82, y1 + H * 0.14
+            c.create_oval(mx_ - 26 * s, my_ - 26 * s, mx_ + 26 * s, my_ + 26 * s, fill="#F4EFD2", outline="")
+            c.create_oval(mx_ - 12 * s, my_ - 30 * s, mx_ + 36 * s, my_ + 18 * s, fill=mix(top, bottom, 0.15),
+                          outline="")
+        else:
+            sx_, sy_ = x1 + W * 0.86, y1 + H * 0.13
+            c.create_oval(sx_ - 30 * s, sy_ - 30 * s, sx_ + 30 * s, sy_ + 30 * s, fill="#FFE27A", outline="")
+        cl_top, cl_bottom = mix("#FFFFFF", "#6B7398", night), mix("#E2E9F0", "#4E5679", night)
+        first = math.floor((X * 0.2 - 0.4) / 0.35)
+        for i in range(first, first + int((full_x2 - x1) / W / 0.35) + 4):
+            if rnd(i, 7) < 0.4:
+                continue
+            draw_cloud(c, x1 + (i * 0.35 - X * 0.2) * W, y1 + (0.08 + 0.2 * rnd(i, 5)) * H,
+                       (0.03 + 0.025 * rnd(i, 6)) * H, cl_top, cl_bottom)
+
+        # Meer bis zum Horizont
+        sea_top, sea_bottom = mix("#7FB6DA", "#1E2E52", night), mix("#1F5F8E", "#0B1633", night)
+        wl = y1 + WL_Y * H
+        for i in range(bands):
+            c.create_rectangle(x1, hy + (y2 - hy) * i / bands, full_x2, hy + (y2 - hy) * (i + 1) / bands + 1,
+                               fill=mix(sea_top, sea_bottom, i / (bands - 1)), outline="")
+        k = SCENE_SCALE * H
+        sh = self.shore()
+        if sh is None and self.phase == "sea":
+            # weit draußen: Inseln und andere Schiffe am Horizont
+            first = math.floor(X * 0.15 / 0.9) - 1
+            for i in range(first, first + 4):
+                if rnd(i, 120) < 0.45:
+                    continue
+                ix = x1 + (i * 0.9 + 0.3 - X * 0.15) * W
+                iw = (0.12 + 0.15 * rnd(i, 121)) * W
+                ih = (0.02 + 0.03 * rnd(i, 122)) * H
+                c.create_polygon(ix, hy + 1, ix + iw * 0.3, hy - ih, ix + iw * 0.7, hy - ih * 0.8, ix + iw, hy + 1,
+                                 fill=mix("#7E9A86", "#2A3550", night), outline="", smooth=True)
+            first = math.floor(X * 0.3 / 1.3) - 1
+            for i in range(first, first + 3):
+                if rnd(i, 125) < 0.5:
+                    continue
+                bx_ = x1 + (i * 1.3 + 0.5 - X * 0.3) * W
+                u = 0.022 * H
+                c.create_polygon(bx_, hy - u * 0.2, bx_ + u * 3, hy - u * 0.2, bx_ + u * 2.7, hy + u * 0.3, bx_ + u * 0.2,
+                                 hy + u * 0.3, fill=mix("#5A6470", "#1E2533", night), outline="")
+                c.create_rectangle(bx_ + u * 0.3, hy - u * 0.9, bx_ + u * 2.2, hy - u * 0.2,
+                                   fill=mix("#C8442F", "#3A2A33", night), outline="")
+        if sh is not None:
+            sx, port = sh
+            lx1, lx2 = x1 + (sx - LAND_W) * W, x1 + (sx + LAND_W) * W
+            c.create_rectangle(lx1, hy - 0.05 * H, lx2, hy + 0.012 * H, fill=port["far"], outline="")
+            draw_shapes(c, port["scene"], x1 + sx * W, hy, k, clamp=(-LAND_W * W / k, LAND_W * W / k))
+            c.create_rectangle(lx1, hy - 0.004 * H, lx2, hy + 0.012 * H, fill=port["ground"], outline="")
+            c.create_polygon(lx1, hy + 0.012 * H, lx1 - 0.04 * W, hy + 0.012 * H, lx1, hy - 0.05 * H,
+                             fill=port["far"], outline="")
+            c.create_polygon(lx2, hy + 0.012 * H, lx2 + 0.04 * W, hy + 0.012 * H, lx2, hy - 0.05 * H,
+                             fill=port["far"], outline="")
+        # Wellen: weiter hinten langsamer und kleiner
+        wave = mix("#A9D3EE", "#4A5A80", night)
+        for j in range(6):
+            f = (j + 1) / 7
+            y = hy + (wl - hy) * f * f
+            speed = 0.15 + 0.85 * f * f
+            sp = 0.12 + 0.1 * f
+            first = math.floor((X * speed) / sp) - 1
+            for i in range(first, first + int((full_x2 - x1) / W / sp) + 3):
+                wx = x1 + (i * sp + rnd(i, 130 + j) * sp * 0.6 - X * speed) * W
+                c.create_line(wx, y, wx + (0.02 + 0.03 * f) * W, y, fill=wave, width=max(1, (1 + 2 * f) * s))
+
+        # Möwen in Hafennähe
+        if sh is not None and night < 0.3:
+            for i in range(5):
+                gx = x1 + ((rnd(i, 150) + t_now * 0.03 * (0.6 + rnd(i, 151))) % 1.2 - 0.1) * W
+                gy = y1 + (0.12 + 0.25 * rnd(i, 152)) * H + math.sin(t_now * 2 + i) * 4 * s
+                wing = 8 * s * (0.8 + 0.4 * abs(math.sin(t_now * 6 + i)))
+                c.create_line(gx - wing, gy - wing * 0.4, gx, gy, gx + wing, gy - wing * 0.4, fill="#F4F4F4",
+                              width=max(1, 2 * s), smooth=True)
+
+        # Delfine auf hoher See
+        if self.phase == "sea" and night < 0.5:
+            first = math.floor(X / 1.7) - 1
+            for i in range(first, first + 3):
+                if rnd(i, 160) < 0.4:
+                    continue
+                dx = x1 + (i * 1.7 + 0.6 - X) * W
+                u = (dx - x1) / W
+                if 0.5 < u < 1.0:
+                    phase = (u - 0.5) / 0.5
+                    for kk in range(2):
+                        draw_dolphin(c, dx + kk * 0.07 * W, hy + (wl - hy) * (0.55 + 0.1 * kk), 0.07 * W,
+                                     (phase * 2 + kk * 0.3) % 1)
+
+        # Schiff mit Bugwelle und Kielwasser
+        length = min(0.46 * W, 0.95 * H)
+        bob = math.sin(t_now * 1.3) * 2.5 * s if self.phase != "port" else 0.0
+        sxp = x1 + SHIP_X * W
+        if v > 0.02:
+            foam = mix("#FFFFFF", "#8090B0", night)
+            for kk in range(3):
+                c.create_line(x1, wl + (2 + kk * 5) * s, sxp - 0.48 * length, wl + (2 + kk * 3) * s, fill=foam,
+                              width=max(1, (3 - kk) * s))
+            bx_ = sxp + 0.5 * length
+            c.create_polygon(bx_ - 0.04 * length, wl, bx_ + 0.03 * length, wl - 0.025 * length * v,
+                             bx_ + 0.08 * length, wl + 3 * s, fill=foam, outline="")
+        draw_cruise_ship(c, sxp, wl + bob, length, self.line["color"], night)
+        # Wasser vor dem Rumpf
+        near_top, near_bottom = mix("#2F78A8", "#152247", night), sea_bottom
+        for i in range(3):
+            c.create_rectangle(x1, wl + 0.004 * H + (y2 - wl) * i / 3, full_x2, wl + 0.004 * H + (y2 - wl) * (i + 1) / 3 + 1,
+                               fill=mix(near_top, near_bottom, i / 2), outline="")
+        for i in range(math.floor(X / 0.18) - 1, math.floor(X / 0.18) + int((full_x2 - x1) / W / 0.18) + 3):
+            wx = x1 + (i * 0.18 + rnd(i, 170) * 0.08 - X) * W
+            yy = wl + (0.02 + 0.08 * rnd(i, 171)) * H
+            c.create_line(wx, yy, wx + 0.05 * W, yy, fill=wave, width=max(1, 3 * s))
+        self.geo = (sxp, wl, length, W, H)
+
+        # Kai im Vordergrund (im Hafen), mit Pollern
+        if sh is not None:
+            qx1 = x1 + max(sh[0] - SCENE_X + SHIP_X - 1.1, sh[0] - LAND_W) * W      # der Kai endet mit dem Ufer
+            qx2 = x1 + (sh[0] - SCENE_X + SHIP_X + 1.0) * W
+            qy = wl + 0.03 * H
+            if qx2 > x1 and qx1 < full_x2:
+                c.create_rectangle(qx1, qy, qx2, y2, fill="#A3A8AE", outline="")
+                c.create_rectangle(qx1, qy, qx2, qy + 0.012 * H, fill="#C9CED6", outline="")
+                c.create_rectangle(qx1, qy + 0.012 * H, qx2, qy + 0.018 * H, fill="#F2D21B", outline="")
+                bx_ = qx1 + 0.05 * W
+                while bx_ < qx2:
+                    c.create_rectangle(bx_ - 5 * s, qy - 6 * s, bx_ + 5 * s, qy + 2 * s, fill="#3A3A3A", outline="")
+                    c.create_oval(bx_ - 7 * s, qy - 9 * s, bx_ + 7 * s, qy - 4 * s, fill="#3A3A3A", outline="")
+                    bx_ += 0.22 * W
+                if self.phase == "port":                                   # Leinen zum Poller
+                    for fx in (-0.42, 0.42):
+                        c.create_line(sxp + fx * length, wl - 0.1 * length, sxp + fx * length + 0.05 * W, qy - 6 * s,
+                                      fill="#E9DCC0", width=max(1, 2 * s))
+        if self.gangway:
+            self.draw_gangway(c, wl + 0.03 * H)
+
+        # Fahrt-Anzeige oben links
+        if self.phase in ("leave", "sea", "arrive"):
+            kn = int(round(18 * v))
+            text = f"{kn} Knoten  ·  {int(round(kn * 1.852))} km/h"
+            f = app.font(17, "bold")
+            tw = f.measure(text) + 30 * s
+            round_rect(c, x1 + 20 * s, y1 + 18 * s, x1 + 20 * s + tw, y1 + 58 * s, 20 * s, fill="#1E2A38", outline="")
+            c.create_text(x1 + 20 * s + tw / 2, y1 + 38 * s, text=text, font=f, fill=LED)
+
+    def draw_gangway(self, c, qy):
+        """Gangway von der Tür im Rumpf hinunter auf den Kai, mit Passagieren."""
+        s = self.app.s
+        sxp, wl, length, W, H = self.geo
+        g = self.gangway
+        now = time.monotonic()
+        out = 1.0 - (min(1.0, (now - g["closing"]) / 0.8) if g["closing"] is not None else 0.0)
+        out *= min(1.0, (now - g["t0"]) / 0.8)
+        dx, dy = sxp + 0.2 * length, wl - 0.07 * length
+        c.create_rectangle(dx - 0.012 * length, dy - 0.025 * length, dx + 0.012 * length, dy + 0.012 * length,
+                           fill="#2B3440", outline="")
+        ex, ey = dx + 0.16 * length * out, dy + (qy - dy) * out
+        c.create_polygon(dx, dy + 0.012 * length, ex, ey, ex, ey - 4 * s, dx, dy + 0.012 * length - 4 * s,
+                         fill="#C9CED6", outline="#7D8794")
+        c.create_line(dx, dy - 0.02 * length, ex, ey - 0.03 * length, fill="#7D8794", width=max(1, 2 * s))
+        if out < 1:
+            return
+        far = ex + 0.35 * W
+        t_all = now - g["t0"] - 0.8
+        for look, start, way in g["people"]:
+            t = t_all - start
+            if t < 0:
+                continue
+            if way == "in":
+                segs = [(2.0, (far, qy, 1), (ex, qy, 1), "walk"), (1.2, (ex, qy, 1), (dx, dy + 0.012 * length, 1), "walk")]
+            else:
+                segs = [(1.2, (dx, dy + 0.012 * length, 1), (ex, qy, 1), "walk"), (2.2, (ex, qy, 1), (far, qy, 1), "walk")]
+            pos = follow(segs, t)
+            if pos:
+                draw_person(c, pos[0], pos[1], 0.07 * length, look, "walk", t * 9 + start)
+
+    def draw_panel(self, c, w, h, px1, top):
+        app, s = self.app, self.app.s
+        px2 = w - 24 * s
+        py = top + 24 * s
+        pw = px2 - px1 - 48 * s
+        round_rect(c, px1 + 5 * s, py + 7 * s, px2 + 5 * s, h - 24 * s + 7 * s, 26 * s, fill=SHADOW, outline="")
+        round_rect(c, px1, py, px2, h - 24 * s, 26 * s, fill=PANEL, outline="")
+        ix = px1 + 24 * s
+        label_font = app.font(14, "bold")
+        big_font = app.font(26, "bold")
+        mid_font = app.font(17, "bold")
+
+        # Karte mit der Seeroute
+        if not hasattr(app, "sea_map"):
+            app.sea_map = SeaMap(app.data["flights"]["land"])
+        n = len(self.codes)
+        legs = [self.leg(k) for k in range(n - 1)]
+        ports = []
+        for i in range(n - (1 if self.round_trip else 0)):
+            p = self.port(i)
+            ports.append((p["lat"], p["lon"], p["name"]))
+        map_h = min(pw * 0.68, (h - top) * 0.3)
+        mx1, my1, mx2, my2 = ix - 8 * s, py + 16 * s, ix + pw + 8 * s, py + 16 * s + map_h
+        cur = min(self.stop, n - 2)
+        frac = self.hop_progress() if self.phase != "port" else (1.0 if self.stop > cur else 0.0)
+        app.sea_map.draw(c, legs, mx1, my1, mx2, my2, s, cur, frac, ports, app.font(11, "bold"))
+        y = my2 + 24 * s
+
+        c.create_text(ix, y, text="KREUZFAHRT", anchor="w", font=label_font, fill="#F7D117")
+        c.create_text(ix + pw, y, text=f"Hafen {self.stop + 1} von {n}", anchor="e", font=app.font(14), fill="#B8C4D0")
+        y += 22 * s
+        tg = self.target
+        if self.phase == "port":
+            c.create_text(ix, y, text=fit_text(big_font, self.here["name"], pw), anchor="nw", font=big_font, fill="white")
+            y += big_font.metrics("linespace")
+            c.create_text(ix, y, text=fit_text(mid_font, self.here["country"], pw), anchor="nw", font=mid_font,
+                          fill="#CFE8FF")
+            y += mid_font.metrics("linespace")
+            if self.last:
+                info = "Ende der Reise"
+            else:
+                nxt = self.port(self.stop + 1)
+                info = f"Nächster Hafen: {nxt['name']} · {days_text(self.hours(self.stop))}"
+        else:
+            c.create_text(ix, y, text=fit_text(big_font, "Nach " + tg["name"], pw), anchor="nw", font=big_font,
+                          fill="white")
+            y += big_font.metrics("linespace")
+            km = self.cruise["km"][self.stop if self.direction == 0 else len(self.cruise["km"]) - 1 - self.stop]
+            c.create_text(ix, y, text=fit_text(mid_font, f"{tg['country']} · {km:,} km".replace(",", "."), pw),
+                          anchor="nw", font=mid_font, fill="#CFE8FF")
+            y += mid_font.metrics("linespace")
+            info = f"Auf See ca. {days_text(self.hours(self.stop))}"
+        c.create_text(ix, y, text=fit_text(mid_font, info, pw), anchor="nw", font=mid_font, fill="#9FE3B0")
+        y += mid_font.metrics("linespace") + 10 * s
+        bar_w = px2 - px1 - 48 * s
+        round_rect(c, ix, y, ix + bar_w, y + 14 * s, 7 * s, fill="#3A4A5C", outline="")
+        total = (self.stop + (self.hop_progress() if self.phase != "port" else 0.0)) / max(1, n - 1)
+        if total > 0:
+            round_rect(c, ix, y, ix + max(14 * s, bar_w * total), y + 14 * s, 7 * s, fill=self.line["color"],
+                       outline="")
+
+        # Knöpfe
+        in_port = self.phase == "port"
+        buttons = [({"sea": "▶▶"}.get(self.phase, "▼"), self.go, (in_port and not self.last) or self.phase == "sea",
+                    "#F7D117", PANEL, 30),
+                   ("Ansage", self.announce, True, "#3D8BD4", "white", 17),
+                   ("T", self.horn, True, "#E8483B", "white", 30),
+                   ("Ö", self.toggle_open, in_port, "#2BA59B", "white", 30),
+                   ("U", self.change, bool(self.station_key()), "#2F855A", "white", 30),
+                   ("R", self.again, in_port and self.last, "#8E6BBF", "white", 30)]
+        bgap = 12 * s
+        bsize = min(84 * s, (pw - (len(buttons) - 1) * bgap) / len(buttons))
+        by2 = h - 50 * s
+        btn_y = by2 - bsize - 76 * s
+        bx1 = (px1 + px2) / 2 - (len(buttons) * bsize + (len(buttons) - 1) * bgap) / 2
+        for sym, cb, enabled, bg, fg, size in buttons:
+            round_rect(c, bx1, btn_y, bx1 + bsize, btn_y + bsize, 24 * s, fill=bg if enabled else "#3A4A5C",
+                       outline="")
+            c.create_text(bx1 + bsize / 2, btn_y + bsize / 2, text=sym, font=app.font(size, "bold"),
+                          fill=fg if enabled else "#5A6A7C")
+            if enabled:
+                app.hit(bx1, btn_y, bx1 + bsize, btn_y + bsize, cb)
+            bx1 += bsize + bgap
+        # großer Knopf unten
+        if in_port and not self.last:
+            label, cb, on = f"⚓  Leinen los – nach {self.port(self.stop + 1)['name']}", self.go, True
+        elif in_port:
+            label, cb, on = (("⟲  Nochmal: " + self.cruise["title"]) if self.round_trip
+                             else f"⟲  Zurück nach {self.port(0)['name']}"), self.again, True
+        else:
+            label, cb, on = "Gute Fahrt!", None, False
+        rbw, rbh = px2 - px1 - 48 * s, 56 * s
+        rby = by2 - rbh
+        round_rect(c, ix, rby, ix + rbw, rby + rbh, 28 * s, fill="white" if on else "#3A4A5C", outline="")
+        bf = app.font(20, "bold")
+        c.create_text(ix + rbw / 2, rby + rbh / 2, text=fit_text(bf, label, rbw - 20 * s), font=bf,
+                      fill=PANEL if on else "#8A9AAC")
+        if on:
+            app.hit(ix, rby, ix + rbw, rby + rbh, cb)
+
+        # Leuchtanzeige
+        text, until = self.message
+        if not (text and time.monotonic() < until):
+            if self.gangway:
+                text = "Gangway draußen – Ö holt sie ein"
+            elif in_port:
+                text = ("Ö: Gangway · R: nochmal" if self.last else "Ö: Gangway · ▼: Ablegen")
+            else:
+                text = {"leave": "Ablegen …", "sea": "Auf hoher See – ▼ fährt schneller",
+                        "arrive": f"Einlaufen in {tg['name']}"}[self.phase]
+        box_y1, box_y2 = y + 30 * s, btn_y - 14 * s
+        if box_y2 - box_y1 >= 40 * s:
+            round_rect(c, ix, box_y1, ix + pw, box_y2, 14 * s, fill="#11181F", outline="#3A4A5C", width=2 * s)
+            mf = app.font(22 if box_y2 - box_y1 > 70 * s else 19, "bold")
+            lines = wrap_text(mf, text, pw - 24 * s, 2)
+            lh = mf.metrics("linespace")
+            ty = (box_y1 + box_y2) / 2 - lh * (len(lines) - 1) / 2
+            for ln in lines:
+                c.create_text((px1 + px2) / 2, ty, text=ln, font=mf, fill="#FFB000")
+                ty += lh
+
+
+# --------------------------------------------------------------------------
 # Türen auf (Taste Ö): Blick in den Innenraum, Fahrgäste steigen ein und aus
 # --------------------------------------------------------------------------
 
@@ -4358,6 +5220,7 @@ class App:
     def __init__(self, root, data):
         self.root = root
         add_flights(data)
+        add_cruises(data)
         self.data = data
         self.canvas = tk.Canvas(root, bg=BG, highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)

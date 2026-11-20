@@ -7,8 +7,8 @@ Enthalten sind alle S-Bahn-, U-Bahn-, Straßenbahn- und Buslinien von BVG und
 S-Bahn Berlin, alle BVG-Fähren sowie alle Regional- und ICE-Züge, die durch
 Berlin fahren (16 S-Bahn-, 9 U-Bahn-, 22 Tram-, 204 Bus-, 22 Regional-,
 8 ICE- und 6 Fährlinien).
-Dazu kommen 33 Flüge vom Flughafen BER in die ganze Welt. Das Programm läuft
-komplett **offline**.
+Dazu kommen 33 Flüge vom Flughafen BER in die ganze Welt und 7 Kreuzfahrten
+ab Hamburg, Kiel und Warnemünde. Das Programm läuft komplett **offline**.
 
 ## Browser-Version (ohne Installation)
 
@@ -50,7 +50,7 @@ python3 tools/build_web.py
 
 | Bildschirm | Bedienung |
 |---|---|
-| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Regionalbahn, ICE, Fähre oder Flugzeug, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–8 gehen auch) |
+| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Regionalbahn, ICE, Fähre, Flugzeug oder Kreuzfahrt, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–9 gehen auch) |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
 | **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht, `Ö`: Türen auf und zu (Blick in den Innenraum), an der Endhaltestelle `B`: Betriebshof (Bus, Tram) bzw. Bootshaus (Fähre) oder `A`: Abstellgleis (Bahnen), dort `W`: Waschanlage, `E`: Linie endet hier |
 
@@ -348,6 +348,61 @@ keine Direktflüge, dort steigt man unterwegs um. Das gilt auch für Rovaniemi,
 Nairobi, Delhi, Bangkok, San Francisco und Cancún. In Rovaniemi landet man
 immer nachts, damit man die Polarlichter sieht.
 
+## Kreuzfahrt
+
+Große Kreuzfahrtschiffe fahren nicht durch Berlin, aber viele legen in
+Deutschland ab. Im Spiel gibt es sieben Reisen ab **Hamburg**, **Kiel** und
+**Warnemünde**:
+
+| Schild | Reise | Häfen |
+|---|---|---|
+| Fjorde | Norwegens Fjorde | Hamburg – Stavanger – Geiranger – Bergen – Hamburg |
+| Ostsee | Ostsee-Metropolen | Kiel – Kopenhagen – Stockholm – Helsinki – Tallinn – Kiel |
+| Oslo | Oslo und Kopenhagen | Warnemünde – Oslo – Kopenhagen – Warnemünde |
+| Städte | Metropolen Westeuropas | Hamburg – Amsterdam – London (Southampton) – Paris (Le Havre) – Hamburg |
+| Atlantik | Über den Atlantik nach New York | Hamburg – London (Southampton) – New York |
+| Süden | Von Hamburg ins Mittelmeer | Hamburg – Lissabon – Palma de Mallorca |
+| Island | Island und zurück | Hamburg – Reykjavík – Hamburg |
+
+Man fährt Hafen für Hafen, ähnlich wie beim Fliegen:
+
+1. **Im Hafen** liegt das Schiff am Kai, dahinter das Wahrzeichen der Stadt,
+   z. B. Elbphilharmonie, Containerbrücken und Michel in Hamburg, der
+   Preikestolen bei Stavanger, die Sieben-Schwestern-Wasserfälle in
+   Geiranger, Bryggen in Bergen, der Dom von Helsinki, die Stadtmauer von
+   Tallinn, die Oper in Oslo, der Leuchtturm mit Strandkörben in Warnemünde
+   oder das Marine-Ehrenmal in Kiel. Die übrigen Häfen haben dieselben
+   Wahrzeichen wie die Flugziele.
+2. **Ablegen** mit `▼`, Leertaste oder dem großen Knopf „Leinen los“: Das
+   Schiffshorn tutet, das Schiff fährt an, der Hafen gleitet aus dem Bild.
+3. **Auf hoher See** ziehen Wellen, Inseln und andere Schiffe vorbei,
+   manchmal springen Delfine. Auf langen Strecken (ab 20 Stunden) wird es
+   Nacht, dann leuchten die Fenster des Schiffs. `▼` fährt schneller.
+4. **Einlaufen**: Der nächste Hafen kommt in Sicht, das Schiff legt an. Es
+   gibt einen Gruß in der Landessprache und etwas Wissenswertes zum Vorlesen.
+
+Rechts zeigt eine Karte die ganze Route mit allen Häfen; das kleine Schiff
+fährt mit. Die Seewege sind von Hand eingezeichnet, damit das Schiff nicht
+über Land fährt. Die Fahrzeit auf See ergibt sich aus der Länge der Route bei
+etwa 17 Knoten (31 km/h); im Spiel dauert eine Strecke nur 15 bis 30 Sekunden.
+
+| Taste | Knopf | |
+|---|---|---|
+| `▼` / Leertaste | ▼ bzw. ▶▶ | ablegen, auf See schneller fahren |
+| `T` | T | Schiffshorn |
+| `V` | Ansage | Ansage des Kapitäns, z. B. „Noch etwa 1 Tag und 2 Stunden bis Stockholm“ |
+| `Ö` | Ö | im Hafen: Gangway ausfahren, Passagiere gehen an bzw. von Bord (Landgang) |
+| `U` | U | im Hafen Hamburg: in die Bahn umsteigen |
+| `R` | R / großer Knopf | am Ende der Reise noch einmal (bzw. zurück, z. B. von New York) |
+
+**Mit dem ICE zum Schiff:** Die Schiffe in Hamburg legen am
+Kreuzfahrtterminal Altona ab. Wer mit dem ICE 18 oder ICE 28 nach
+**Hamburg-Altona** fährt, kann dort mit `U` auf ein Kreuzfahrtschiff
+umsteigen, und im Hafen Hamburg geht es mit `U` zurück in den ICE.
+
+Die Reisen sind Beispiele nach typischen Routen der Schiffe, die in
+Deutschland ablegen, kein Fahrplan einer bestimmten Reederei.
+
 ## Startbahnhof
 
 Unter den vier Verkehrsmitteln steht im Hauptmenü der grüne Knopf **„Starte
@@ -393,7 +448,8 @@ Man kann auch auf die Linienschilder der aktuellen Station klicken.
 
 **Ankreuzfeld „Umsteigen getrennt“** (unten links im Hauptmenü,
 standardmäßig angehakt): Beim Fahren mit S-Bahn, U-Bahn, Regionalbahn oder
-ICE werden nur Umstiege in diese vier gezeigt, angeboten und angesagt. Beim Tram- oder
+ICE werden nur Umstiege in diese Bahnen sowie Flugzeug und Kreuzfahrt
+gezeigt, angeboten und angesagt. Beim Tram- oder
 Busfahren gilt das Gleiche für Tram und Bus. Die Fähre gehört zu beiden
 Gruppen: Sie wird überall angeboten, und von der Fähre aus sieht man alle
 Umstiege. Das macht die Liste deutlich
@@ -417,7 +473,8 @@ Die Aufnahmen von BVG und S-Bahn sind nicht frei verfügbar.
 `tools/make_sounds.py` erzeugt sie neu. Eigene Aufnahmen kannst du einfach
 als `sounds/sbahn.wav`, `sounds/ubahn.wav`, `sounds/tram.wav`,
 `sounds/bus.wav`, `sounds/regio.wav`, `sounds/ice.wav` oder
-`sounds/faehre.wav` (Schiffsglocke und Schiffshorn) ablegen. Im
+`sounds/faehre.wav` (Schiffsglocke und Schiffshorn) ablegen. Das tiefe Horn
+des Kreuzfahrtschiffs ist `sounds/schiff.wav`. Im
 Flugzeug gibt es den Kabinengong `sounds/flug.wav` und beim Start das
 Triebwerksgeräusch `sounds/jet.wav`.
 
@@ -542,4 +599,13 @@ bauen:
 
 ```sh
 python3 tools/make_flights.py
+```
+
+**Kreuzfahrten:** Reisen, Häfen, Seewege und die neuen Hafen-Wahrzeichen
+stehen in `tools/make_cruises.py`. Das Skript schreibt `data/cruises.json`
+und übernimmt die Wahrzeichen der Häfen, die auch Flugziele sind, aus
+`tools/make_flights.py`. Neu bauen (danach `python3 tools/build_web.py`):
+
+```sh
+python3 tools/make_cruises.py
 ```

@@ -10,6 +10,7 @@ Die Töne sind den Berliner Fahrzeugen nachempfunden, keine Originalaufnahmen:
 - Regio:   langsamere, hohe Doppelpieptöne wie bei Doppelstockzügen, dann Druckluft
 - ICE:     Dreiklang-Gong wie am Bahnsteig, dann gleichmäßige Warnpieptöne
 - Fähre:   zwei Schläge der Schiffsglocke, dann das Schiffshorn („Tuuut – tut“)
+- Schiff:  tiefes Typhon eines Kreuzfahrtschiffs („Tuuuuut – tuuut“)
 - Flug:    „Ding-Dong“ wie in der Kabine (Anschnallzeichen)
 - Jet:     Triebwerke beim Start: anschwellendes Rauschen und Heulen
 
@@ -150,7 +151,7 @@ def ice():
     return s
 
 
-def horn(dur, volume=0.6):
+def horn(dur, volume=0.6, freq=147):
     """Schiffshorn: tiefer, voller Ton mit vielen Obertönen, weich an- und abschwellend."""
     n = int(RATE * dur)
     partials = (1.0, 0.9, 0.7, 0.5, 0.35, 0.2)
@@ -159,7 +160,7 @@ def horn(dur, volume=0.6):
         t = i / RATE
         env = min(1.0, t / 0.08, (dur - t) / 0.15)
         wobble = 1 + 0.004 * math.sin(2 * math.pi * 5 * t)
-        v = sum(a * math.sin(2 * math.pi * 147 * wobble * (k + 1) * t) for k, a in enumerate(partials))
+        v = sum(a * math.sin(2 * math.pi * freq * wobble * (k + 1) * t) for k, a in enumerate(partials))
         out.append(v * env * volume / sum(partials))
     return out
 
@@ -170,6 +171,15 @@ def faehre():
     mix_in(s, bell(1320, 0.9, 0.45), 0.3)
     mix_in(s, horn(1.3), 1.1)                   # „Tuuut …
     mix_in(s, horn(0.45), 2.6)                  # … tut“
+    return s
+
+
+def schiff():
+    s = []
+    mix_in(s, horn(2.2, 0.7, 98), 0.0)          # tiefes Typhon: „Tuuuuut …
+    mix_in(s, horn(2.2, 0.35, 147), 0.0)        # (zweiter Ton dazu, klingt voller)
+    mix_in(s, horn(0.9, 0.7, 98), 2.6)          # … tuuut“
+    mix_in(s, horn(0.9, 0.35, 147), 2.6)
     return s
 
 
@@ -208,6 +218,7 @@ def main():
     save("regio.wav", regio())
     save("ice.wav", ice())
     save("faehre.wav", faehre())
+    save("schiff.wav", schiff())
     save("flug.wav", flug())
     save("jet.wav", jet())
 
