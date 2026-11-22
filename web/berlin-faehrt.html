@@ -765,6 +765,7 @@ class HomeScreen extends Screen {
     this.lastTile = selected < HomeScreen.START ? selected : 0;
     this.tiles = [];
     this.startBox = null;
+    this.searchBox = null;
     this.cols = 4;
   }
 
@@ -811,8 +812,10 @@ class HomeScreen extends Screen {
     // Start-Knopf: direkt am Startbahnhof losfahren
     const home = app.homeStation();
     const sel = this.selected === HomeScreen.START;
-    let bw = Math.min(w - 80 * s, 720 * s), bh = 86 * s;
-    let bx1 = (w - bw) / 2, by1 = h - 165 * s;
+    const total = Math.min(w - 80 * s, 960 * s), sw = Math.min(240 * s, total * 0.3), sgap = 20 * s;
+    let bw = total - sw - sgap, bh = 86 * s;
+    let bx1 = (w - total) / 2, by1 = h - 165 * s;
+    let sx1 = bx1 + bw + sgap;
     if (sel) { bx1 -= 6 * s; by1 -= 6 * s; bw += 12 * s; bh += 12 * s; }
     const bx2 = bx1 + bw, by2 = by1 + bh;
     const green = "#2F855A";
@@ -827,6 +830,18 @@ class HomeScreen extends Screen {
       sel ? "white" : TEXT, "w");
     this.startBox = [bx1, by1, bx2, by2];
     app.hit(bx1, by1, bx2, by2, () => this.start());
+
+    // Such-Knopf: Linie oder Haltestelle suchen
+    const ssel = this.selected === HomeScreen.SEARCH;
+    let sx2 = sx1 + sw, sy1 = h - 165 * s, sy2 = sy1 + 86 * s;
+    if (ssel) { sx1 -= 6 * s; sy1 -= 6 * s; sx2 += 6 * s; sy2 += 6 * s; }
+    c.roundRect(sx1 + 5 * s, sy1 + 7 * s, sx2 + 5 * s, sy2 + 7 * s, 43 * s, { fill: SHADOW });
+    c.roundRect(sx1, sy1, sx2, sy2, 43 * s, { fill: ssel ? SEARCH_COLOR : CARD, outline: SEARCH_COLOR, width: (ssel ? 8 : 3) * s });
+    const sfg = ssel ? "white" : SEARCH_COLOR, sf = app.font(24, "bold");
+    drawMagnifier(c, sx1 + 45 * s, (sy1 + sy2) / 2, 40 * s, sfg, Math.max(2, 5 * s));
+    c.text(sx1 + 80 * s, (sy1 + sy2) / 2, fitText(sf, "Suchen", sx2 - sx1 - 95 * s), sf, sfg, "w");
+    this.searchBox = [sx1, sy1, sx2, sy2];
+    app.hit(sx1, sy1, sx2, sy2, () => this.search());
 
     // Ankreuzfelder für Eltern
     checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug, Schiff / Tram, Bus (Fähre, Bus Brandenburg bei beiden)",
@@ -851,6 +866,10 @@ class HomeScreen extends Screen {
   }
 
   /** Am Startbahnhof losfahren – dieselbe Auswahl wie beim Umsteigen. */
+  search(text = "") {
+    this.app.show(new SearchScreen(this.app, text));
+  }
+
   start() {
     const app = this.app;
     const home = app.homeStation();
@@ -879,10 +898,15 @@ class HomeScreen extends Screen {
 
   key(k, char) {
     const n = MODES.length;
-    if (this.selected === HomeScreen.START) {
+    if (char && /\p{L}/u.test(char)) return this.search(char);    // einfach lostippen: die Suche öffnet sich
+    if (char && "1234567890".slice(0, n).includes(char)) return this.open("1234567890".indexOf(char));
+    if (this.selected === HomeScreen.START || this.selected === HomeScreen.SEARCH) {
+      const start = this.selected === HomeScreen.START;
       if (k === "Up") this.selected = this.lastTile;
-      else if (KEYS_OK.has(k)) return this.start();
-      else if (k === PARENT_KEY) return this.resetHome();
+      else if (k === "Right" && start) this.selected = HomeScreen.SEARCH;
+      else if (k === "Left" && !start) this.selected = HomeScreen.START;
+      else if (KEYS_OK.has(k)) return start ? this.start() : this.search();
+      else if (k === PARENT_KEY && start) return this.resetHome();
       else return;
     } else if (k === "Right") {
       this.selected = (this.selected + 1) % n;
@@ -909,6 +933,7 @@ class HomeScreen extends Screen {
   motion(x, y) {
     const boxes = this.tiles.map((b, i) => [i, b]);
     if (this.startBox) boxes.push([HomeScreen.START, this.startBox]);
+    if (this.searchBox) boxes.push([HomeScreen.SEARCH, this.searchBox]);
     for (const [i, [x1, y1, x2, y2]] of boxes) {
       if (x1 <= x && x <= x2 && y1 <= y && y <= y2 && i !== this.selected) {
         this.selected = i;
@@ -919,6 +944,7 @@ class HomeScreen extends Screen {
   }
 }
 HomeScreen.START = MODES.length;      // Auswahl-Nummer des Start-Knopfs unter den Kacheln
+HomeScreen.SEARCH = MODES.length + 1; // … und des Such-Knopfs daneben
 
 class LinesScreen extends Screen {
   /** selected: Nummer der Linie in data.lines[kind]. Beim Bus in Brandenburg zeigt die Liste nur die Linien
@@ -4783,6 +4809,283 @@ class CruiseScreen extends Screen {
 }
 
 // --------------------------------------------------------------------------
+// Suche (Hauptmenü): Linien, Haltestellen, Flugziele und Kreuzfahrten
+// --------------------------------------------------------------------------
+
+const SEARCH_COLOR = "#2B6CB0";
+const SEARCH_MAX = 80;              // so viele Treffer werden höchstens gezeigt
+
+/** Für den Vergleich: klein, ohne Akzente und Satzzeichen („S+U Alexanderplatz“ -> „sualexanderplatz“). */
+function searchNorm(text) {
+  return text.replace(/ß/g, "ss").replace(/ẞ/g, "ss").normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** Haltestellenname ohne „S+U “ usw. davor, für die Suche am Wortanfang. */
+function stationBase(name) {
+  return searchNorm(name.replace(/^(S\+U|S|U)\s+/, ""));
+}
+
+/** Alles, was man suchen kann, einmal aufbereitet. */
+class SearchIndex {
+  constructor(data) {
+    this.lines = [];          // [Verkehrsmittel, Nr., Namen zum Vergleichen, weitere Texte]
+    for (const [kind, label] of MODES) {
+      const lab = searchNorm(label);
+      (data.lines[kind] || []).forEach((line, gi) => {
+        const name = searchNorm(line.name);
+        let extra = [];
+        if (kind === "flug") {
+          const d0 = line.directions[0];
+          extra = [searchNorm(data.stations[d0[d0.length - 1]])];
+        } else if (kind === "schiff") {
+          const cr = data.cruises.cruises[gi];
+          extra = [searchNorm(cr.title)].concat(cr.ports.map(p => searchNorm(data.cruises.ports[p].name)));
+        }
+        this.lines.push([kind, gi, [name, lab + name], extra]);
+      });
+    }
+    // Haltestellen: gleicher Name nur einmal; große Umsteigebahnhöfe (viele Linien) kommen zuerst
+    const served = {};
+    for (const lines of Object.values(data.lines)) {
+      for (const line of lines) for (const key of new Set(line.directions[0])) served[key] = (served[key] || 0) + 1;
+    }
+    this.stations = [];
+    const seen = new Set();
+    const entries = Object.entries(data.stations).sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
+    for (const [key, name] of entries) {
+      if (key.startsWith("AP:") || key.startsWith("PORT:") || seen.has(name)) continue;
+      seen.add(name);
+      this.stations.push([key, name, searchNorm(name), stationBase(name), served[key] || 0]);
+    }
+  }
+
+  /** Treffer als ["linie", Verkehrsmittel, Nr.] bzw. ["halt", Schlüssel, Name], die besten zuerst. */
+  find(query) {
+    const q = searchNorm(query);
+    if (!q) return [];
+    const ranked = [];
+    const order = Object.fromEntries(MODES.map((m, i) => [m[0], i]));
+    for (const [kind, gi, names, extra] of this.lines) {
+      let rank;
+      if (names.includes(q)) rank = 0;
+      else if (names.some(n => n.startsWith(q))) rank = 1;
+      else if (q.length >= 3 && extra.some(e => e.includes(q))) rank = 3;
+      else continue;
+      ranked.push([rank, order[kind], gi, "", ["linie", kind, gi]]);
+    }
+    if (q.length >= 2) {
+      for (const [key, name, full, base, pop] of this.stations) {
+        if (base.startsWith(q) || full.startsWith(q)) ranked.push([2, -pop, name.length, name, ["halt", key, name]]);
+        else if (q.length >= 3 && full.includes(q)) ranked.push([4, -pop, name.length, name, ["halt", key, name]]);
+      }
+    }
+    ranked.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || (a[3] < b[3] ? -1 : a[3] > b[3] ? 1 : 0));
+    return ranked.slice(0, SEARCH_MAX).map(r => r[4]);
+  }
+}
+
+function drawMagnifier(c, cx, cy, size, color, width) {
+  const r = size * 0.32;
+  c.oval(cx - r - size * 0.1, cy - r - size * 0.1, cx + r - size * 0.1, cy + r - size * 0.1, { outline: color, width });
+  c.line([[cx + r * 0.55, cy + r * 0.55], [cx + size * 0.45, cy + size * 0.45]], { fill: color, width: width * 1.4, cap: "round" });
+}
+
+/** Linie aus der Suche öffnen (am Anfang der Linie); „Zurück“ führt wieder zu backScreen. */
+function openLine(app, kind, gi, backScreen = null) {
+  const back = backScreen || new LinesScreen(app, kind, gi);
+  if (kind === "flug") app.show(new FlightScreen(app, gi, 0, back));
+  else if (kind === "schiff") app.show(new CruiseScreen(app, gi, 0, back));
+  else app.show(new RideScreen(app, kind, gi, back));
+  app.animate();
+}
+
+/** Echtes Eingabefeld über dem Canvas – so erscheint am Tablet die Bildschirmtastatur. */
+function searchInput(app) {
+  if (!app.searchInput) {
+    const el = document.createElement("input");
+    el.id = "suche";
+    el.type = "search";
+    el.autocomplete = "off";
+    el.spellcheck = false;
+    el.setAttribute("autocapitalize", "off");
+    el.placeholder = "Linie oder Haltestelle …";
+    Object.assign(el.style, { position: "fixed", display: "none", border: "none", outline: "none", background: "transparent",
+      color: TEXT, fontFamily: FONT_FAMILY, fontWeight: "bold", padding: "0", margin: "0" });
+    el.addEventListener("input", () => { if (app.screen instanceof SearchScreen) app.screen.setQuery(el.value); });
+    document.body.appendChild(el);
+    app.searchInput = el;
+  }
+  return app.searchInput;
+}
+
+/** Suchfeld mit Trefferliste: Liniennummer oder Haltestelle eintippen. */
+class SearchScreen extends Screen {
+  constructor(app, query = "") {
+    super(app);
+    if (!app.searchIndex) app.searchIndex = new SearchIndex(app.data);
+    this.query = "";
+    this.results = [];
+    this.selected = 0;
+    this.scroll = 0;
+    this.rows = [];
+    const el = searchInput(app);
+    el.value = query;
+    this.setQuery(query, false);
+    this.focusLater = true;
+  }
+
+  setQuery(query, redraw = true) {
+    this.query = query;
+    this.results = this.app.searchIndex.find(query);
+    this.selected = 0;
+    this.scroll = 0;
+    if (redraw) this.app.redraw();
+  }
+
+  /** [Titel, Untertitel] eines Treffers. */
+  rowText(res) {
+    const app = this.app, st = app.data.stations;
+    if (res[0] === "halt") {
+      const n = app.transfers.options(res[1]).length;
+      return [res[2], `Haltestelle · ${n} Linie${n !== 1 ? "n" : ""} – hier einsteigen`];
+    }
+    const [, kind, gi] = res;
+    const line = app.data.lines[kind][gi], stops = line.directions[0];
+    if (kind === "flug") return [`Flughafen BER → ${st[stops[stops.length - 1]]}`, "Flugzeug"];
+    if (kind === "schiff") {
+      const cr = app.data.cruises.cruises[gi];
+      return [cr.title, "Kreuzfahrt ab " + app.data.cruises.ports[cr.ports[0]].name];
+    }
+    const title = stops[0] === stops[stops.length - 1] ? `${st[stops[0]]}  ↻  Ringfahrt` : `${st[stops[0]]}  ⇄  ${st[stops[stops.length - 1]]}`;
+    let sub = MODE[kind][1];
+    if (kind === "bbus") sub += " · " + app.data.regions[line.region].name;
+    return [title, sub];
+  }
+
+  draw(c, w, h) {
+    const app = this.app, s = app.s;
+    const hh0 = HEADER_H * s;
+    const fx1 = 30 * s, fx2 = w - 30 * s, fy1 = hh0 + 22 * s, fy2 = fy1 + 72 * s;
+    const top = fy2 + 22 * s, rowH = 74 * s, viewH = h - top;
+    const maxScroll = Math.max(0, this.results.length * rowH + 20 * s - viewH);
+    if (this.follow) {                                               // Auswahl im Bild halten
+      const ySel = this.selected * rowH;
+      if (ySel < this.scroll) this.scroll = ySel;
+      else if (ySel + rowH > this.scroll + viewH) this.scroll = ySel + rowH - viewH;
+      this.follow = false;
+    }
+    this.scroll = Math.max(0, Math.min(maxScroll, this.scroll));
+
+    // Trefferliste
+    const titleFont = app.font(21, "bold"), subFont = app.font(15), badgeFont = app.font(24, "bold");
+    this.rows = [];
+    this.results.forEach((res, n) => {
+      const y1 = top + n * rowH - this.scroll;
+      if (y1 + rowH < top || y1 > h) return;
+      const y2 = y1 + rowH - 8 * s, sel = n === this.selected, cy = (y1 + y2) / 2;
+      c.roundRect(fx1, y1, fx2, y2, 18 * s, { fill: sel ? HIGHLIGHT : CARD, outline: sel ? SEARCH_COLOR : "#EEE6D2", width: (sel ? 5 : 2) * s });
+      let tx;
+      if (res[0] === "halt") {
+        const r = 20 * s;
+        c.oval(fx1 + 40 * s - r, cy - r, fx1 + 40 * s + r, cy + r, { fill: "#F7D117", outline: "#2F8F4E", width: 3 * s });
+        c.text(fx1 + 40 * s, cy, "H", app.font(20, "bold"), "#2F8F4E");
+        tx = fx1 + 80 * s;
+      } else {
+        const [, kind, gi] = res, line = app.data.lines[kind][gi];
+        drawModeSign(c, app, kind, fx1 + 40 * s, cy, 42 * s);
+        const bw = drawBadge(c, fx1 + 76 * s, cy, line.name, line.color, kind, 44 * s, badgeFont);
+        tx = fx1 + 76 * s + bw + 18 * s;
+      }
+      const [title, sub] = this.rowText(res);
+      c.text(tx, cy - 12 * s, fitText(titleFont, title, fx2 - tx - 20 * s), titleFont, TEXT, "w");
+      c.text(tx, cy + 15 * s, fitText(subFont, sub, fx2 - tx - 20 * s), subFont, MUTED, "w");
+      this.rows.push([n, fx1, Math.max(y1, top), fx2, y2]);
+      if (y2 > top) app.hit(fx1, Math.max(y1, top), fx2, y2, () => this.choose(n));
+    });
+    if (this.query && !this.results.length) c.text(w / 2, top + 60 * s, "Nichts gefunden – versuch es mit weniger Buchstaben.", app.font(22), MUTED);
+    if (!this.query) {
+      ["Tippe eine Liniennummer, z. B. 100, M10, U8, RE1, ICE 10 oder 873,",
+        "eine Haltestelle, z. B. Alexanderplatz oder Strausberg,",
+        "ein Flugziel wie Tokio oder eine Kreuzfahrt wie Fjorde."].forEach((ln, k) => c.text(w / 2, top + 50 * s + k * 34 * s, ln, app.font(19), MUTED));
+    }
+
+    // Kopf und Suchfeld zuletzt, damit die Liste darunter verschwindet
+    c.rect(0, hh0, w, top - 4 * s, BG);
+    const [hh, left] = header(app, c, w, SEARCH_COLOR, () => this.back());
+    drawMagnifier(c, left + 55 * s, hh / 2, 50 * s, "white", Math.max(2, 5 * s));
+    c.text(left + 100 * s, hh / 2, "Suchen: Linie oder Haltestelle", app.font(30, "bold"), "white", "w");
+    c.roundRect(fx1, fy1, fx2, fy2, 36 * s, { fill: "white", outline: SEARCH_COLOR, width: 4 * s });
+    drawMagnifier(c, fx1 + 40 * s, (fy1 + fy2) / 2, 34 * s, SEARCH_COLOR, Math.max(2, 4 * s));
+    let right = fx2 - 30 * s;
+    if (this.query) {
+      const count = `${this.results.length}${this.results.length >= SEARCH_MAX ? "+" : ""} Treffer`, cf = app.font(16);
+      c.text(right, (fy1 + fy2) / 2, count, cf, MUTED, "e");
+      right -= cf.measure(count) + 20 * s;
+    }
+    // das echte Eingabefeld liegt genau im gezeichneten Feld
+    const el = searchInput(app), f = app.font(30, "bold");
+    Object.assign(el.style, { display: "block", left: `${fx1 + 75 * s}px`, top: `${fy1 + 10 * s}px`, width: `${right - fx1 - 75 * s}px`,
+      height: `${fy2 - fy1 - 20 * s}px`, fontSize: `${f.px}px` });
+    if (this.focusLater) {
+      this.focusLater = false;
+      el.focus();
+      try { el.setSelectionRange(el.value.length, el.value.length); } catch (err) { /* egal */ }
+    }
+  }
+
+  choose(n) {
+    if (n < 0 || n >= this.results.length) return;
+    this.selected = n;
+    const res = this.results[n], app = this.app;
+    if (res[0] === "linie") return openLine(app, res[1], res[2], this);
+    const options = app.transfers.options(res[1]);
+    if (options.length) app.show(new ChangeScreen(app, `${res[2]}: Womit fährst du los?`, options, () => app.show(this), "Los geht's mit {}!"));
+  }
+
+  back() { this.app.show(new HomeScreen(this.app, HomeScreen.SEARCH)); }
+
+  /** Vom Eingabefeld kommen nur die Steuertasten hierher; die Buchstaben tippt der Browser selbst ins Feld. */
+  key(k, char) {
+    const n = this.results.length;
+    if (k === "Escape") return this.back();
+    if (k === "Down") this.selected = n ? Math.min(n - 1, this.selected + 1) : 0;
+    else if (k === "Up") this.selected = Math.max(0, this.selected - 1);
+    else if (k === "Next") this.selected = n ? Math.min(n - 1, this.selected + 6) : 0;
+    else if (k === "Prior") this.selected = Math.max(0, this.selected - 6);
+    else if (k === "Return") return this.choose(this.selected);
+    else if (k === "BackSpace" || char) {
+      // Taste kam nicht aus dem Feld (z. B. nach einem Klick in die Liste): selbst eintragen
+      const el = searchInput(this.app);
+      el.value = k === "BackSpace" ? el.value.slice(0, -1) : el.value + char;
+      this.setQuery(el.value, false);
+      el.focus();
+    } else return;
+    this.follow = true;
+    this.app.redraw();
+  }
+
+  wheel(delta) {
+    this.scroll -= delta;
+    this.app.redraw();
+  }
+
+  drag(dy) {
+    this.scroll -= dy;
+    this.app.redraw();
+  }
+
+  motion(x, y) {
+    for (const [n, x1, y1, x2, y2] of this.rows) {
+      if (x1 <= x && x <= x2 && y1 <= y && y <= y2 && n !== this.selected) {
+        this.selected = n;
+        this.app.redraw();
+      }
+    }
+  }
+}
+
+// --------------------------------------------------------------------------
 // Türen auf (Taste Ö): Blick in den Innenraum, Fahrgäste steigen ein und aus
 // --------------------------------------------------------------------------
 
@@ -5195,6 +5498,9 @@ class App {
     canvas.addEventListener("pointermove", e => this.onPointerMove(e));
     canvas.addEventListener("pointerup", e => this.onPointerUp(e));
     canvas.addEventListener("pointercancel", () => { this.press = null; });
+    // Nach dem Antippen schickt der Browser noch ein „mousedown“, das dem Suchfeld den Fokus (und damit am
+    // Tablet die Bildschirmtastatur) wegnehmen würde
+    canvas.addEventListener("mousedown", e => { if (this.screen instanceof SearchScreen) e.preventDefault(); });
     canvas.addEventListener("wheel", e => { e.preventDefault(); this.screen.wheel(-e.deltaY); }, { passive: false });
     canvas.focus();
     // Die Stimmen werden in manchen Browsern erst nach dem Start geladen
@@ -5274,6 +5580,14 @@ class App {
 
   show(screen) {
     this.screen = screen;
+    if (screen instanceof SearchScreen) {
+      searchInput(this).value = screen.query;        // zurück zur Suche: Text und Schreibmarke wieder ins Feld
+      screen.focusLater = true;
+    } else if (this.searchInput) {
+      this.searchInput.style.display = "none";
+      this.searchInput.blur();
+      this.canvas.focus();
+    }
     this.redraw();
   }
 
@@ -5310,13 +5624,15 @@ class App {
     const k = KEY_NAMES[e.key] || e.key;
     const char = e.key.length === 1 ? e.key : "";
     if (e.metaKey || e.ctrlKey || e.altKey) return;   // Browser-Kürzel (Neu laden, Zoom …) nicht stören
+    // Im Suchfeld tippt der Browser die Buchstaben selbst; nur die Steuertasten gehen an die Suche
+    if (e.target && e.target.id === "suche" && !["Down", "Up", "Next", "Prior", "Return", "Escape"].includes(k)) return;
     if (KEY_NAMES[e.key] || char) e.preventDefault();
     this.screen.key(k, char);
   }
 
   onPointerDown(e) {
     if (e.button > 0) return;
-    this.canvas.focus();
+    if (!(this.screen instanceof SearchScreen)) this.canvas.focus();
     try { this.canvas.setPointerCapture(e.pointerId); } catch (err) { /* egal */ }
     this.press = { id: e.pointerId, x: e.offsetX, y: e.offsetY, lastY: e.offsetY, moved: false, samples: [] };
   }

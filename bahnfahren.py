@@ -19,6 +19,7 @@ import subprocess
 import sys
 import time
 import tkinter as tk
+import unicodedata
 import tkinter.font as tkfont
 from pathlib import Path
 
@@ -718,6 +719,7 @@ def draw_house(c, cx, cy, size, color):
 
 class HomeScreen(Screen):
     START = len(MODES)      # Auswahl-Nummer des Start-Knopfs unter den Kacheln
+    SEARCH = len(MODES) + 1  # … und des Such-Knopfs daneben
 
     def __init__(self, app, selected=0):
         super().__init__(app)
@@ -725,6 +727,7 @@ class HomeScreen(Screen):
         self.last_tile = selected if selected < self.START else 0
         self.tiles = []
         self.start_box = None
+        self.search_box = None
         self.cols = 4
 
     def draw(self, c, w, h):
@@ -772,8 +775,11 @@ class HomeScreen(Screen):
         # Start-Knopf: direkt am Startbahnhof losfahren
         home = app.home_station()
         sel = self.selected == self.START
-        bw, bh = min(w - 80 * s, 720 * s), 86 * s
-        bx1, by1 = (w - bw) / 2, h - 165 * s
+        total = min(w - 80 * s, 960 * s)
+        sw, sgap = min(240 * s, total * 0.3), 20 * s
+        bw, bh = total - sw - sgap, 86 * s
+        bx1, by1 = (w - total) / 2, h - 165 * s
+        sx1 = bx1 + bw + sgap
         if sel:
             bx1 -= 6 * s; by1 -= 6 * s; bw += 12 * s; bh += 12 * s
         bx2, by2 = bx1 + bw, by1 + bh
@@ -791,6 +797,22 @@ class HomeScreen(Screen):
                       anchor="w", font=name_font, fill=TEXT if not sel else "white")
         self.start_box = (bx1, by1, bx2, by2)
         app.hit(bx1, by1, bx2, by2, self.start)
+
+        # Such-Knopf: Linie oder Haltestelle suchen
+        sel = self.selected == self.SEARCH
+        sx2, sy1, sy2 = sx1 + sw, h - 165 * s, h - 165 * s + 86 * s
+        if sel:
+            sx1 -= 6 * s; sy1 -= 6 * s; sx2 += 6 * s; sy2 += 6 * s
+        round_rect(c, sx1 + 5 * s, sy1 + 7 * s, sx2 + 5 * s, sy2 + 7 * s, 43 * s, fill=SHADOW, outline="")
+        round_rect(c, sx1, sy1, sx2, sy2, 43 * s, fill=SEARCH_COLOR if sel else CARD, outline=SEARCH_COLOR,
+                   width=(8 if sel else 3) * s)
+        fg = "white" if sel else SEARCH_COLOR
+        draw_magnifier(c, sx1 + 45 * s, (sy1 + sy2) / 2, 40 * s, fg, max(2, 5 * s))
+        sf = app.font(24, "bold")
+        c.create_text(sx1 + 80 * s, (sy1 + sy2) / 2, text=fit_text(sf, "Suchen", sx2 - sx1 - 95 * s), anchor="w",
+                      font=sf, fill=fg)
+        self.search_box = (sx1, sy1, sx2, sy2)
+        app.hit(sx1, sy1, sx2, sy2, self.search)
 
         # Ankreuzfelder für Eltern
         checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug, Schiff / Tram, Bus (Fähre, Bus Brandenburg bei beiden)",
@@ -811,6 +833,9 @@ class HomeScreen(Screen):
         self.selected = i
         kind = MODES[i][0]
         self.app.show(RegionScreen(self.app) if kind == "bbus" else LinesScreen(self.app, kind))
+
+    def search(self, text=""):
+        self.app.show(SearchScreen(self.app, text))
 
     def start(self):
         """Am Startbahnhof losfahren – dieselbe Auswahl wie beim Umsteigen."""
@@ -842,13 +867,23 @@ class HomeScreen(Screen):
 
     def key(self, k, char):
         n = len(MODES)
-        if self.selected == self.START:
+        if char and char.isalpha():
+            self.search(char)                    # einfach lostippen: die Suche öffnet sich
+            return
+        if char and char in "1234567890"[:n]:
+            self.open("1234567890".index(char))
+            return
+        if self.selected in (self.START, self.SEARCH):
             if k == "Up":
                 self.selected = self.last_tile
+            elif k == "Right" and self.selected == self.START:
+                self.selected = self.SEARCH
+            elif k == "Left" and self.selected == self.SEARCH:
+                self.selected = self.START
             elif k in KEYS_OK:
-                self.start()
+                self.start() if self.selected == self.START else self.search()
                 return
-            elif k == PARENT_KEY:
+            elif k == PARENT_KEY and self.selected == self.START:
                 self.reset_home()
                 return
             else:
@@ -879,7 +914,8 @@ class HomeScreen(Screen):
         self.app.redraw()
 
     def motion(self, x, y):
-        boxes = list(enumerate(self.tiles)) + ([(self.START, self.start_box)] if self.start_box else [])
+        boxes = list(enumerate(self.tiles)) + ([(self.START, self.start_box)] if self.start_box else []) + \
+            ([(self.SEARCH, self.search_box)] if self.search_box else [])
         for i, (x1, y1, x2, y2) in boxes:
             if x1 <= x <= x2 and y1 <= y <= y2 and i != self.selected:
                 self.selected = i
@@ -5095,6 +5131,294 @@ class CruiseScreen(Screen):
             for ln in lines:
                 c.create_text((px1 + px2) / 2, ty, text=ln, font=mf, fill="#FFB000")
                 ty += lh
+
+
+# --------------------------------------------------------------------------
+# Suche (Hauptmenü): Linien, Haltestellen, Flugziele und Kreuzfahrten
+# --------------------------------------------------------------------------
+
+SEARCH_COLOR = "#2B6CB0"
+SEARCH_MAX = 80             # so viele Treffer werden höchstens gezeigt
+
+
+def search_norm(text):
+    """Für den Vergleich: klein, ohne Akzente und Satzzeichen („S+U Alexanderplatz“ -> „sualexanderplatz“)."""
+    text = unicodedata.normalize("NFD", text.replace("ß", "ss").replace("ẞ", "ss"))
+    return re.sub(r"[^a-z0-9]", "", "".join(ch for ch in text if not unicodedata.combining(ch)).lower())
+
+
+def station_base(name):
+    """Haltestellenname ohne „S+U “ usw. davor, für die Suche am Wortanfang."""
+    return search_norm(re.sub(r"^(S\+U|S|U)\s+", "", name))
+
+
+class SearchIndex:
+    """Alles, was man suchen kann, einmal aufbereitet."""
+
+    def __init__(self, data):
+        self.lines = []          # (Verkehrsmittel, Nr., Namen zum Vergleichen, weitere Texte)
+        for kind in [m[0] for m in MODES]:
+            label = search_norm(MODE[kind][1])
+            for gi, line in enumerate(data["lines"].get(kind, [])):
+                name = search_norm(line["name"])
+                extra = []
+                if kind == "flug":
+                    extra = [search_norm(data["stations"][line["directions"][0][-1]])]
+                elif kind == "schiff":
+                    cr = data["cruises"]["cruises"][gi]
+                    extra = [search_norm(cr["title"])] + [search_norm(data["cruises"]["ports"][p]["name"])
+                                                          for p in cr["ports"]]
+                self.lines.append((kind, gi, (name, label + name), extra))
+        # Haltestellen: gleicher Name nur einmal (die erste Nummer genügt, Umsteigen sucht ohnehin in der Nähe).
+        # Große Umsteigebahnhöfe (viele Linien) kommen in der Trefferliste zuerst.
+        served = {}
+        for lines in data["lines"].values():
+            for line in lines:
+                for key in set(line["directions"][0]):
+                    served[key] = served.get(key, 0) + 1
+        self.stations = []
+        seen = set()
+        for key, name in sorted(data["stations"].items(), key=lambda kv: kv[1]):
+            if key.startswith(("AP:", "PORT:")) or name in seen:
+                continue
+            seen.add(name)
+            self.stations.append((key, name, search_norm(name), station_base(name), served.get(key, 0)))
+
+    def find(self, query):
+        """Treffer als Liste von ("linie", Verkehrsmittel, Nr.) bzw. ("halt", Schlüssel, Name), die besten zuerst."""
+        q = search_norm(query)
+        if not q:
+            return []
+        ranked = []
+        order = {k: i for i, k in enumerate(m[0] for m in MODES)}
+        for kind, gi, names, extra in self.lines:
+            if q in names:
+                rank = 0
+            elif any(n.startswith(q) for n in names):
+                rank = 1
+            elif len(q) >= 3 and any(q in e for e in extra):
+                rank = 3
+            else:
+                continue
+            ranked.append((rank, order[kind], gi, ("linie", kind, gi)))
+        if len(q) >= 2:
+            for key, name, full, base, pop in self.stations:
+                if base.startswith(q) or full.startswith(q):
+                    ranked.append((2, -pop, len(name), ("halt", key, name)))
+                elif len(q) >= 3 and q in full:
+                    ranked.append((4, -pop, len(name), ("halt", key, name)))
+        ranked.sort(key=lambda r: r[:3] + (r[3][2] if r[3][0] == "halt" else "",))
+        return [r[3] for r in ranked[:SEARCH_MAX]]
+
+
+def draw_magnifier(c, cx, cy, size, color, width):
+    r = size * 0.32
+    c.create_oval(cx - r - size * 0.1, cy - r - size * 0.1, cx + r - size * 0.1, cy + r - size * 0.1, outline=color,
+                  width=width)
+    c.create_line(cx + r * 0.55, cy + r * 0.55, cx + size * 0.45, cy + size * 0.45, fill=color, width=width * 1.4,
+                  capstyle="round")
+
+
+def open_line(app, kind, gi, back_screen=None):
+    """Linie aus der Suche öffnen (am Anfang der Linie); „Zurück“ führt wieder zu ``back_screen``."""
+    back = back_screen or LinesScreen(app, kind, gi)
+    if kind == "flug":
+        app.show(FlightScreen(app, gi, 0, back))
+    elif kind == "schiff":
+        app.show(CruiseScreen(app, gi, 0, back))
+    else:
+        app.show(RideScreen(app, kind, gi, back))
+    app.animate()
+
+
+class SearchScreen(Screen):
+    """Suchfeld mit Trefferliste: Liniennummer oder Haltestelle eintippen."""
+
+    ROW_H = 74
+
+    def __init__(self, app, query=""):
+        super().__init__(app)
+        if not hasattr(app, "search_index"):
+            app.search_index = SearchIndex(app.data)
+        self.query = ""
+        self.results = []
+        self.selected = 0
+        self.scroll = 0.0
+        self.rows = []
+        self.set_query(query)
+
+    def set_query(self, query):
+        self.query = query
+        self.results = self.app.search_index.find(query)
+        self.selected = 0
+        self.scroll = 0.0
+
+    def row_text(self, res):
+        """(Titel, Untertitel) eines Treffers."""
+        app = self.app
+        st = app.data["stations"]
+        if res[0] == "halt":
+            n = len(app.transfers.options(res[1]))
+            return res[2], f"Haltestelle · {n} Linie{'n' if n != 1 else ''} – hier einsteigen"
+        kind, gi = res[1], res[2]
+        line = app.data["lines"][kind][gi]
+        stops = line["directions"][0]
+        if kind == "flug":
+            return f"Flughafen BER → {st[stops[-1]]}", "Flugzeug"
+        if kind == "schiff":
+            cr = app.data["cruises"]["cruises"][gi]
+            return cr["title"], "Kreuzfahrt ab " + app.data["cruises"]["ports"][cr["ports"][0]]["name"]
+        title = f"{st[stops[0]]}  ↻  Ringfahrt" if stops[0] == stops[-1] else f"{st[stops[0]]}  ⇄  {st[stops[-1]]}"
+        sub = MODE[kind][1]
+        if kind == "bbus":
+            sub += " · " + app.data["regions"][line["region"]]["name"]
+        return title, sub
+
+    def draw(self, c, w, h):
+        app, s = self.app, self.app.s
+        hh = HEADER_H * s
+        fx1, fx2 = 30 * s, w - 30 * s
+        fy1 = hh + 22 * s
+        fy2 = fy1 + 72 * s
+        top = fy2 + 22 * s
+        row_h = self.ROW_H * s
+        view_h = h - top
+        max_scroll = max(0, len(self.results) * row_h + 20 * s - view_h)
+        y_sel = self.selected * row_h                                   # Auswahl im Bild halten
+        if y_sel < self.scroll:
+            self.scroll = y_sel
+        elif y_sel + row_h > self.scroll + view_h:
+            self.scroll = y_sel + row_h - view_h
+        self.scroll = max(0.0, min(max_scroll, self.scroll))
+
+        # Trefferliste
+        title_font, sub_font, badge_font = app.font(21, "bold"), app.font(15), app.font(24, "bold")
+        self.rows = []
+        for n, res in enumerate(self.results):
+            y1 = top + n * row_h - self.scroll
+            if y1 + row_h < top or y1 > h:
+                continue
+            y2 = y1 + row_h - 8 * s
+            sel = n == self.selected
+            round_rect(c, fx1, y1, fx2, y2, 18 * s, fill=HIGHLIGHT if sel else CARD,
+                       outline=SEARCH_COLOR if sel else "#EEE6D2", width=(5 if sel else 2) * s)
+            cy = (y1 + y2) / 2
+            if res[0] == "halt":
+                r = 20 * s
+                c.create_oval(fx1 + 40 * s - r, cy - r, fx1 + 40 * s + r, cy + r, fill="#F7D117", outline="#2F8F4E",
+                              width=3 * s)
+                c.create_text(fx1 + 40 * s, cy, text="H", font=app.font(20, "bold"), fill="#2F8F4E")
+                tx = fx1 + 80 * s
+            else:
+                kind, gi = res[1], res[2]
+                line = app.data["lines"][kind][gi]
+                draw_mode_sign(c, app, kind, fx1 + 40 * s, cy, 42 * s)
+                bw = draw_badge(c, fx1 + 76 * s, cy, line["name"], line["color"], kind, 44 * s, badge_font)
+                tx = fx1 + 76 * s + bw + 18 * s
+            title, sub = self.row_text(res)
+            c.create_text(tx, cy - 12 * s, text=fit_text(title_font, title, fx2 - tx - 20 * s), anchor="w",
+                          font=title_font, fill=TEXT)
+            c.create_text(tx, cy + 15 * s, text=fit_text(sub_font, sub, fx2 - tx - 20 * s), anchor="w", font=sub_font,
+                          fill=MUTED)
+            self.rows.append((n, fx1, max(y1, top), fx2, y2))
+            if y2 > top:
+                app.hit(fx1, max(y1, top), fx2, y2, lambda n=n: self.choose(n))
+        if self.query and not self.results:
+            c.create_text(w / 2, top + 60 * s, text="Nichts gefunden – versuch es mit weniger Buchstaben.",
+                          font=app.font(22), fill=MUTED)
+        if not self.query:
+            hint = app.font(19)
+            for k, ln in enumerate(("Tippe eine Liniennummer, z. B. 100, M10, U8, RE1, ICE 10 oder 873,",
+                                    "eine Haltestelle, z. B. Alexanderplatz oder Strausberg,",
+                                    "ein Flugziel wie Tokio oder eine Kreuzfahrt wie Fjorde.")):
+                c.create_text(w / 2, top + 50 * s + k * 34 * s, text=ln, font=hint, fill=MUTED)
+
+        # Kopf und Suchfeld zuletzt, damit die Liste darunter verschwindet
+        c.create_rectangle(0, hh, w, top - 4 * s, fill=BG, outline="")
+        hh, left = header(app, c, w, SEARCH_COLOR, self.back)
+        draw_magnifier(c, left + 55 * s, hh / 2, 50 * s, "white", max(2, 5 * s))
+        c.create_text(left + 100 * s, hh / 2, text="Suchen: Linie oder Haltestelle", anchor="w",
+                      font=app.font(30, "bold"), fill="white")
+        self.draw_field(c, fx1, fy1, fx2, fy2)
+
+    def draw_field(self, c, fx1, fy1, fx2, fy2):
+        """Suchfeld mit Text und blinkender Schreibmarke."""
+        app, s = self.app, self.app.s
+        round_rect(c, fx1, fy1, fx2, fy2, 36 * s, fill="white", outline=SEARCH_COLOR, width=4 * s)
+        draw_magnifier(c, fx1 + 40 * s, (fy1 + fy2) / 2, 34 * s, SEARCH_COLOR, max(2, 4 * s))
+        f = app.font(30, "bold")
+        tx = fx1 + 75 * s
+        count = f"{len(self.results)}{'+' if len(self.results) >= SEARCH_MAX else ''} Treffer" if self.query else ""
+        cf = app.font(16)
+        right = fx2 - 30 * s - (cf.measure(count) + 20 * s if count else 0)
+        if self.query:
+            text = self.query
+            while text and f.measure(text) > right - tx:
+                text = text[1:]
+            c.create_text(tx, (fy1 + fy2) / 2, text=text, anchor="w", font=f, fill=TEXT)
+            cx = tx + f.measure(text) + 3 * s
+        else:
+            c.create_text(tx, (fy1 + fy2) / 2, text="Linie oder Haltestelle …", anchor="w", font=f, fill="#B8B2A6")
+            cx = tx
+        if int(time.monotonic() * 2) % 2 == 0:
+            c.create_line(cx, fy1 + 18 * s, cx, fy2 - 18 * s, fill=SEARCH_COLOR, width=max(2, 3 * s))
+        if count:
+            c.create_text(fx2 - 30 * s, (fy1 + fy2) / 2, text=count, anchor="e", font=cf, fill=MUTED)
+
+    def tick(self):
+        return True                                                   # Schreibmarke blinkt
+
+    def choose(self, n):
+        if not 0 <= n < len(self.results):
+            return
+        self.selected = n
+        res = self.results[n]
+        app = self.app
+        if res[0] == "linie":
+            open_line(app, res[1], res[2], self)
+            return
+        options = app.transfers.options(res[1])
+        if options:
+            app.show(ChangeScreen(app, f"{res[2]}: Womit fährst du los?", options, lambda: app.show(self),
+                                  "Los geht's mit {}!"))
+
+    def back(self):
+        modes = [m[0] for m in MODES]
+        self.app.show(HomeScreen(self.app, HomeScreen.SEARCH))
+
+    def key(self, k, char):
+        n = len(self.results)
+        if k == "BackSpace":
+            self.set_query(self.query[:-1])
+        elif k == "Escape":
+            self.back()
+            return
+        elif k == "Down":
+            self.selected = min(n - 1, self.selected + 1) if n else 0
+        elif k == "Up":
+            self.selected = max(0, self.selected - 1)
+        elif k == "Next":
+            self.selected = min(n - 1, self.selected + 6) if n else 0
+        elif k == "Prior":
+            self.selected = max(0, self.selected - 6)
+        elif k in ("Return", "KP_Enter"):
+            self.choose(self.selected)
+            return
+        elif char and char.isprintable() and len(self.query) < 40:
+            self.set_query(self.query + char)
+        else:
+            return
+        self.app.redraw()
+
+    def wheel(self, delta):
+        self.scroll -= delta
+        self.app.redraw()
+
+    def motion(self, x, y):
+        for n, x1, y1, x2, y2 in self.rows:
+            if x1 <= x <= x2 and y1 <= y <= y2 and n != self.selected:
+                self.selected = n
+                self.app.redraw()
 
 
 # --------------------------------------------------------------------------

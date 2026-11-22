@@ -51,7 +51,7 @@ python3 tools/build_web.py
 
 | Bildschirm | Bedienung |
 |---|---|
-| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Bus Brandenburg, Regionalbahn, ICE, Fähre, Flugzeug oder Kreuzfahrt, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–9 und 0 gehen auch) |
+| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Bus Brandenburg, Regionalbahn, ICE, Fähre, Flugzeug oder Kreuzfahrt, darunter „Starte in …“ und „Suchen“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–9 und 0 gehen auch). Einfach einen Buchstaben tippen öffnet die Suche |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
 | **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht, `Ö`: Türen auf und zu (Blick in den Innenraum), an der Endhaltestelle `B`: Betriebshof (Bus, Tram) bzw. Bootshaus (Fähre) oder `A`: Abstellgleis (Bahnen), dort `W`: Waschanlage, `E`: Linie endet hier |
 
@@ -433,6 +433,30 @@ umsteigen, und im Hafen Hamburg geht es mit `U` zurück in den ICE.
 
 Die Reisen sind Beispiele nach typischen Routen der Schiffe, die in
 Deutschland ablegen, kein Fahrplan einer bestimmten Reederei.
+
+## Suchen
+
+Bei über 1000 Linien hilft die Suche: im Hauptmenü der blaue Knopf
+**„Suchen“** neben „Starte in …“. Man kann auch einfach lostippen: Jeder
+Buchstabe öffnet die Suche (Ziffern wählen im Hauptmenü weiterhin das
+Verkehrsmittel).
+
+Gefunden wird gleichzeitig:
+- **Linien** nach ihrer Nummer, z. B. `100`, `M10`, `U8`, `RE1`, `ICE 10`,
+  `F10` oder `873`. Genaue Treffer kommen zuerst, dann alle, die so anfangen.
+- **Haltestellen**, z. B. `Alexanderplatz`, `Wannsee` oder `Strausberg`.
+  Große Umsteigebahnhöfe (viele Linien) stehen oben. Wählt man eine
+  Haltestelle, erscheinen alle Linien dort, wie beim Startbahnhof.
+- **Flugziele und Kreuzfahrten**, z. B. `Tokio`, `Fjorde` oder `Bergen`.
+
+Groß- und Kleinschreibung, Leerzeichen, Bindestriche und Umlaute spielen
+keine Rolle („fahre“ findet auch „Fähre“, „ice10“ auch „ICE 10“). Bei
+Brandenburger Bussen steht der Landkreis dabei, denn dieselbe Nummer gibt es
+oft mehrmals. Mit ↑/↓ und Enter wählt man aus, `Esc` führt zurück. Aus einer
+Linie geht es mit „Zurück“ wieder zur Trefferliste.
+
+In der Browser-Version ist das Suchfeld ein echtes Eingabefeld, damit am
+Tablet und Handy die Bildschirmtastatur erscheint.
 
 ## Startbahnhof
 
