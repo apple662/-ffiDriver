@@ -44,7 +44,7 @@ OPERATORS = {"1", "796"}
 # Die U4 fehlt seit Februar 2026 im VBB-Datensatz, die Saison-Fähre F24 (nur April bis Oktober) seit Oktober 2025.
 KEEP_LINES = ["U4", "F24"]
 MAX_LOOKBACK = 12   # so viele ältere Versionen werden höchstens durchsucht
-PRODUCTS = ("sbahn", "ubahn", "tram", "bus", "regio", "ice", "faehre")
+PRODUCTS = ("sbahn", "ubahn", "tram", "bus", "regio", "ice", "faehre", "bbus")
 # ICE-Linien stehen nicht im VBB-Fahrplan; sie kommen aus dieser Datei (von Hand gepflegt)
 ICE_FILE = ROOT / "data" / "ice_lines.json"
 # Neue Linien, die im VBB-Datensatz noch fehlen (z. B. die S15), von Hand gepflegt
@@ -53,6 +53,32 @@ ICE_COLOR = "#EC0016"   # DB-Rot
 # Regionalzüge kommen von vielen Betreibern (DB Regio, ODEG, NEB …); genommen werden alle,
 # die mindestens einmal in Berlin halten (Haltestellen-IDs „de:11000:…“).
 BERLIN_PREFIX = "de:11000:"
+
+# Busse in Brandenburg („bbus“): alle Buslinien der übrigen Betreiber, die in Brandenburg halten. Sie werden
+# nach Landkreisen bzw. kreisfreien Städten eingeteilt (Gemeindeschlüssel in den Haltestellen-IDs „de:120xx:…“).
+# Schlüssel -> (Kfz-Kennzeichen, Name, Farbe der Linienschilder)
+REGIONS = {
+    "12051": ("BRB", "Brandenburg an der Havel", "#1F6FA8"),
+    "12052": ("CB", "Cottbus", "#C8102E"),
+    "12053": ("FF", "Frankfurt (Oder)", "#7A3E9D"),
+    "12054": ("P", "Potsdam", "#E07A2C"),
+    "12060": ("BAR", "Barnim", "#2E8B57"),
+    "12061": ("LDS", "Dahme-Spreewald", "#0B7FA3"),
+    "12062": ("EE", "Elbe-Elster", "#9C6B30"),
+    "12063": ("HVL", "Havelland", "#3E7CB1"),
+    "12064": ("MOL", "Märkisch-Oderland", "#B5432F"),
+    "12065": ("OHV", "Oberhavel", "#1D8A7A"),
+    "12066": ("OSL", "Oberspreewald-Lausitz", "#6B5A9E"),
+    "12067": ("LOS", "Oder-Spree", "#C0392B"),
+    "12068": ("OPR", "Ostprignitz-Ruppin", "#4F7F45"),
+    "12069": ("PM", "Potsdam-Mittelmark", "#D35400"),
+    "12070": ("PR", "Prignitz", "#5D6D7E"),
+    "12071": ("SPN", "Spree-Neiße", "#16A085"),
+    "12072": ("TF", "Teltow-Fläming", "#8E44AD"),
+    "12073": ("UM", "Uckermark", "#2C5AA0"),
+}
+REGION_ID = re.compile(r"de:(12\d{3}):")
+RAIL_NAME = re.compile(r"^(S|U|RE|RB|FEX|ICE|IC)\d")
 
 # GTFS route_type (VBB nutzt die erweiterten Typen) -> Verkehrsmittel
 ROUTE_TYPES = {
@@ -77,7 +103,7 @@ LINE_COLORS = {
     "S75": "#816DA6", "S8": "#66AA22", "S85": "#66AA22", "S9": "#992746",
 }
 DEFAULT_COLORS = {"sbahn": "#008D4F", "ubahn": "#115D91", "tram": "#CC0A22", "bus": "#A5027D",
-                  "regio": "#E2001A", "ice": "#EC0016", "faehre": "#0080BA"}
+                  "regio": "#E2001A", "ice": "#EC0016", "faehre": "#0080BA", "bbus": "#C8102E"}
 
 STATION_ID = re.compile(r"900\d{6}")
 
@@ -127,11 +153,14 @@ def parse_npm_lines(raw):
             continue
         line = json.loads(row)
         product = NPM_PRODUCTS.get(line["product"])
-        if not product or (line["operator"] not in OPERATORS and product != "regio"):
+        if product == "bus" and line["operator"] not in OPERATORS:
+            product = "bbus"                     # Bus eines anderen Betreibers: Bus in Brandenburg
+        if not product or (line["operator"] not in OPERATORS and product not in ("regio", "bbus")):
             continue
         lines.append({
             "name": line["name"],
             "product": product,
+            "operator": line["operator"] if product == "bbus" else "",
             "variants": [(v["stops"], v["trips"]) for v in line["variants"]],
         })
     return lines
@@ -197,8 +226,10 @@ def load_gtfs(path):
         routes = {}
         for r in table("routes.txt"):
             product = ROUTE_TYPES.get(r["route_type"])
-            if product and (r.get("agency_id") in OPERATORS or product == "regio"):
-                routes[r["route_id"]] = (r["route_short_name"], product)
+            if product == "bus" and r.get("agency_id") not in OPERATORS:
+                product = "bbus"
+            if product and (r.get("agency_id") in OPERATORS or product in ("regio", "bbus")):
+                routes[r["route_id"]] = (r["route_short_name"], product, r.get("agency_id", ""))
 
         names, coords = {}, {}
         for s in table("stops.txt"):
@@ -223,10 +254,11 @@ def load_gtfs(path):
 
     lines = []
     for route_id, counter in variants.items():
-        name, product = routes[route_id]
+        name, product, agency = routes[route_id]
         lines.append({
             "name": name,
             "product": product,
+            "operator": agency if product == "bbus" else "",
             "variants": [(list(stops), n) for stops, n in counter.items()],
         })
     return lines, names, coords, f"VBB-GTFS ({Path(path).name})"
@@ -358,22 +390,37 @@ def build(lines, raw_names, raw_coords, source):
         if "::" not in key or k not in coords:
             coords[k] = [round(pos[0], 5), round(pos[1], 5)]
 
-    # Linien gleichen Namens (z. B. mehrere S1-Einträge) zusammenführen
+    # Linien gleichen Namens (z. B. mehrere S1-Einträge) zusammenführen; in Brandenburg gibt es dieselbe
+    # Liniennummer oft in mehreren Landkreisen, dort zählt deshalb auch der Betreiber
     grouped = collections.defaultdict(list)
     for line in lines:
         if not line["name"]:
             continue
-        grouped[(line["product"], line["name"])].extend(line["variants"])
+        grouped[(line["product"], line["name"], line.get("operator", ""))].extend(line["variants"])
 
-    rail_names = {name for (product, name) in grouped if product != "bus"}
+    rail_names = {name for (product, name, _) in grouped if product not in ("bus", "bbus")}
 
     stations = {}
     berlin = set()      # Stationen in Berlin
     result = {p: [] for p in PRODUCTS}
-    for (product, name), variants in grouped.items():
+    for (product, name, _), variants in grouped.items():
         # Ersatzverkehr (Bus "S41", Bus "M10" ...) überspringen
         if product == "bus" and (name in rail_names or name[0] in "SU"):
             continue
+        if product == "bbus" and (name in rail_names or RAIL_NAME.match(name) or "SEV" in name.upper()):
+            continue
+        region = None
+        if product == "bbus":
+            # Landkreis bzw. kreisfreie Stadt mit den meisten Halten (gewichtet mit der Zahl der Fahrten)
+            counts = collections.Counter()
+            for stops, trips in variants:
+                for stop in stops:
+                    m = REGION_ID.search(stop)
+                    if m and m.group(1) in REGIONS:
+                        counts[m.group(1)] += trips
+            if not counts:
+                continue                        # fährt gar nicht in Brandenburg
+            region = counts.most_common(1)[0][0]
         if product == "ubahn" and not name.startswith("U"):
             continue
         if product == "sbahn" and not name.startswith("S"):
@@ -403,11 +450,14 @@ def build(lines, raw_names, raw_coords, source):
         # Regionalzüge nur, wenn ihre Hauptstrecke durch Berlin führt
         if product == "regio" and not any(k in berlin for d in directions for k in d):
             continue
-        result[product].append({
+        entry = {
             "name": name,
-            "color": LINE_COLORS.get(name, DEFAULT_COLORS[product]),
+            "color": REGIONS[region][2] if region else LINE_COLORS.get(name, DEFAULT_COLORS[product]),
             "directions": directions,
-        })
+        }
+        if region:
+            entry["region"] = region
+        result[product].append(entry)
 
     extra = add_extra_lines(result, stations)
     add_ice_lines(result, stations, coords)
@@ -421,6 +471,7 @@ def build(lines, raw_names, raw_coords, source):
         + (f" + {', '.join(extra)} von Hand (data/extra_lines.json)" if extra else ""),
         "license": "Fahrplandaten: VBB Verkehrsverbund Berlin-Brandenburg GmbH, CC BY 4.0",
         "created": date.today().isoformat(),
+        "regions": {k: {"short": v[0], "name": v[1], "color": v[2]} for k, v in REGIONS.items()},
         "stations": {k: v for k, v in sorted(stations.items()) if k in used},
         "coords": {k: v for k, v in sorted(coords.items()) if k in used},
         "lines": result,

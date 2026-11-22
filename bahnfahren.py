@@ -56,6 +56,7 @@ MODES = [
     ("ubahn", "U-Bahn", "#115D91", ("#F7D117", "#3A3A3A")),
     ("tram", "Straßenbahn", "#CC0A22", ("#F7D117", "#FFFFFF")),
     ("bus", "Bus", "#A5027D", ("#F7D117", "#3A3A3A")),
+    ("bbus", "Bus Brandenburg", "#C8102E", ("#F4F4F4", "#C8102E")),     # weiß-rot wie die Landesfarben
     ("regio", "Regionalbahn", "#4B5563", ("#D7001D", "#FFFFFF")),
     ("ice", "ICE", "#EC0016", ("#F4F4F4", "#EC0016")),
     ("faehre", "Fähre", "#0080BA", ("#F7D117", "#FFFFFF")),     # gelber Rumpf, weißer Aufbau
@@ -123,6 +124,8 @@ def draw_vehicle(c, kind, cx, cy, length, flip=False):
         c.create_line([v for p in pts for v in p], fill="#BFE2F7", width=max(1, length / 110))
         return
     body, accent = MODE[kind][3]
+    if kind == "bbus":
+        kind = "bus"            # gleiche Bauform wie der Berliner Bus, nur andere Farben
     mx = -1 if flip else 1
 
     def T(pts):
@@ -247,6 +250,12 @@ def draw_mode_sign(c, app, kind, cx, cy, size):
     elif kind == "flug":
         round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
         c.create_polygon(plane_top_points(cx, cy, size * 0.78, math.pi / 4), fill="white", outline="")
+    elif kind == "bbus":
+        # rotes Schild mit „Bus“ und darunter „BB“ für Brandenburg
+        round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
+        c.create_text(cx, cy - r * 0.22, text="Bus", fill="white", font=app.font(size / app.s * 0.34, "bold"))
+        round_rect(c, cx - r * 0.62, cy + r * 0.22, cx + r * 0.62, cy + r * 0.72, size * 0.06, fill="white", outline="")
+        c.create_text(cx, cy + r * 0.47, text="BB", fill=color, font=app.font(size / app.s * 0.2, "bold"))
     elif kind == "schiff":
         round_rect(c, cx - r, cy - r, cx + r, cy + r, size * 0.22, fill=color, outline="")
         draw_anchor(c, cx, cy, r, "white", max(2, size * 0.07))
@@ -274,7 +283,7 @@ def draw_mode_sign(c, app, kind, cx, cy, size):
 def draw_badge(c, x, y, name, color, kind, h, font, border=0):
     """Linienschild wie an der Haltestelle. Gibt die Breite zurück."""
     w = max(h * 1.6, font.measure(name) + h * 0.6)
-    r = {"sbahn": h / 2, "tram": h / 2, "bus": h * 0.3, "faehre": h * 0.3, "schiff": h * 0.3}.get(kind, h * 0.12)
+    r = {"sbahn": h / 2, "tram": h / 2, "bus": h * 0.3, "faehre": h * 0.3, "schiff": h * 0.3, "bbus": h * 0.3}.get(kind, h * 0.12)
     if border:
         round_rect(c, x - border, y - h / 2 - border, x + w + border, y + h / 2 + border, r + border,
                    fill="white", outline="")
@@ -419,10 +428,11 @@ class SoundPlayer:
 # Umsteigen
 # --------------------------------------------------------------------------
 
-MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "flug", "schiff", "tram", "bus", "faehre"]     # Reihenfolge beim Umsteigen
+MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "flug", "schiff", "tram", "bus", "bbus", "faehre"]     # Reihenfolge beim Umsteigen
 # Bei „Umsteigen getrennt“ sieht man nur Umstiege innerhalb der eigenen Gruppe.
 # Die Fähre gehört zu beiden: Man kommt mit der S-Bahn (z. B. Wannsee) genauso hin wie mit Bus und Tram.
-MODE_GROUPS = [("sbahn", "ubahn", "regio", "ice", "flug", "schiff", "faehre"), ("tram", "bus", "faehre")]
+# Der Bus in Brandenburg gehört auch zu beiden: Am Bahnhof in Brandenburg steigt man vom Regionalzug in den Bus.
+MODE_GROUPS = [("sbahn", "ubahn", "regio", "ice", "flug", "schiff", "faehre", "bbus"), ("tram", "bus", "faehre", "bbus")]
 NEAR_M = 200          # Haltestellen in diesem Umkreis gehören zusammen
 SAME_NAME_M = 400     # gleichnamige Stationen (z. B. "S+U" und "U Alexanderplatz") auch etwas weiter
 
@@ -783,7 +793,7 @@ class HomeScreen(Screen):
         app.hit(bx1, by1, bx2, by2, self.start)
 
         # Ankreuzfelder für Eltern
-        checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug, Schiff / Tram, Bus (Fähre bei beiden)",
+        checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug, Schiff / Tram, Bus (Fähre, Bus Brandenburg bei beiden)",
                  app.separate_modes(), lambda: self.toggle("separate_modes", app.separate_modes()))
         checkbox(app, c, 24 * s, h - 22 * s, "Zeige ICE-Umstiege", app.show_ice(),
                  lambda: self.toggle("show_ice", app.show_ice()))
@@ -799,7 +809,8 @@ class HomeScreen(Screen):
 
     def open(self, i):
         self.selected = i
-        self.app.show(LinesScreen(self.app, MODES[i][0]))
+        kind = MODES[i][0]
+        self.app.show(RegionScreen(self.app) if kind == "bbus" else LinesScreen(self.app, kind))
 
     def start(self):
         """Am Startbahnhof losfahren – dieselbe Auswahl wie beim Umsteigen."""
@@ -860,8 +871,8 @@ class HomeScreen(Screen):
         elif k == PARENT_KEY:
             self.reset_home()
             return
-        elif char and char in "123456789"[:len(MODES)]:
-            self.open(int(char) - 1)
+        elif char and char in "1234567890"[:len(MODES)]:
+            self.open("1234567890".index(char))
             return
         if self.selected < self.START:
             self.last_tile = self.selected
@@ -891,11 +902,21 @@ def header(app, c, w, color, back):
 
 
 class LinesScreen(Screen):
-    def __init__(self, app, kind, selected=0):
+    def __init__(self, app, kind, selected=0, region=None):
+        """``selected``: Nummer der Linie in data["lines"][kind]. Beim Bus in Brandenburg zeigt die Liste nur
+        die Linien eines Landkreises (``region``, sonst der Landkreis der gewählten Linie)."""
         super().__init__(app)
         self.kind = kind
-        self.lines = app.data["lines"][kind]
-        self.selected = min(selected, len(self.lines) - 1)
+        all_lines = app.data["lines"].get(kind, [])
+        if kind == "bbus":
+            if region is None and 0 <= selected < len(all_lines):
+                region = all_lines[selected].get("region")
+            self.indices = [i for i, line in enumerate(all_lines) if line.get("region") == region]
+        else:
+            self.indices = list(range(len(all_lines)))
+        self.region = region
+        self.lines = [all_lines[i] for i in self.indices]
+        self.selected = self.indices.index(selected) if selected in self.indices else 0
         self.scroll = 0.0
         self.scroll_target = None
         self.cards = []
@@ -951,9 +972,39 @@ class LinesScreen(Screen):
             bw = draw_badge(c, x1 + 22 * s, (y1 + y2) / 2, line["name"], line["color"], kind, 64 * s, badge_font)
             tx = x1 + 22 * s + bw + 22 * s
             tw = x2 - tx - 18 * s
-            first, last = line["directions"][0][0], line["directions"][0][-1]
-            if kind == "schiff":
-                cr = app.data["cruises"]["cruises"][i]
+            self.card_text(c, i, line, tx, tw, y1, name_font, small_font)
+            self.cards.append((i, x1, max(y1, top), x2, y2))
+            if y2 > top:
+                app.hit(x1, max(y1, top), x2, y2, lambda i=i: self.open(i))
+
+        # Kopfbereich zuletzt, damit er über den gescrollten Karten liegt
+        c.create_rectangle(0, hh, w, top - 4 * s, fill=BG, outline="")
+        hh, left = header(app, c, w, color, self.back)
+        draw_mode_sign(c, app, kind, left + 60 * s, hh / 2, 62 * s)
+        tf = app.font(30, "bold")
+        c.create_text(left + 105 * s, hh / 2, text=fit_text(tf, self.title_text(), w - left - 125 * s), anchor="w",
+                      font=tf, fill="white")
+        if max_scroll > 0:
+            bar_h = max(40 * s, view_h * view_h / content_h)
+            bar_y = top + (view_h - bar_h) * (self.scroll / max_scroll)
+            round_rect(c, w - 12 * s, bar_y, w - 4 * s, bar_y + bar_h, 4 * s, fill="#D8CFB8", outline="")
+
+    def title_text(self):
+        label = MODE[self.kind][1]
+        if self.kind == "bbus" and self.region:
+            label = self.app.data["regions"][self.region]["name"]
+        question = {"flug": "Wohin fliegst du?", "schiff": "Welche Reise machst du?"}.get(self.kind,
+                                                                                         "Welche Linie nimmst du?")
+        return f"{label}: {question}"
+
+    def card_text(self, c, i, line, tx, tw, y1, name_font, small_font):
+        """Text auf der Karte neben dem Linienschild."""
+        app, s = self.app, self.app.s
+        stations = app.data["stations"]
+        first, last = line["directions"][0][0], line["directions"][0][-1]
+        if True:
+            if self.kind == "schiff":
+                cr = app.data["cruises"]["cruises"][self.indices[i]]
                 pn = [app.data["cruises"]["ports"][p]["name"] for p in cr["ports"]]
                 via = ("↻  " + ", ".join(pn[1:-1])) if pn[0] == pn[-1] else "→  " + ", ".join(pn[1:])
                 c.create_text(tx, y1 + 40 * s, text=fit_text(name_font, cr["title"], tw), anchor="w",
@@ -972,21 +1023,6 @@ class LinesScreen(Screen):
                 c.create_text(tx, y1 + 65 * s, text="⇅", anchor="w", font=small_font, fill=MUTED)
                 c.create_text(tx, y1 + 90 * s, text=fit_text(name_font, stations[last], tw), anchor="w",
                               font=name_font, fill=TEXT)
-            self.cards.append((i, x1, max(y1, top), x2, y2))
-            if y2 > top:
-                app.hit(x1, max(y1, top), x2, y2, lambda i=i: self.open(i))
-
-        # Kopfbereich zuletzt, damit er über den gescrollten Karten liegt
-        c.create_rectangle(0, hh, w, top - 4 * s, fill=BG, outline="")
-        hh, left = header(app, c, w, color, self.back)
-        draw_mode_sign(c, app, kind, left + 60 * s, hh / 2, 62 * s)
-        question = {"flug": "Wohin fliegst du?", "schiff": "Welche Reise machst du?"}.get(kind, "Welche Linie nimmst du?")
-        c.create_text(left + 105 * s, hh / 2, text=f"{label}: {question}", anchor="w",
-                      font=app.font(30, "bold"), fill="white")
-        if max_scroll > 0:
-            bar_h = max(40 * s, view_h * view_h / content_h)
-            bar_y = top + (view_h - bar_h) * (self.scroll / max_scroll)
-            round_rect(c, w - 12 * s, bar_y, w - 4 * s, bar_y + bar_h, 4 * s, fill="#D8CFB8", outline="")
 
     def scroll_to(self, y):
         self.scroll_target = y
@@ -1004,17 +1040,21 @@ class LinesScreen(Screen):
         return True
 
     def back(self):
+        if self.kind == "bbus":
+            self.app.show(RegionScreen(self.app, self.region))
+            return
         modes = [m[0] for m in MODES]
         self.app.show(HomeScreen(self.app, modes.index(self.kind)))
 
     def open(self, i):
         self.selected = i
+        gi = self.indices[i]
         if self.kind == "flug":
-            self.app.show(FlightScreen(self.app, i, 0, self))
+            self.app.show(FlightScreen(self.app, gi, 0, self))
         elif self.kind == "schiff":
-            self.app.show(CruiseScreen(self.app, i, 0, self))
+            self.app.show(CruiseScreen(self.app, gi, 0, self))
         else:
-            self.app.show(RideScreen(self.app, self.kind, i, self))
+            self.app.show(RideScreen(self.app, self.kind, gi, self))
 
     def key(self, k, char):
         n = len(self.lines)
@@ -1064,10 +1104,54 @@ class LinesScreen(Screen):
                 self.app.redraw()
 
 
+class RegionScreen(LinesScreen):
+    """Bus in Brandenburg: erst den Landkreis bzw. die kreisfreie Stadt wählen (mit Autokennzeichen)."""
+
+    def __init__(self, app, selected=None):
+        Screen.__init__(self, app)
+        self.kind = "bbus"
+        self.region = None
+        counts = {}
+        for line in app.data["lines"].get("bbus", []):
+            counts[line["region"]] = counts.get(line["region"], 0) + 1
+        regions = app.data.get("regions", {})
+        codes = sorted(counts, key=lambda k: regions[k]["name"])
+        self.lines = [{"name": regions[k]["short"], "color": regions[k]["color"], "code": k,
+                       "title": regions[k]["name"], "count": counts[k]} for k in codes]
+        self.indices = list(range(len(self.lines)))
+        self.selected = codes.index(selected) if selected in codes else 0
+        self.scroll = 0.0
+        self.scroll_target = None
+        self.cards = []
+        self.cols = 1
+        self.typed = ""
+        self.typed_at = 0.0
+        self.follow = True
+
+    def title_text(self):
+        return "Bus Brandenburg: Wohin fährst du?"
+
+    def card_text(self, c, i, line, tx, tw, y1, name_font, small_font):
+        s = self.app.s
+        kreis = "Kreisfreie Stadt" if line["code"] < "12060" else "Landkreis"
+        c.create_text(tx, y1 + 40 * s, text=fit_text(name_font, line["title"], tw), anchor="w", font=name_font, fill=TEXT)
+        c.create_text(tx, y1 + 66 * s, text=fit_text(small_font, kreis, tw), anchor="w", font=small_font, fill=MUTED)
+        c.create_text(tx, y1 + 92 * s, text=fit_text(small_font, f"{line['count']} Buslinien", tw), anchor="w",
+                      font=small_font, fill=TEXT)
+
+    def back(self):
+        modes = [m[0] for m in MODES]
+        self.app.show(HomeScreen(self.app, modes.index("bbus")))
+
+    def open(self, i):
+        self.selected = i
+        self.app.show(LinesScreen(self.app, "bbus", region=self.lines[i]["code"], selected=-1))
+
+
 def depot_info(kind):
     """(Name, Taste, „wohin“) – Bus und Tram fahren auf den Betriebshof, Bahnen aufs Abstellgleis,
     die Fähre ins Bootshaus."""
-    if kind in ("bus", "tram"):
+    if kind in ("bus", "tram", "bbus"):
         return "Betriebshof", "B", "auf den Betriebshof"
     if kind == "faehre":
         return "Bootshaus", "B", "ins Bootshaus"
@@ -1596,9 +1680,10 @@ class RideScreen(Screen):
                   "regio": "Bitte einsteigen. Vorsicht bei der Abfahrt!",
                   "ice": "Bitte einsteigen. Vorsicht bei der Abfahrt!",
                   "faehre": "Alle an Bord? Leinen los!"}.get(self.kind)
-        self.app.sound.play(SOUND_DIR / f"{self.kind}.wav", speech)
+        self.app.sound.play(SOUND_DIR / f"{SOUND_OF.get(self.kind, self.kind)}.wav", speech)
         # Beim Bus zischt die Druckluft, wenn die Türen aufgehen; die Fähre tutet mit dem Schiffshorn
-        self.say({"bus": "Pssscht – Türen auf!", "faehre": "Tuuut! Leinen los!"}.get(self.kind, "Türen schließen!"), 2.5)
+        self.say({"bus": "Pssscht – Türen auf!", "bbus": "Pssscht – Türen auf!",
+                  "faehre": "Tuuut! Leinen los!"}.get(self.kind, "Türen schließen!"), 2.5)
         self.app.animate()
 
     def announce(self):
@@ -1614,7 +1699,7 @@ class RideScreen(Screen):
         text = spoken_name(name) + "."
         others = self.transfer_options()
         if others:
-            prefix = {"tram": "Tram ", "bus": "Bus ", "flug": "Flug nach ", "faehre": "Fähre ", "schiff": "Kreuzfahrt "}
+            prefix = {"tram": "Tram ", "bus": "Bus ", "flug": "Flug nach ", "faehre": "Fähre ", "schiff": "Kreuzfahrt ", "bbus": "Bus "}
             names = [prefix.get(o["kind"], "") + spoken_line(o["name"]) for o in others[:8]]
             text += " Umsteigen zu " + ", ".join(names) + (" und weiteren Linien." if len(others) > 8 else ".")
         if self.index == len(stops) - 1 and not self.ring:
@@ -1678,7 +1763,7 @@ class RideScreen(Screen):
             self.say("Erst anhalten – dann Türen auf!", 2)
         else:
             self.door = Doors(self)
-            if self.kind == "bus":
+            if self.kind in ("bus", "bbus"):
                 app.sound.play(SOUND_DIR / "bus.wav")
             self.say("Türen auf – bitte ein- und aussteigen!", 2.5)
         app.redraw()
@@ -1765,9 +1850,10 @@ class RideScreen(Screen):
 SEG = 60.0              # so viele Meter liegen in der Szene zwischen zwei Stationen
 CAM_H = 2.4             # Augenhöhe des Fahrers über den Schienen bzw. der Straße
 Z_NEAR, Z_FAR = 1.2, 140.0
-VMAX = {"sbahn": 100, "ubahn": 70, "tram": 60, "bus": 50, "regio": 160, "ice": 300, "faehre": 25}   # km/h am Tacho
+VMAX = {"sbahn": 100, "ubahn": 70, "tram": 60, "bus": 50, "regio": 160, "ice": 300, "faehre": 25, "bbus": 80}   # km/h am Tacho
 COCKPIT_SPEED = 0.7     # höchstes Tempo in Stationen pro Sekunde – ca. 1,5 s von Station zu Station
 LED = "#FFA31A"         # Farbe der Leuchtschrift
+SOUND_OF = {"bbus": "bus"}  # Verkehrsmittel ohne eigenen Türton
 
 
 def rnd(i, salt=0):
@@ -1810,7 +1896,7 @@ def station_level(kind, line_name, names, i):
     """'tunnel', 'ground' oder 'elevated' für Bahnhof ``i`` der Liste ``names``."""
     name = names[i]
     neighbors = {names[j] for j in (i - 1, i + 1) if 0 <= j < len(names)}
-    if kind in ("tram", "bus", "faehre"):
+    if kind in ("tram", "bus", "faehre", "bbus"):
         return "ground"
     if kind == "ubahn":
         if name in U_ELEVATED.get(line_name, ()):
@@ -1871,6 +1957,8 @@ def draw_scene(ride, c, app, x1, y1, x2, y2):
     """Die Strecke vor dem Fahrzeug. Alles hängt von ride.pos ab – so zieht die Landschaft beim Fahren vorbei."""
     if ride.kind == "faehre":
         return draw_water_scene(ride, c, app, x1, y1, x2, y2)
+    if ride.kind == "bbus":
+        return draw_country_scene(ride, c, app, x1, y1, x2, y2)
     if ride.kind not in ("tram", "bus"):
         return draw_rail_scene(ride, c, app, x1, y1, x2, y2)
     # ab hier Straßenbahn und Bus: Straße zwischen Häusern
@@ -2163,6 +2251,178 @@ def draw_boathouse(c, app, sc, z, color):
     for X in (-16, -10, 10, 16):                                           # Fenster
         sc.front(X - 1.6, X + 1.6, 3.0, 5.4, z, "#CFE8FF")
     station_sign(c, app, sc, -5.5, 5.5, 6.0, 7.6, z, "Bootshaus", color)
+
+
+FIELDS = ["#E8D44D", "#9CC17F", "#B39A6B", "#D9C27A", "#7FAE62", "#E8D44D"]   # Raps, Wiese, Acker, Weizen …
+
+
+def draw_country_scene(ride, c, app, x1, y1, x2, y2):
+    """Bus in Brandenburg: Landstraße mit Alleen, Feldern, Kiefernwald und Windrädern; an den Haltestellen
+    ein Dorf mit Häusern, manchmal einer Feldsteinkirche, und ein Wartehäuschen."""
+    s = app.s
+    st = app.data["stations"]
+    stops = ride.stops
+    cam = ride.pos * SEG
+    sc = Scene(c, x1, y1, x2, y2)
+    hy = sc.hy
+    W, H = x2 - x1, y2 - y1
+
+    # --- Himmel, Windräder und Wald am Horizont ---
+    sky = ["#6FB6EA", "#82C0EE", "#96CAF1", "#AAD4F4", "#BFDFF6", "#D4EAF9"]
+    band = (hy - y1) / len(sky)
+    for i, col in enumerate(sky):
+        c.create_rectangle(x1, y1 + i * band, x2, y1 + (i + 1) * band + 1, fill=col, outline="")
+    turn = time.monotonic() * 1.5
+    for k in range(6):
+        fx = (0.1 + 0.19 * k + 0.05 * rnd(k, 200) - cam * 0.0004) % 1.2 - 0.1
+        tx, th = x1 + fx * W, (0.1 + 0.05 * rnd(k, 201)) * H
+        c.create_line(tx, hy, tx, hy - th, fill="#E9ECEF", width=max(2, 3 * s))
+        for b in range(3):
+            a = turn * (0.8 + 0.4 * rnd(k, 202)) + b * 2 * math.pi / 3
+            c.create_line(tx, hy - th, tx + math.cos(a) * th * 0.45, hy - th + math.sin(a) * th * 0.45, fill="#F4F6F8",
+                          width=max(1, 3 * s), capstyle="round")
+        c.create_oval(tx - 3 * s, hy - th - 3 * s, tx + 3 * s, hy - th + 3 * s, fill="#C9CED6", outline="")
+    pts = [(x1, hy + 1)]
+    for k in range(41):                                          # Kiefernwald am Horizont
+        bx = x1 + W * k / 40
+        pts += [(bx, hy - (0.025 + 0.02 * rnd(k, 203)) * H), (bx + W / 80, hy - (0.012 + 0.01 * rnd(k, 204)) * H)]
+    pts.append((x2, hy + 1))
+    c.create_polygon([v for p in pts for v in p], fill="#3F5E3A", outline="")
+
+    # --- Boden: Felder links und rechts ---
+    c.create_rectangle(x1, hy, x2, y2, fill="#8DB86A", outline="")
+
+    def periodic(spacing, offset=0.0):
+        k = math.floor((cam + Z_NEAR - offset) / spacing)
+        while True:
+            z = k * spacing + offset - cam
+            if z > Z_FAR:
+                return
+            if z >= Z_NEAR - spacing:
+                yield k, z
+            k += 1
+
+    def block(z):
+        """Art des Abschnitts (alle 200 m): Allee, freies Feld oder Kiefernwald."""
+        r = rnd(math.floor((z + cam) / 200.0), 205)
+        return "allee" if r < 0.4 else "feld" if r < 0.75 else "wald"
+
+    for k, z in periodic(50.0):
+        for side, (xa, xb) in ((1, (3.4, 300)), (-1, (-300, -6.2))):
+            if block(z) == "wald":
+                col = "#5E7F45"
+            else:
+                col = FIELDS[int(rnd(k, 206 + side) * len(FIELDS))]
+            sc.ground(xa, xb, z, z + 50, col)
+    # --- Landstraße ---
+    sc.ground(-4.8, 2.0, Z_NEAR, Z_FAR, "#5C5E63")
+    for X in (-4.6, 1.8):
+        sc.ground(X - 0.06, X + 0.06, Z_NEAR, Z_FAR, "#E8E8E8", y=0.01)          # Randlinien
+    for k, z in periodic(12.0):
+        sc.ground(-1.47, -1.33, z, z + 6, "#F2F2F2", y=0.01)                     # Mittellinie
+
+    z_end = Z_FAR + 100
+    if ride.depot:
+        z_end = len(stops) * SEG - cam + 34
+        draw_depot_hall(c, app, sc, z_end, MODE["bbus"][2], "bbus")
+
+    items = []
+
+    def tree(z, X, k, big=True):
+        def fn():
+            sc.front(X - 0.22, X + 0.22, 0, 3.2, z, "#6B4A2E")
+            cx, cy = sc.p(X, 5.4 if big else 3.6, z)
+            r = sc.size((2.6 if big else 1.6) + 0.6 * rnd(k, 207), z)
+            c.create_oval(cx - r, cy - r, cx + r, cy + r, fill=["#4F8F3F", "#5E9C46", "#477F38"][k % 3], outline="")
+        items.append((z, fn))
+
+    def pine(z, X, k):
+        def fn():
+            sc.front(X - 0.15, X + 0.15, 0, 7.0, z, "#8C5A3C")
+            cx, cy = sc.p(X, 8.2, z)
+            r = sc.size(1.6 + 0.5 * rnd(k, 208), z)
+            c.create_oval(cx - r * 1.1, cy - r * 0.8, cx + r * 1.1, cy + r * 0.8, fill="#355E35", outline="")
+        items.append((z, fn))
+
+    for k, z in periodic(9.0, 2.0):
+        kind = block(z)
+        if kind == "allee":
+            tree(z, 3.3, k)
+            tree(z + 4.5, -6.1, k + 1)
+        elif kind == "feld" and rnd(k, 209) < 0.12:
+            tree(z, (1 if rnd(k, 210) < 0.5 else -1) * (14 + 30 * rnd(k, 211)), k, big=False)
+    for k, z in periodic(4.0, 1.0):
+        if block(z) == "wald":
+            for j in range(2):
+                pine(z + 2 * j, 5 + 25 * rnd(k * 2 + j, 212), k + j)
+                pine(z + 1 + 2 * j, -8 - 25 * rnd(k * 2 + j, 213), k + j + 1)
+    for k, z in periodic(50.0, 10.0):                                            # Leitpfosten
+        for X in (2.5, -5.3):
+            items.append((z, lambda z=z, X=X: (sc.front(X - 0.08, X + 0.08, 0, 1.0, z, "#F4F4F4"),
+                                               sc.front(X - 0.08, X + 0.08, 0.7, 0.85, z, "#1E1E1E"))))
+
+    # --- Dörfer an den Haltestellen ---
+    colors = ["#F2EEE6", "#E8C9A0", "#D9A68C", "#E6DDB8", "#C7D3DD"]
+    for i in range(math.floor(ride.pos) - 1, math.floor(ride.pos) + 3):
+        if not 0 <= i < len(stops):
+            continue
+        zs = i * SEG - cam
+        if zs + 50 < Z_NEAR or zs - 40 > Z_FAR:
+            continue
+        name = st[stops[i]]
+        # in der Stadt (kurze Fahrzeiten) eine ganze Häuserzeile, auf dem Land nur ein kleines Dorf
+        gaps = [ride.travel_time(i) if i + 1 < len(stops) else None, ride.travel_time(i - 1) if i > 0 else None]
+        town = all(g is not None and g < 3 for g in gaps)
+        for j in range(4 if town else 2):                        # Häuser mit Giebel zur Straße
+            for side in (1, -1):
+                hz = (zs - 24 if town else zs - 8) + j * 14 + 4 * rnd(i * 10 + j, 214 + side)
+                if rnd(i * 10 + j, 216 + side) < 0.35:
+                    continue
+                xa = 9.0 if side > 0 else -12.0
+                xb = xa + 7.0 * side
+                col = colors[int(rnd(i * 10 + j, 218 + side) * len(colors))]
+
+                def house(hz=hz, xa=xa, xb=xb, col=col):
+                    lo, hi = min(xa, xb), max(xa, xb)
+                    sc.wall(xa, 0, 3.2, hz, hz + 8, col)
+                    sc.wall(xa, 3.2, 3.7, hz, hz + 8, "#A8432F")            # Dachkante (das Dach liegt höher als das Auge)
+                    sc.front(lo, hi, 0, 3.2, hz, col)
+                    sc.poly([(lo, 3.2, hz), (hi, 3.2, hz), ((lo + hi) / 2, 6.0, hz)], "#B5432F")
+                    sc.front(lo + 1.2, lo + 2.4, 1.2, 2.4, hz - 0.01, "#7E97AD")
+                    sc.front(hi - 2.4, hi - 1.2, 1.2, 2.4, hz - 0.01, "#7E97AD")
+                items.append((hz, house))
+        if rnd(i, 220) < 0.45:                                   # Feldsteinkirche mit Turm
+            kz = zs + 34
+
+            def church(kz=kz):
+                sc.wall(-12.0, 0, 5.0, kz, kz + 14, "#A39A8C")
+                sc.front(-19.0, -12.0, 0, 5.0, kz, "#A39A8C")
+                sc.poly([(-19.0, 5.0, kz), (-12.0, 5.0, kz), (-15.5, 8.5, kz)], "#7A3E2E")
+                sc.front(-17.6, -13.4, 0, 12.0, kz - 0.5, "#9A9183")
+                sc.poly([(-17.8, 12.0, kz - 0.5), (-13.2, 12.0, kz - 0.5), (-15.5, 16.5, kz - 0.5)], "#5A4A3A")
+                sc.front(-16.0, -15.0, 8.0, 10.0, kz - 0.51, "#3A3A3A")
+            items.append((kz - 0.5, church))
+
+        def stop(zs=zs, name=name):
+            sc.ground(2.0, 3.6, zs - 12, zs + 18, "#5C5E63")                  # Busbucht
+            for wz in (zs + 3, zs + 8):                                       # Wartehäuschen aus Holz
+                sc.front(4.0, 4.2, 0, 2.6, wz, "#7A5230")
+                sc.front(6.6, 6.8, 0, 2.6, wz, "#7A5230")
+            sc.ground(3.8, 7.0, zs + 3, zs + 8, "#8C5A3C", y=2.6)
+            sc.wall(6.8, 0, 2.6, zs + 3, zs + 8, "#A47B52")
+            pole_z = zs + 12
+            sc.front(2.95, 3.05, 0, 3.6, pole_z, "#6F7378")
+            station_sign(c, app, sc, 3.1, 6.6, 2.0, 2.7, pole_z, name, MODE["bbus"][2])
+            if Z_NEAR < pole_z < Z_FAR:
+                hx, hy2 = sc.p(3.0, 3.6, pole_z)
+                r = sc.size(0.45, pole_z)
+                c.create_oval(hx - r, hy2 - r, hx + r, hy2 + r, fill="#F7D117", outline="#2F8F4E", width=max(1, r * 0.15))
+                if r > 5:
+                    c.create_text(hx, hy2, text="H", fill="#2F8F4E", font=app.font(r * 1.3 / s, "bold"))
+        items.append((zs + 18, stop))
+
+    for z, fn in sorted((it for it in items if it[0] < z_end), key=lambda it: -it[0]):
+        fn()
 
 
 def draw_rail_scene(ride, c, app, x1, y1, x2, y2):
@@ -2521,7 +2781,7 @@ def draw_wash(ride, c, app, x1, y1, x2, y2, t):
         sc.ground(-3.2, 3.2, k - cam, k - cam + 0.25, "#5FA3D0" if ferry else "#4C545C", y=0.01)
     for k in range(2, int(WASH_EXIT), 6):                           # Lampen an der Decke
         sc.ground(-0.6, 0.6, k - cam, k - cam + 1.5, "#E8F4FF", y=4.78)
-    if ride.kind not in ("bus", "faehre"):
+    if ride.kind not in ("bus", "faehre", "bbus"):
         for X in (-0.75, 0.75):
             sc.ground(X - 0.05, X + 0.05, za, zb, "#C8C8C8", y=0.06)
 
@@ -4859,6 +5119,7 @@ INTERIOR = {   # Wand, Sitze, Haltestangen, Türflügel
     "ubahn": ("#EFEAE0", "#2F5597", "#F7D117", "#F7D117"),
     "tram": ("#F2EEE6", "#C9302C", "#F7D117", "#D5D9DE"),
     "bus": ("#EEEEEE", "#2F4E8C", "#F7D117", "#D5D9DE"),
+    "bbus": ("#EEEEEE", "#8C1C2C", "#C9CED6", "#D5D9DE"),
     "regio": ("#ECECEC", "#2F5A9E", "#A8AEB5", "#D7001D"),
     "ice": ("#F4F4F4", "#59636F", "#A8AEB5", "#D5D9DE"),
     "faehre": ("#EFE9DC", "#1F6FA8", "#B8BEC6", "#F7D117"),
@@ -5109,7 +5370,7 @@ class Doors:
         W, H = x2 - x1, y2 - y1
         X = lambda f: x1 + f * W
         Y = lambda f: y1 + f * H
-        level = ride.levels[ride.index] if kind not in ("tram", "bus", "faehre") else "ground"
+        level = ride.levels[ride.index] if kind not in ("tram", "bus", "faehre", "bbus") else "ground"
         if level == "tunnel":
             c.create_rectangle(x1, y1, x2, Y(0.82), fill="#E6DFC8", outline="")
             for k in range(0, 60):
@@ -5130,6 +5391,23 @@ class Doors:
                         for wx in (0.2, 0.6):
                             c.create_rectangle(hx + W / 8 * wx, Y(wy), hx + W / 8 * (wx + 0.2), Y(wy + 0.07),
                                                fill="#7E97AD", outline="")
+                sign_bg, sign_fg = "#F2D21B", "#0F6B3A"
+            elif kind == "bbus":
+                c.create_rectangle(x1, Y(0.42), x2, Y(0.58), fill="#9CC17F", outline="")      # Wiese
+                c.create_rectangle(x1, Y(0.42), x2, Y(0.46), fill="#E8D44D", outline="")      # Rapsfeld dahinter
+                for k in range(3):                               # Dorfhäuser mit roten Dächern
+                    hx, hw = X(0.06 + k * 0.34), 0.15 * W
+                    c.create_rectangle(hx, Y(0.36), hx + hw, Y(0.58), fill=["#F2EEE6", "#E8C9A0", "#D9A68C"][k],
+                                       outline="")
+                    c.create_polygon(hx - 0.01 * W, Y(0.36), hx + hw / 2, Y(0.2), hx + hw + 0.01 * W, Y(0.36),
+                                     fill="#B5432F", outline="")
+                    for wx in (0.15, 0.6):
+                        c.create_rectangle(hx + hw * wx, Y(0.42), hx + hw * (wx + 0.22), Y(0.5), fill="#7E97AD",
+                                           outline="")
+                for k in range(4):                               # Bäume der Allee
+                    tx = X(0.23 + k * 0.34)
+                    c.create_rectangle(tx - 3 * s, Y(0.4), tx + 3 * s, Y(0.58), fill="#6B4A2E", outline="")
+                    c.create_oval(tx - 0.05 * W, Y(0.18), tx + 0.05 * W, Y(0.44), fill="#5E9C46", outline="")
                 sign_bg, sign_fg = "#F2D21B", "#0F6B3A"
             elif kind == "faehre":
                 for k in range(12):                              # Bäume am anderen Ufer
@@ -5170,7 +5448,7 @@ class Doors:
         round_rect(c, cx - tw / 2, Y(0.2), cx + tw / 2, Y(0.2) + 50 * s, 8 * s, fill=sign_bg, outline="white",
                    width=3 * s)
         c.create_text(cx, Y(0.2) + 25 * s, text=text, font=f, fill=sign_fg)
-        if kind in ("tram", "bus", "faehre"):          # Haltestellenschild mit „H“
+        if kind in ("tram", "bus", "faehre", "bbus"):  # Haltestellenschild mit „H“
             hx = X(0.86)
             c.create_line(hx, Y(0.24), hx, Y(0.8), fill="#8C877D", width=max(2, 4 * s))
             c.create_oval(hx - 22 * s, Y(0.2) - 22 * s, hx + 22 * s, Y(0.2) + 22 * s, fill="#F2D21B", outline="#0F6B3A",

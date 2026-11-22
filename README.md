@@ -6,7 +6,8 @@ dann Station für Station mit den Pfeiltasten durch Berlin fahren.
 Enthalten sind alle S-Bahn-, U-Bahn-, Straßenbahn- und Buslinien von BVG und
 S-Bahn Berlin, alle BVG-Fähren sowie alle Regional- und ICE-Züge, die durch
 Berlin fahren (16 S-Bahn-, 9 U-Bahn-, 22 Tram-, 204 Bus-, 22 Regional-,
-8 ICE- und 6 Fährlinien).
+8 ICE- und 6 Fährlinien). Als eigene Kategorie kommen 780 Buslinien in ganz
+Brandenburg dazu.
 Dazu kommen 33 Flüge vom Flughafen BER in die ganze Welt und 7 Kreuzfahrten
 ab Hamburg, Kiel und Warnemünde. Das Programm läuft komplett **offline**.
 
@@ -15,7 +16,7 @@ ab Hamburg, Kiel und Warnemünde. Das Programm läuft komplett **offline**.
 Im Ordner `web/` liegt dasselbe Spiel für den Browser, mit allen Funktionen.
 Es braucht kein Python und keinen Server:
 
-- **`web/berlin-faehrt.html`**: alles in einer einzigen Datei (gut 1,2 MB).
+- **`web/berlin-faehrt.html`**: alles in einer einzigen Datei (gut 3,5 MB).
   Per Doppelklick öffnen, fertig. Diese Datei kann man auch einfach per Mail
   oder USB-Stick weitergeben.
 - **`web/index.html`**: dieselbe Version, aufgeteilt in mehrere Dateien
@@ -50,7 +51,7 @@ python3 tools/build_web.py
 
 | Bildschirm | Bedienung |
 |---|---|
-| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Regionalbahn, ICE, Fähre, Flugzeug oder Kreuzfahrt, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–9 gehen auch) |
+| **1. Verkehrsmittel** – S-Bahn, U-Bahn, Straßenbahn, Bus, Bus Brandenburg, Regionalbahn, ICE, Fähre, Flugzeug oder Kreuzfahrt, darunter „Starte in …“ | Pfeiltasten + Enter, oder anklicken (Tasten 1–9 und 0 gehen auch) |
 | **2. Linie** – Linienschild (z. B. U8, M77) mit Start- und Endhaltestelle | Pfeiltasten + Enter, oder anklicken. Liniennummer tippen (z. B. `100`) springt direkt dahin |
 | **3. Fahren** – Stationsliste mit allen Umsteigemöglichkeiten und Netzplan | ↓/→ nächste Station, ↑/← zurück, `T` oder Knopf „Türen“: Türgeräusch, `V` oder Knopf „Ansage“: Station ansagen, `U`: umsteigen, `R` oder Knopf: andere Richtung, `F`: Cockpit-Ansicht, `Ö`: Türen auf und zu (Blick in den Innenraum), an der Endhaltestelle `B`: Betriebshof (Bus, Tram) bzw. Bootshaus (Fähre) oder `A`: Abstellgleis (Bahnen), dort `W`: Waschanlage, `E`: Linie endet hier |
 
@@ -147,6 +148,9 @@ Ansicht“ zurück). Man blickt nach vorn auf die Strecke, in einfachem 3D:
 - **Straßenbahn:** auf der Straße zwischen Häusern, mit eingelassenen
   Schienen und Oberleitung.
 - **Bus:** Straße mit Mittellinie, Gehweg, Bäumen und Häusern.
+- **Bus Brandenburg:** Landstraße mit Leitpfosten, dazu Alleen,
+  Rapsfelder, Wiesen und Äcker, Kiefernwald und Windräder am Horizont (siehe
+  [Bus Brandenburg](#bus-brandenburg)).
 - **Fähre:** über den Bug aufs Wasser, mit Wellen, Ufern voller Bäume und
   Schilf, roten und grünen Fahrwassertonnen und an jeder Station einem
   Anleger mit Wartehäuschen und „H“-Schild.
@@ -187,6 +191,33 @@ Alles andere ist ins Cockpit eingebaut:
 
 Alle Tasten funktionieren genauso wie in der normalen Ansicht. Die gewählte
 Ansicht bleibt beim Umsteigen erhalten.
+
+## Bus Brandenburg
+
+Eine eigene Kategorie, getrennt von den Berliner Bussen: alle Buslinien in
+Brandenburg (780 Linien). Weil das so viele sind, wählt man zuerst den
+**Landkreis bzw. die kreisfreie Stadt**, erkennbar am Autokennzeichen
+(z. B. BAR Barnim, MOL Märkisch-Oderland, P Potsdam, CB Cottbus, UM
+Uckermark), und dann die Linie. Tippen geht auch: `U`, `M` springt zur
+Uckermark. Die Linienschilder haben die Farbe ihres Landkreises, der Bus ist
+weiß-rot wie die Landesfarben.
+
+Die Linie gehört zu dem Landkreis, in dem sie die meisten Halte hat. Fährt
+eine Linie über die Grenze, z. B. von Potsdam-Mittelmark nach Berlin, steht
+sie trotzdem nur einmal in der Liste.
+
+Alles andere geht wie beim Berliner Bus: Netzplan, Fahrzeiten, Umsteigen,
+Türen, Ansage, Betriebshof mit Waschanlage, eigene Endstation. Im Cockpit
+geht es über die **Landstraße**: Mal fährt der Bus durch eine Allee, mal
+zwischen Raps- und Getreidefeldern, mal durch Kiefernwald, und am Horizont
+drehen sich Windräder. An den Haltestellen steht ein Dorf mit Wartehäuschen,
+manchmal auch eine Feldsteinkirche. Liegen die Haltestellen dicht beieinander
+(weniger als 3 Minuten Fahrzeit), fährt der Bus durch eine längere
+Häuserzeile wie in einer Kleinstadt. Der Tacho geht bis 80 km/h.
+
+Umsteigen geht an jedem Bahnhof in Brandenburg, z. B. vom RE1 in Frankfurt
+(Oder) in die Stadtbusse. Beim „Umsteigen getrennt“ gehört der Bus in
+Brandenburg deshalb zu beiden Gruppen, wie die Fähre.
 
 ## Regionalbahn
 
@@ -450,9 +481,9 @@ Man kann auch auf die Linienschilder der aktuellen Station klicken.
 standardmäßig angehakt): Beim Fahren mit S-Bahn, U-Bahn, Regionalbahn oder
 ICE werden nur Umstiege in diese Bahnen sowie Flugzeug und Kreuzfahrt
 gezeigt, angeboten und angesagt. Beim Tram- oder
-Busfahren gilt das Gleiche für Tram und Bus. Die Fähre gehört zu beiden
-Gruppen: Sie wird überall angeboten, und von der Fähre aus sieht man alle
-Umstiege. Das macht die Liste deutlich
+Busfahren gilt das Gleiche für Tram und Bus. Die Fähre und der Bus in
+Brandenburg gehören zu beiden Gruppen: Sie werden überall angeboten, und von
+dort aus sieht man alle Umstiege. Das macht die Liste deutlich
 übersichtlicher. Ohne Haken sieht man wieder alle Umstiege. Die Einstellung
 wird gespeichert. Der Start-Knopf im Hauptmenü zeigt immer alle Linien am
 Startbahnhof, weil man dort ja erst das Verkehrsmittel wählt.
@@ -539,6 +570,15 @@ python3 tools/build_data.py --gtfs GTFS.zip
 
 Für jede Linie wählt das Skript die typische Hin- und Rückfahrt aus. Kurze
 Fahrten, Fahrten zum Betriebshof und Ersatzverkehr lässt es weg.
+
+Die **Busse in Brandenburg** sind alle Buslinien der übrigen Betreiber im
+VBB (also nicht BVG und S-Bahn), die in Brandenburg halten. Der
+Landkreis steht im Gemeindeschlüssel der Haltestellen-Nummern
+(„de:12064:…“ = Märkisch-Oderland); die Tabelle `REGIONS` in
+`tools/build_data.py` ordnet ihm Kennzeichen, Namen und Farbe zu. Gleiche
+Liniennummern gibt es oft in mehreren Landkreisen, deshalb unterscheidet das
+Skript die Linien dort auch nach dem Betreiber. Fahrzeiten sind für 99 %
+der Abschnitte da.
 
 Der aktuelle Datenstand stammt aus dem VBB-Fahrplan vom März 2026. Die
 **U4** fehlt darin seit Februar 2026, vermutlich wegen einer Sperrung, und

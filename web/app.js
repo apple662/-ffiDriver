@@ -27,6 +27,7 @@ const MODES = [
   ["ubahn", "U-Bahn", "#115D91", ["#F7D117", "#3A3A3A"]],
   ["tram", "Straßenbahn", "#CC0A22", ["#F7D117", "#FFFFFF"]],
   ["bus", "Bus", "#A5027D", ["#F7D117", "#3A3A3A"]],
+  ["bbus", "Bus Brandenburg", "#C8102E", ["#F4F4F4", "#C8102E"]],     // weiß-rot wie die Landesfarben
   ["regio", "Regionalbahn", "#4B5563", ["#D7001D", "#FFFFFF"]],
   ["ice", "ICE", "#EC0016", ["#F4F4F4", "#EC0016"]],
   ["faehre", "Fähre", "#0080BA", ["#F7D117", "#FFFFFF"]],      // gelber Rumpf, weißer Aufbau
@@ -194,6 +195,7 @@ function drawVehicle(c, kind, cx, cy, length, flip = false) {
     return;
   }
   const [body, accent] = MODE[kind][3];
+  if (kind === "bbus") kind = "bus";       // gleiche Bauform wie der Berliner Bus, nur andere Farben
   const mx = flip ? -1 : 1;
   const T = pts => pts.map(([x, y]) => [cx + mx * x * length, cy + y * length]);
   const poly = (pts, o) => c.polygon(T(pts), o);
@@ -304,6 +306,12 @@ function drawModeSign(c, app, kind, cx, cy, size) {
   } else if (kind === "flug") {
     c.roundRect(cx - r, cy - r, cx + r, cy + r, size * 0.22, { fill: color });
     c.polygon(planeTopPoints(cx, cy, size * 0.78, Math.PI / 4), { fill: "white" });
+  } else if (kind === "bbus") {
+    // rotes Schild mit „Bus“ und darunter „BB“ für Brandenburg
+    c.roundRect(cx - r, cy - r, cx + r, cy + r, size * 0.22, { fill: color });
+    c.text(cx, cy - r * 0.22, "Bus", app.font(size / s * 0.34, "bold"), "white");
+    c.roundRect(cx - r * 0.62, cy + r * 0.22, cx + r * 0.62, cy + r * 0.72, size * 0.06, { fill: "white" });
+    c.text(cx, cy + r * 0.47, "BB", app.font(size / s * 0.2, "bold"), color);
   } else if (kind === "schiff") {
     c.roundRect(cx - r, cy - r, cx + r, cy + r, size * 0.22, { fill: color });
     drawAnchor(c, cx, cy, r, "white", Math.max(2, size * 0.07));
@@ -334,7 +342,7 @@ function drawModeSign(c, app, kind, cx, cy, size) {
 /** Linienschild wie an der Haltestelle. Gibt die Breite zurück. */
 function drawBadge(c, x, y, name, color, kind, h, font, border = 0) {
   const w = Math.max(h * 1.6, font.measure(name) + h * 0.6);
-  const r = { sbahn: h / 2, tram: h / 2, bus: h * 0.3, faehre: h * 0.3, schiff: h * 0.3 }[kind] ?? h * 0.12;
+  const r = { sbahn: h / 2, tram: h / 2, bus: h * 0.3, faehre: h * 0.3, schiff: h * 0.3, bbus: h * 0.3 }[kind] ?? h * 0.12;
   if (border) {
     c.roundRect(x - border, y - h / 2 - border, x + w + border, y + h / 2 + border, r + border, { fill: "white" });
   }
@@ -464,10 +472,11 @@ class SoundPlayer {
 // Umsteigen
 // --------------------------------------------------------------------------
 
-const MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "flug", "schiff", "tram", "bus", "faehre"];     // Reihenfolge beim Umsteigen
+const MODE_ORDER = ["sbahn", "ubahn", "regio", "ice", "flug", "schiff", "tram", "bus", "bbus", "faehre"];     // Reihenfolge beim Umsteigen
 // Bei „Umsteigen getrennt“ sieht man nur Umstiege innerhalb der eigenen Gruppe.
 // Die Fähre gehört zu beiden: Man kommt mit der S-Bahn (z. B. Wannsee) genauso hin wie mit Bus und Tram.
-const MODE_GROUPS = [["sbahn", "ubahn", "regio", "ice", "flug", "schiff", "faehre"], ["tram", "bus", "faehre"]];
+// Der Bus in Brandenburg gehört auch zu beiden: Am Bahnhof in Brandenburg steigt man vom Regionalzug in den Bus.
+const MODE_GROUPS = [["sbahn", "ubahn", "regio", "ice", "flug", "schiff", "faehre", "bbus"], ["tram", "bus", "faehre", "bbus"]];
 const NEAR_M = 200;          // Haltestellen in diesem Umkreis gehören zusammen
 const SAME_NAME_M = 400;     // gleichnamige Stationen (z. B. "S+U" und "U Alexanderplatz") auch etwas weiter
 
@@ -797,7 +806,7 @@ class HomeScreen extends Screen {
     app.hit(bx1, by1, bx2, by2, () => this.start());
 
     // Ankreuzfelder für Eltern
-    checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug, Schiff / Tram, Bus (Fähre bei beiden)",
+    checkbox(app, c, 24 * s, h - 50 * s, "Umsteigen getrennt: S-Bahn, U-Bahn, Regio, ICE, Flugzeug, Schiff / Tram, Bus (Fähre, Bus Brandenburg bei beiden)",
       app.separateModes(), () => this.toggle("separate_modes", app.separateModes()));
     checkbox(app, c, 24 * s, h - 22 * s, "Zeige ICE-Umstiege", app.showIce(),
       () => this.toggle("show_ice", app.showIce()));
@@ -814,7 +823,8 @@ class HomeScreen extends Screen {
 
   open(i) {
     this.selected = i;
-    this.app.show(new LinesScreen(this.app, MODES[i][0]));
+    const kind = MODES[i][0];
+    this.app.show(kind === "bbus" ? new RegionScreen(this.app) : new LinesScreen(this.app, kind));
   }
 
   /** Am Startbahnhof losfahren – dieselbe Auswahl wie beim Umsteigen. */
@@ -866,8 +876,8 @@ class HomeScreen extends Screen {
       return this.open(this.selected);
     } else if (k === PARENT_KEY) {
       return this.resetHome();
-    } else if (char && "123456789".slice(0, n).includes(char)) {
-      return this.open(+char - 1);
+    } else if (char && "1234567890".slice(0, n).includes(char)) {
+      return this.open("1234567890".indexOf(char));
     }
     if (this.selected < HomeScreen.START) this.lastTile = this.selected;
     this.app.redraw();
@@ -888,11 +898,19 @@ class HomeScreen extends Screen {
 HomeScreen.START = MODES.length;      // Auswahl-Nummer des Start-Knopfs unter den Kacheln
 
 class LinesScreen extends Screen {
-  constructor(app, kind, selected = 0) {
+  /** selected: Nummer der Linie in data.lines[kind]. Beim Bus in Brandenburg zeigt die Liste nur die Linien
+   *  eines Landkreises (region, sonst der Landkreis der gewählten Linie). */
+  constructor(app, kind, selected = 0, region = null) {
     super(app);
     this.kind = kind;
-    this.lines = app.data.lines[kind];
-    this.selected = Math.min(selected, this.lines.length - 1);
+    const all = app.data.lines[kind] || [];
+    if (kind === "bbus") {
+      if (region === null && selected >= 0 && selected < all.length) region = all[selected].region;
+      this.indices = all.map((line, i) => (line.region === region ? i : -1)).filter(i => i >= 0);
+    } else this.indices = all.map((_, i) => i);
+    this.region = region;
+    this.lines = this.indices.map(i => all[i]);
+    this.selected = Math.max(0, this.indices.indexOf(selected));
     this.scroll = 0;
     this.scrollTarget = null;
     this.cards = [];
@@ -941,10 +959,40 @@ class LinesScreen extends Screen {
       const bw = drawBadge(c, x1 + 22 * s, (y1 + y2) / 2, line.name, line.color, kind, 64 * s, badgeFont);
       const tx = x1 + 22 * s + bw + 22 * s;
       const tw = x2 - tx - 18 * s;
-      const d0 = line.directions[0];
-      const first = d0[0], last = d0[d0.length - 1];
-      if (kind === "schiff") {
-        const cr = app.data.cruises.cruises[i];
+      this.cardText(c, i, line, tx, tw, y1, nameFont, smallFont);
+      this.cards.push([i, x1, Math.max(y1, top), x2, y2]);
+      if (y2 > top) app.hit(x1, Math.max(y1, top), x2, y2, () => this.open(i));
+    });
+
+    // Kopfbereich zuletzt, damit er über den gescrollten Karten liegt
+    c.rect(0, hh, w, top - 4 * s, BG);
+    let left;
+    [hh, left] = header(app, c, w, color, () => this.back());
+    drawModeSign(c, app, kind, left + 60 * s, hh / 2, 62 * s);
+    const tf = app.font(30, "bold");
+    c.text(left + 105 * s, hh / 2, fitText(tf, this.titleText(), w - left - 125 * s), tf, "white", "w");
+    if (maxScroll > 0) {
+      const barH = Math.max(40 * s, viewH * viewH / contentH);
+      const barY = top + (viewH - barH) * (this.scroll / maxScroll);
+      c.roundRect(w - 12 * s, barY, w - 4 * s, barY + barH, 4 * s, { fill: "#D8CFB8" });
+    }
+  }
+
+  titleText() {
+    let label = MODE[this.kind][1];
+    if (this.kind === "bbus" && this.region) label = this.app.data.regions[this.region].name;
+    const question = { flug: "Wohin fliegst du?", schiff: "Welche Reise machst du?" }[this.kind] || "Welche Linie nimmst du?";
+    return `${label}: ${question}`;
+  }
+
+  /** Text auf der Karte neben dem Linienschild. */
+  cardText(c, i, line, tx, tw, y1, nameFont, smallFont) {
+    const app = this.app, s = app.s, stations = app.data.stations;
+    const d0 = line.directions[0];
+    const first = d0[0], last = d0[d0.length - 1];
+    {
+      if (this.kind === "schiff") {
+        const cr = app.data.cruises.cruises[this.indices[i]];
         const pn = cr.ports.map(p => app.data.cruises.ports[p].name);
         const via = pn[0] === pn[pn.length - 1] ? "↻  " + pn.slice(1, -1).join(", ") : "→  " + pn.slice(1).join(", ");
         c.text(tx, y1 + 40 * s, fitText(nameFont, cr.title, tw), nameFont, TEXT, "w");
@@ -958,21 +1006,6 @@ class LinesScreen extends Screen {
         c.text(tx, y1 + 65 * s, "⇅", smallFont, MUTED, "w");
         c.text(tx, y1 + 90 * s, fitText(nameFont, stations[last], tw), nameFont, TEXT, "w");
       }
-      this.cards.push([i, x1, Math.max(y1, top), x2, y2]);
-      if (y2 > top) app.hit(x1, Math.max(y1, top), x2, y2, () => this.open(i));
-    });
-
-    // Kopfbereich zuletzt, damit er über den gescrollten Karten liegt
-    c.rect(0, hh, w, top - 4 * s, BG);
-    let left;
-    [hh, left] = header(app, c, w, color, () => this.back());
-    drawModeSign(c, app, kind, left + 60 * s, hh / 2, 62 * s);
-    const question = { flug: "Wohin fliegst du?", schiff: "Welche Reise machst du?" }[this.kind] || "Welche Linie nimmst du?";
-    c.text(left + 105 * s, hh / 2, `${label}: ${question}`, app.font(30, "bold"), "white", "w");
-    if (maxScroll > 0) {
-      const barH = Math.max(40 * s, viewH * viewH / contentH);
-      const barY = top + (viewH - barH) * (this.scroll / maxScroll);
-      c.roundRect(w - 12 * s, barY, w - 4 * s, barY + barH, 4 * s, { fill: "#D8CFB8" });
     }
   }
 
@@ -994,14 +1027,16 @@ class LinesScreen extends Screen {
   }
 
   back() {
+    if (this.kind === "bbus") return this.app.show(new RegionScreen(this.app, this.region));
     this.app.show(new HomeScreen(this.app, MODES.findIndex(m => m[0] === this.kind)));
   }
 
   open(i) {
     this.selected = i;
-    if (this.kind === "flug") this.app.show(new FlightScreen(this.app, i, 0, this));
-    else if (this.kind === "schiff") this.app.show(new CruiseScreen(this.app, i, 0, this));
-    else this.app.show(new RideScreen(this.app, this.kind, i, this));
+    const gi = this.indices[i];
+    if (this.kind === "flug") this.app.show(new FlightScreen(this.app, gi, 0, this));
+    else if (this.kind === "schiff") this.app.show(new CruiseScreen(this.app, gi, 0, this));
+    else this.app.show(new RideScreen(this.app, this.kind, gi, this));
   }
 
   key(k, char) {
@@ -1056,10 +1091,41 @@ class LinesScreen extends Screen {
   }
 }
 
+/** Bus in Brandenburg: erst den Landkreis bzw. die kreisfreie Stadt wählen (mit Autokennzeichen). */
+class RegionScreen extends LinesScreen {
+  constructor(app, selected = null) {
+    super(app, "bbus", -1);
+    const counts = {};
+    for (const line of app.data.lines.bbus || []) counts[line.region] = (counts[line.region] || 0) + 1;
+    const regions = app.data.regions || {};
+    const codes = Object.keys(counts).sort((a, b) => regions[a].name.localeCompare(regions[b].name, "de"));
+    this.region = null;
+    this.lines = codes.map(k => ({ name: regions[k].short, color: regions[k].color, code: k, title: regions[k].name, count: counts[k] }));
+    this.indices = this.lines.map((_, i) => i);
+    this.selected = Math.max(0, codes.indexOf(selected));
+  }
+
+  titleText() { return "Bus Brandenburg: Wohin fährst du?"; }
+
+  cardText(c, i, line, tx, tw, y1, nameFont, smallFont) {
+    const s = this.app.s;
+    c.text(tx, y1 + 40 * s, fitText(nameFont, line.title, tw), nameFont, TEXT, "w");
+    c.text(tx, y1 + 66 * s, fitText(smallFont, line.code < "12060" ? "Kreisfreie Stadt" : "Landkreis", tw), smallFont, MUTED, "w");
+    c.text(tx, y1 + 92 * s, fitText(smallFont, `${line.count} Buslinien`, tw), smallFont, TEXT, "w");
+  }
+
+  back() { this.app.show(new HomeScreen(this.app, MODES.findIndex(m => m[0] === "bbus"))); }
+
+  open(i) {
+    this.selected = i;
+    this.app.show(new LinesScreen(this.app, "bbus", -1, this.lines[i].code));
+  }
+}
+
 /** [Name, Taste, „wohin“] – Bus und Tram fahren auf den Betriebshof, Bahnen aufs Abstellgleis,
  *  die Fähre ins Bootshaus. */
 function depotInfo(kind) {
-  if (kind === "bus" || kind === "tram") return ["Betriebshof", "B", "auf den Betriebshof"];
+  if (kind === "bus" || kind === "tram" || kind === "bbus") return ["Betriebshof", "B", "auf den Betriebshof"];
   if (kind === "faehre") return ["Bootshaus", "B", "ins Bootshaus"];
   return ["Abstellgleis", "A", "aufs Abstellgleis"];
 }
@@ -1572,9 +1638,9 @@ class RideScreen extends Screen {
     const speech = { sbahn: "Zurückbleiben, bitte!", ubahn: "Zurückbleiben, bitte!",
       regio: "Bitte einsteigen. Vorsicht bei der Abfahrt!", ice: "Bitte einsteigen. Vorsicht bei der Abfahrt!",
       faehre: "Alle an Bord? Leinen los!" }[this.kind];
-    this.app.sound.play(this.kind, speech);
+    this.app.sound.play(SOUND_OF[this.kind] || this.kind, speech);
     // Beim Bus zischt die Druckluft, wenn die Türen aufgehen; die Fähre tutet mit dem Schiffshorn
-    this.say({ bus: "Pssscht – Türen auf!", faehre: "Tuuut! Leinen los!" }[this.kind] || "Türen schließen!", 2.5);
+    this.say({ bus: "Pssscht – Türen auf!", bbus: "Pssscht – Türen auf!", faehre: "Tuuut! Leinen los!" }[this.kind] || "Türen schließen!", 2.5);
     this.app.animate();
   }
 
@@ -1591,7 +1657,7 @@ class RideScreen extends Screen {
     let text = spokenName(name) + ".";
     const others = this.transferOptions();
     if (others.length) {
-      const prefix = { tram: "Tram ", bus: "Bus ", flug: "Flug nach ", faehre: "Fähre ", schiff: "Kreuzfahrt " };
+      const prefix = { tram: "Tram ", bus: "Bus ", flug: "Flug nach ", faehre: "Fähre ", schiff: "Kreuzfahrt ", bbus: "Bus " };
       const names = others.slice(0, 8).map(o => (prefix[o.kind] || "") + spokenLine(o.name));
       text += " Umsteigen zu " + names.join(", ") + (others.length > 8 ? " und weiteren Linien." : ".");
     }
@@ -1654,7 +1720,7 @@ class RideScreen extends Screen {
       this.say("Erst anhalten – dann Türen auf!", 2);
     } else {
       this.door = new Doors(this);
-      if (this.kind === "bus") app.sound.play("bus");
+      if (this.kind === "bus" || this.kind === "bbus") app.sound.play("bus");
       this.say("Türen auf – bitte ein- und aussteigen!", 2.5);
     }
     app.redraw();
@@ -1732,7 +1798,8 @@ class RideScreen extends Screen {
 const SEG = 60;               // so viele Meter liegen in der Szene zwischen zwei Stationen
 const CAM_H = 2.4;            // Augenhöhe des Fahrers über den Schienen bzw. der Straße
 const Z_NEAR = 1.2, Z_FAR = 140;
-const VMAX = { sbahn: 100, ubahn: 70, tram: 60, bus: 50, regio: 160, ice: 300, faehre: 25 };   // km/h am Tacho
+const SOUND_OF = { bbus: "bus" };   // Verkehrsmittel ohne eigenen Türton
+const VMAX = { sbahn: 100, ubahn: 70, tram: 60, bus: 50, regio: 160, ice: 300, faehre: 25, bbus: 80 };   // km/h am Tacho
 const COCKPIT_SPEED = 0.7;    // höchstes Tempo in Stationen pro Sekunde – ca. 1,5 s von Station zu Station
 const LED = "#FFA31A";        // Farbe der Leuchtschrift
 
@@ -1867,7 +1934,7 @@ const HBF_LOWER_NEIGHBORS = new Set(["S Südkreuz", "S+U Gesundbrunnen", "S+U Po
 function stationLevel(kind, lineName, names, i) {
   const name = names[i];
   const neighbors = [names[i - 1], names[i + 1]].filter(Boolean);
-  if (kind === "tram" || kind === "bus" || kind === "faehre") return "ground";
+  if (kind === "tram" || kind === "bus" || kind === "faehre" || kind === "bbus") return "ground";
   if (kind === "ubahn") {
     if (U_ELEVATED[lineName] && U_ELEVATED[lineName].has(name)) return "elevated";
     return U_GROUND[lineName] && U_GROUND[lineName].has(name) ? "ground" : "tunnel";
@@ -2206,8 +2273,167 @@ function drawBoathouse(c, app, sc, z, color) {
   stationSign(c, app, sc, -5.5, 5.5, 6.0, 7.6, z, "Bootshaus", color);
 }
 
+const FIELDS = ["#E8D44D", "#9CC17F", "#B39A6B", "#D9C27A", "#7FAE62", "#E8D44D"];   // Raps, Wiese, Acker, Weizen …
+
+/** Bus in Brandenburg: Landstraße mit Alleen, Feldern, Kiefernwald und Windrädern; an den Haltestellen
+ *  ein Dorf mit Häusern, manchmal einer Feldsteinkirche, und ein Wartehäuschen. */
+function drawCountryScene(ride, c, app, x1, y1, x2, y2) {
+  const s = app.s, st = app.data.stations, stops = ride.stops;
+  const cam = ride.pos * SEG;
+  const sc = new Scene(c, x1, y1, x2, y2);
+  const hy = sc.hy, W = x2 - x1, H = y2 - y1;
+
+  // --- Himmel, Windräder und Wald am Horizont ---
+  const sky = ["#6FB6EA", "#82C0EE", "#96CAF1", "#AAD4F4", "#BFDFF6", "#D4EAF9"];
+  const band = (hy - y1) / sky.length;
+  sky.forEach((col, i) => c.rect(x1, y1 + i * band, x2, y1 + (i + 1) * band + 1, col));
+  const turn = now() * 1.5;
+  for (let k = 0; k < 6; k++) {
+    const fx = ((((0.1 + 0.19 * k + 0.05 * rnd(k, 200) - cam * 0.0004) % 1.2) + 1.2) % 1.2) - 0.1;
+    const tx = x1 + fx * W, th = (0.1 + 0.05 * rnd(k, 201)) * H;
+    c.line([[tx, hy], [tx, hy - th]], { fill: "#E9ECEF", width: Math.max(2, 3 * s) });
+    for (let b = 0; b < 3; b++) {
+      const a = turn * (0.8 + 0.4 * rnd(k, 202)) + b * 2 * Math.PI / 3;
+      c.line([[tx, hy - th], [tx + Math.cos(a) * th * 0.45, hy - th + Math.sin(a) * th * 0.45]], { fill: "#F4F6F8", width: Math.max(1, 3 * s), cap: "round" });
+    }
+    c.oval(tx - 3 * s, hy - th - 3 * s, tx + 3 * s, hy - th + 3 * s, { fill: "#C9CED6" });
+  }
+  const pts = [[x1, hy + 1]];
+  for (let k = 0; k < 41; k++) {                                          // Kiefernwald am Horizont
+    const bx = x1 + W * k / 40;
+    pts.push([bx, hy - (0.025 + 0.02 * rnd(k, 203)) * H], [bx + W / 80, hy - (0.012 + 0.01 * rnd(k, 204)) * H]);
+  }
+  pts.push([x2, hy + 1]);
+  c.polygon(pts, { fill: "#3F5E3A" });
+
+  // --- Boden: Felder links und rechts ---
+  c.rect(x1, hy, x2, y2, "#8DB86A");
+  function periodic(spacing, offset = 0) {
+    const out = [];
+    for (let k = Math.floor((cam + Z_NEAR - offset) / spacing); ; k++) {
+      const z = k * spacing + offset - cam;
+      if (z > Z_FAR) return out;
+      if (z >= Z_NEAR - spacing) out.push([k, z]);
+    }
+  }
+  /** Art des Abschnitts (alle 200 m): Allee, freies Feld oder Kiefernwald. */
+  const block = z => {
+    const r = rnd(Math.floor((z + cam) / 200), 205);
+    return r < 0.4 ? "allee" : r < 0.75 ? "feld" : "wald";
+  };
+  for (const [k, z] of periodic(50)) {
+    for (const [side, xa, xb] of [[1, 3.4, 300], [-1, -300, -6.2]]) {
+      const col = block(z) === "wald" ? "#5E7F45" : FIELDS[Math.floor(rnd(k, 206 + side) * FIELDS.length)];
+      sc.ground(xa, xb, z, z + 50, col);
+    }
+  }
+  // --- Landstraße ---
+  sc.ground(-4.8, 2.0, Z_NEAR, Z_FAR, "#5C5E63");
+  for (const X of [-4.6, 1.8]) sc.ground(X - 0.06, X + 0.06, Z_NEAR, Z_FAR, "#E8E8E8", 0.01);   // Randlinien
+  for (const [, z] of periodic(12)) sc.ground(-1.47, -1.33, z, z + 6, "#F2F2F2", 0.01);         // Mittellinie
+
+  let zEnd = Z_FAR + 100;
+  if (ride.depot) {
+    zEnd = stops.length * SEG - cam + 34;
+    drawDepotHall(c, app, sc, zEnd, MODE.bbus[2], "bbus");
+  }
+
+  const items = [];
+  const tree = (z, X, k, big = true) => items.push([z, () => {
+    sc.front(X - 0.22, X + 0.22, 0, 3.2, z, "#6B4A2E");
+    const [cx, cy] = sc.p(X, big ? 5.4 : 3.6, z), r = sc.size((big ? 2.6 : 1.6) + 0.6 * rnd(k, 207), z);
+    c.oval(cx - r, cy - r, cx + r, cy + r, { fill: ["#4F8F3F", "#5E9C46", "#477F38"][((k % 3) + 3) % 3] });
+  }]);
+  const pine = (z, X, k) => items.push([z, () => {
+    sc.front(X - 0.15, X + 0.15, 0, 7.0, z, "#8C5A3C");
+    const [cx, cy] = sc.p(X, 8.2, z), r = sc.size(1.6 + 0.5 * rnd(k, 208), z);
+    c.oval(cx - r * 1.1, cy - r * 0.8, cx + r * 1.1, cy + r * 0.8, { fill: "#355E35" });
+  }]);
+  for (const [k, z] of periodic(9, 2)) {
+    const kind = block(z);
+    if (kind === "allee") {
+      tree(z, 3.3, k);
+      tree(z + 4.5, -6.1, k + 1);
+    } else if (kind === "feld" && rnd(k, 209) < 0.12) {
+      tree(z, (rnd(k, 210) < 0.5 ? 1 : -1) * (14 + 30 * rnd(k, 211)), k, false);
+    }
+  }
+  for (const [k, z] of periodic(4, 1)) {
+    if (block(z) !== "wald") continue;
+    for (let j = 0; j < 2; j++) {
+      pine(z + 2 * j, 5 + 25 * rnd(k * 2 + j, 212), k + j);
+      pine(z + 1 + 2 * j, -8 - 25 * rnd(k * 2 + j, 213), k + j + 1);
+    }
+  }
+  for (const [, z] of periodic(50, 10)) {                                  // Leitpfosten
+    for (const X of [2.5, -5.3]) items.push([z, () => {
+      sc.front(X - 0.08, X + 0.08, 0, 1.0, z, "#F4F4F4");
+      sc.front(X - 0.08, X + 0.08, 0.7, 0.85, z, "#1E1E1E");
+    }]);
+  }
+
+  // --- Dörfer an den Haltestellen ---
+  const colors = ["#F2EEE6", "#E8C9A0", "#D9A68C", "#E6DDB8", "#C7D3DD"];
+  for (let i = Math.floor(ride.pos) - 1; i < Math.floor(ride.pos) + 3; i++) {
+    if (i < 0 || i >= stops.length) continue;
+    const zs = i * SEG - cam;
+    if (zs + 50 < Z_NEAR || zs - 40 > Z_FAR) continue;
+    const name = st[stops[i]];
+    // in der Stadt (kurze Fahrzeiten) eine ganze Häuserzeile, auf dem Land nur ein kleines Dorf
+    const gaps = [i + 1 < stops.length ? ride.travelTime(i) : null, i > 0 ? ride.travelTime(i - 1) : null];
+    const town = gaps.every(g => g !== null && g !== undefined && g < 3);
+    for (let j = 0; j < (town ? 4 : 2); j++) {                             // Häuser mit Giebel zur Straße
+      for (const side of [1, -1]) {
+        const hz = (town ? zs - 24 : zs - 8) + j * 14 + 4 * rnd(i * 10 + j, 214 + side);
+        if (rnd(i * 10 + j, 216 + side) < 0.35) continue;
+        const xa = side > 0 ? 9 : -12, xb = xa + 7 * side;
+        const col = colors[Math.floor(rnd(i * 10 + j, 218 + side) * colors.length)];
+        const lo = Math.min(xa, xb), hi = Math.max(xa, xb);
+        items.push([hz, () => {
+          sc.wall(xa, 0, 3.2, hz, hz + 8, col);
+          sc.wall(xa, 3.2, 3.7, hz, hz + 8, "#A8432F");                    // Dachkante (das Dach liegt höher als das Auge)
+          sc.front(lo, hi, 0, 3.2, hz, col);
+          sc.poly([[lo, 3.2, hz], [hi, 3.2, hz], [(lo + hi) / 2, 6.0, hz]], "#B5432F");
+          sc.front(lo + 1.2, lo + 2.4, 1.2, 2.4, hz - 0.01, "#7E97AD");
+          sc.front(hi - 2.4, hi - 1.2, 1.2, 2.4, hz - 0.01, "#7E97AD");
+        }]);
+      }
+    }
+    if (rnd(i, 220) < 0.45) {                                              // Feldsteinkirche mit Turm
+      const kz = zs + 34;
+      items.push([kz - 0.5, () => {
+        sc.wall(-12, 0, 5, kz, kz + 14, "#A39A8C");
+        sc.front(-19, -12, 0, 5, kz, "#A39A8C");
+        sc.poly([[-19, 5, kz], [-12, 5, kz], [-15.5, 8.5, kz]], "#7A3E2E");
+        sc.front(-17.6, -13.4, 0, 12, kz - 0.5, "#9A9183");
+        sc.poly([[-17.8, 12, kz - 0.5], [-13.2, 12, kz - 0.5], [-15.5, 16.5, kz - 0.5]], "#5A4A3A");
+        sc.front(-16, -15, 8, 10, kz - 0.51, "#3A3A3A");
+      }]);
+    }
+    items.push([zs + 18, () => {
+      sc.ground(2.0, 3.6, zs - 12, zs + 18, "#5C5E63");                    // Busbucht
+      for (const wz of [zs + 3, zs + 8]) {                                 // Wartehäuschen aus Holz
+        sc.front(4.0, 4.2, 0, 2.6, wz, "#7A5230");
+        sc.front(6.6, 6.8, 0, 2.6, wz, "#7A5230");
+      }
+      sc.ground(3.8, 7.0, zs + 3, zs + 8, "#8C5A3C", 2.6);
+      sc.wall(6.8, 0, 2.6, zs + 3, zs + 8, "#A47B52");
+      const poleZ = zs + 12;
+      sc.front(2.95, 3.05, 0, 3.6, poleZ, "#6F7378");
+      stationSign(c, app, sc, 3.1, 6.6, 2.0, 2.7, poleZ, name, MODE.bbus[2]);
+      if (poleZ > Z_NEAR && poleZ < Z_FAR) {
+        const [hx, hy2] = sc.p(3.0, 3.6, poleZ), r = sc.size(0.45, poleZ);
+        c.oval(hx - r, hy2 - r, hx + r, hy2 + r, { fill: "#F7D117", outline: "#2F8F4E", width: Math.max(1, r * 0.15) });
+        if (r > 5) c.text(hx, hy2, "H", app.font(r * 1.3 / s, "bold"), "#2F8F4E");
+      }
+    }]);
+  }
+  for (const [, fn] of items.filter(it => it[0] < zEnd).sort((a, b) => b[0] - a[0])) fn();
+}
+
 function drawScene(ride, c, app, x1, y1, x2, y2) {
   if (ride.kind === "faehre") return drawWaterScene(ride, c, app, x1, y1, x2, y2);
+  if (ride.kind === "bbus") return drawCountryScene(ride, c, app, x1, y1, x2, y2);
   if (ride.kind !== "tram" && ride.kind !== "bus") return drawRailScene(ride, c, app, x1, y1, x2, y2);
   // ab hier Straßenbahn und Bus: Straße zwischen Häusern
   const s = app.s, kind = ride.kind, st = app.data.stations, stops = ride.stops;
@@ -2407,7 +2633,7 @@ function drawWash(ride, c, app, x1, y1, x2, y2, t) {
     sc.ground(-3.2, 3.2, k - cam, k - cam + 0.25, ferry ? "#5FA3D0" : "#4C545C", 0.01);
   }
   for (let k = 2; k < WASH_EXIT; k += 6) sc.ground(-0.6, 0.6, k - cam, k - cam + 1.5, "#E8F4FF", 4.78);   // Lampen
-  if (ride.kind !== "bus" && !ferry) for (const X of [-0.75, 0.75]) sc.ground(X - 0.05, X + 0.05, za, zb, "#C8C8C8", 0.06);
+  if (ride.kind !== "bus" && ride.kind !== "bbus" && !ferry) for (const X of [-0.75, 0.75]) sc.ground(X - 0.05, X + 0.05, za, zb, "#C8C8C8", 0.06);
 
   const arch = (z, color) => {
     sc.front(-3.0, -2.75, 0, 4.4, z, color);
@@ -4555,6 +4781,7 @@ const INTERIOR = {   // Wand, Sitze, Haltestangen, Türflügel
   ubahn: ["#EFEAE0", "#2F5597", "#F7D117", "#F7D117"],
   tram: ["#F2EEE6", "#C9302C", "#F7D117", "#D5D9DE"],
   bus: ["#EEEEEE", "#2F4E8C", "#F7D117", "#D5D9DE"],
+  bbus: ["#EEEEEE", "#8C1C2C", "#C9CED6", "#D5D9DE"],
   regio: ["#ECECEC", "#2F5A9E", "#A8AEB5", "#D7001D"],
   ice: ["#F4F4F4", "#59636F", "#A8AEB5", "#D5D9DE"],
   faehre: ["#EFE9DC", "#1F6FA8", "#B8BEC6", "#F7D117"],
@@ -4807,7 +5034,7 @@ class Doors {
   drawOutside(c, x1, y1, x2, y2, name) {
     const ride = this.ride, app = ride.app, s = app.s, kind = ride.kind;
     const W = x2 - x1, H = y2 - y1, X = f => x1 + f * W, Y = f => y1 + f * H;
-    const level = kind !== "tram" && kind !== "bus" && kind !== "faehre" ? ride.levels[ride.index] : "ground";
+    const level = !["tram", "bus", "faehre", "bbus"].includes(kind) ? ride.levels[ride.index] : "ground";
     let signBg, signFg;
     if (level === "tunnel") {
       c.rect(x1, y1, x2, Y(0.82), "#E6DFC8");
@@ -4822,6 +5049,21 @@ class Doors {
           const hx = X(k / 8);
           c.rect(hx, Y(0.12 + 0.04 * (k % 3)), hx + W / 8 + 1, Y(0.7), ["#E8C9A0", "#D9A68C", "#C7D3DD", "#E6DDB8"][k % 4]);
           for (const wy of [0.24, 0.38, 0.52]) for (const wx of [0.2, 0.6]) c.rect(hx + W / 8 * wx, Y(wy), hx + W / 8 * (wx + 0.2), Y(wy + 0.07), "#7E97AD");
+        }
+        [signBg, signFg] = ["#F2D21B", "#0F6B3A"];
+      } else if (kind === "bbus") {
+        c.rect(x1, Y(0.42), x2, Y(0.58), "#9CC17F");                 // Wiese
+        c.rect(x1, Y(0.42), x2, Y(0.46), "#E8D44D");                 // Rapsfeld dahinter
+        for (let k = 0; k < 3; k++) {                                // Dorfhäuser mit roten Dächern
+          const hx = X(0.06 + k * 0.34), hw = 0.15 * W;
+          c.rect(hx, Y(0.36), hx + hw, Y(0.58), ["#F2EEE6", "#E8C9A0", "#D9A68C"][k]);
+          c.polygon([[hx - 0.01 * W, Y(0.36)], [hx + hw / 2, Y(0.2)], [hx + hw + 0.01 * W, Y(0.36)]], { fill: "#B5432F" });
+          for (const wx of [0.15, 0.6]) c.rect(hx + hw * wx, Y(0.42), hx + hw * (wx + 0.22), Y(0.5), "#7E97AD");
+        }
+        for (let k = 0; k < 4; k++) {                                // Bäume der Allee
+          const tx = X(0.23 + k * 0.34);
+          c.rect(tx - 3 * s, Y(0.4), tx + 3 * s, Y(0.58), "#6B4A2E");
+          c.oval(tx - 0.05 * W, Y(0.18), tx + 0.05 * W, Y(0.44), { fill: "#5E9C46" });
         }
         [signBg, signFg] = ["#F2D21B", "#0F6B3A"];
       } else if (kind === "faehre") {
@@ -4861,7 +5103,7 @@ class Doors {
     const f = app.font(22, "bold"), text = fitText(f, name, 0.14 * W), tw = f.measure(text) + 24 * s, cx = X(0.46);
     c.roundRect(cx - tw / 2, Y(0.2), cx + tw / 2, Y(0.2) + 50 * s, 8 * s, { fill: signBg, outline: "white", width: 3 * s });
     c.text(cx, Y(0.2) + 25 * s, text, f, signFg);
-    if (kind === "tram" || kind === "bus" || kind === "faehre") {      // Haltestellenschild mit „H“
+    if (["tram", "bus", "faehre", "bbus"].includes(kind)) {           // Haltestellenschild mit „H“
       const hx = X(0.86);
       c.line([[hx, Y(0.24)], [hx, Y(0.8)]], { fill: "#8C877D", width: Math.max(2, 4 * s) });
       c.oval(hx - 22 * s, Y(0.2) - 22 * s, hx + 22 * s, Y(0.2) + 22 * s, { fill: "#F2D21B", outline: "#0F6B3A", width: 3 * s });
