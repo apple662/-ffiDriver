@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Erzeugt die Offline-Datenbasis ``data/berlin_lines.json``.
 
-Quelle sind die offenen Fahrplandaten (GTFS) des Verkehrsverbunds
-Berlin-Brandenburg (VBB, Lizenz CC BY 4.0). Zwei Wege werden unterstützt:
+Standardquelle ist der bundesweite Soll-Fahrplan (DELFI e.V., Lizenz CC BY 4.0) von gtfs.de: der
+Nahverkehr (``nv_free``: U-Bahn, Tram, Bus, Fähre) und der Regionalverkehr (``rv_free``: S-Bahn,
+RE, RB). Die Haltestellen haben dort eigene Nummern und uneinheitliche Namen; sie werden über die
+Koordinaten dem VBB-Haltestellenverzeichnis (npm-Paket ``vbb-stations``, CC BY 4.0) zugeordnet, so
+bleiben die VBB-Nummern und -Namen erhalten. Die beiden ZIPs (zusammen gut 300 MB) werden
+geladen und einen Tag lang in ``build/`` aufgehoben.
 
-1. Standard: die aus dem VBB-GTFS abgeleiteten npm-Pakete ``vbb-lines`` und
-   ``vbb-stations`` (werden automatisch von registry.npmjs.org geladen).
+    python3 tools/build_data.py                              # Standard: gtfs.de
+    python3 tools/build_data.py --nv nv.zip --rv rv.zip      # mit schon geladenen ZIPs von gtfs.de
 
-       python3 tools/build_data.py
+Andere Quellen (älter):
 
-2. Direkt aus einem GTFS-ZIP des VBB
-   (https://www.vbb.de/vbbgtfs bzw. https://daten.berlin.de):
-
-       python3 tools/build_data.py --gtfs GTFS.zip
+    python3 tools/build_data.py --source npm      # npm-Pakete vbb-lines/vbb-stations (Stand März 2026)
+    python3 tools/build_data.py --gtfs GTFS.zip   # ein GTFS-ZIP des VBB (https://www.vbb.de/vbbgtfs)
 
 Das Skript wird nur einmal benötigt; das Programm selbst läuft danach
 komplett offline.
@@ -23,9 +25,12 @@ import collections
 import csv
 import io
 import json
+import math
 import re
+import shutil
 import sys
 import tarfile
+import time
 import urllib.request
 import zipfile
 from datetime import date
@@ -41,8 +46,9 @@ OPERATORS = {"1", "796"}
 
 # Linien, die im neuesten Fahrplan fehlen dürfen (z. B. wegen Bauarbeiten gesperrt), aber trotzdem ins
 # Spiel sollen. Sie werden dann aus der letzten älteren Version übernommen, in der sie noch vorkommen.
-# Die U4 fehlt seit Februar 2026 im VBB-Datensatz, die Saison-Fähre F24 (nur April bis Oktober) seit Oktober 2025.
-KEEP_LINES = ["U4", "F24"]
+# Die U4 fehlte von Februar bis März 2026 im VBB-Datensatz; die Fähren F21, F23 und F24 fahren nur im Sommer
+# und fehlen deshalb im Winterfahrplan.
+KEEP_LINES = ["U4", "F21", "F23", "F24"]
 MAX_LOOKBACK = 12   # so viele ältere Versionen werden höchstens durchsucht
 PRODUCTS = ("sbahn", "ubahn", "tram", "bus", "regio", "ice", "faehre", "bbus")
 # ICE-Linien stehen nicht im VBB-Fahrplan; sie kommen aus dieser Datei (von Hand gepflegt)
@@ -166,12 +172,12 @@ def parse_npm_lines(raw):
     return lines
 
 
-def add_kept_lines(lines, versions, meta):
-    """Ergänzt Linien aus KEEP_LINES, die im neuesten Fahrplan fehlen, aus älteren Versionen."""
+def add_kept_lines(lines, versions, meta, include_latest=False):
+    """Ergänzt Linien aus KEEP_LINES, die im neuesten Fahrplan fehlen, aus älteren Versionen von vbb-lines."""
     missing = [n for n in KEEP_LINES if not any(l["name"] == n for l in lines)]
     notes = []
     latest = meta["dist-tags"]["latest"]
-    older = [v for v in versions if v != latest][:MAX_LOOKBACK]
+    older = [v for v in versions if include_latest or v != latest][:MAX_LOOKBACK]
     for version in older:
         if not missing:
             break
@@ -214,6 +220,260 @@ def load_npm():
     if notes:
         source += " (" + ", ".join(notes) + ")"
     return lines, names, coords, source
+
+
+# --------------------------------------------------------------------------
+# Standardquelle: bundesweiter Soll-Fahrplan (DELFI e.V.) über gtfs.de
+# --------------------------------------------------------------------------
+
+GTFS_DE = "https://download.gtfs.de/germany/{}_free/latest.zip"   # nv = Nahverkehr, rv = Regionalverkehr (Züge)
+GTFS_DE_CACHE = ROOT / "build"                                    # Zwischenablage (steht in .gitignore)
+MATCH_M = 60            # so nah muss ein Halt aus gtfs.de an einem Bahnsteig aus dem VBB-Verzeichnis liegen …
+MATCH_NAME_M = 400      # … oder so nah, wenn auch ein Teil des Namens übereinstimmt (Bahnhöfe: Gleismitte statt Bahnhofspunkt)
+MATCH_RAIL_M = 800      # bei Zügen noch etwas weiter (lange Bahnsteige, z. B. Spandau oder Hennigsdorf)
+NAME_STOPWORDS = {"berlin", "bahnhof", "bhf", "gleis", "mast", "bstggl", "tief", "bus", "tram", "bln", "berl", "str",
+                  "platz", "flixtrain"}
+BVG_AGENCY = "Berliner Verkehrsbetriebe"
+SBAHN_AGENCY = "S Bahn Berlin"
+EV_NAME = re.compile(r"^S?EV\d*$", re.I)                             # Ersatzverkehr („EV“, „SEV“, „EV3“)
+REGIO_NAME = re.compile(r"^(RE|RB|FEX|TES)")
+COACH_AGENCY = re.compile(r"flix|blablacar|fernbus|eurolines|regiojet", re.I)       # Fernbusse gehören nicht dazu
+
+
+def gtfs_de_zip(kind, path=None):
+    """GTFS-ZIP von gtfs.de (``kind`` = "nv" oder "rv"); höchstens einen Tag alt, sonst neu laden."""
+    if path:
+        return Path(path)
+    target = GTFS_DE_CACHE / f"gtfs-de-{kind}.zip"
+    if not target.exists() or time.time() - target.stat().st_mtime > 86400:
+        url = GTFS_DE.format(kind)
+        print("  lade", url, file=sys.stderr)
+        GTFS_DE_CACHE.mkdir(exist_ok=True)
+        tmp = target.with_suffix(".part")
+        with urllib.request.urlopen(url, timeout=600) as r, open(tmp, "wb") as f:
+            shutil.copyfileobj(r, f, 1 << 20)
+        tmp.replace(target)
+    return target
+
+
+def load_vbb_stations():
+    """VBB-Haltestellenverzeichnis: (Namen, Koordinaten, [(Nummer, Name, Breite, Länge)], Quellenangabe)."""
+    (raw_names, raw_data), label = npm_files("vbb-stations", "names.json", "data.json")
+    names = json.loads(raw_names)
+    rows = json.loads(raw_data)                     # [Nummer, Name, Gewicht, Breite, Länge]
+    coords = {row[0]: (row[3], row[4]) for row in rows}
+    return names, coords, [(row[0], row[1], row[3], row[4], row[2]) for row in rows], label
+
+
+def name_words(name):
+    """Kennzeichnende Wörter eines Haltestellennamens („S Wannsee Bhf (Berlin)“ -> {"wannsee"})."""
+    text = name.lower().replace("ß", "ss").replace("ä", "ae").replace("ö", "oe").replace("ü", "ue")
+    text = re.sub(r"\bhbf\b", "hauptbahnhof", text)
+    text = re.sub(r"(?<=[a-z])(strasse|str)\b", "str", text)      # „Kochstraße“ = „Kochstr.“
+    return {w for w in re.split(r"[^a-z0-9]+", text) if len(w) >= 3 and w not in NAME_STOPWORDS}
+
+
+class StopMatcher:
+    """Findet zu einem Halt aus gtfs.de den passenden Bahnsteig bzw. Mast im VBB-Verzeichnis."""
+
+    def __init__(self, rows):
+        self.grid = collections.defaultdict(list)
+        for key, name, lat, lon, weight in rows:
+            self.grid[(int(lat * 100), int(lon * 60))].append((key, name_words(name), lat, lon, weight))
+
+    def match(self, lat, lon, name="", rail=None):
+        """Der nächste Halt mit gleichem Namensteil (bis 400 m), sonst der nächste überhaupt (bis 60 m).
+
+        Unter den Halten mit gleichem Namensteil gewinnt der mit dem ähnlichsten Namen (Anteil gemeinsamer Wörter),
+        bei Gleichstand der nächste – so wird aus „S Erkner Bhf“ „S Erkner“ und nicht die Bushaltestelle
+        „S Erkner/ZOB“ daneben, aus „S Oranienburger Str.“ nicht „U Oranienburger Tor“.
+
+        ``rail``: Menge der bekannten Bahnhöfe (VBB-Nummern). Bei Zügen wird zuerst unter ihnen gesucht – manche
+        Bahnsteige heißen in gtfs.de wie die Bushaltestelle davor („Spandau S+U Rathaus Spandau Position 2“)."""
+        if rail:
+            hit = self._match(lat, lon, name, MATCH_RAIL_M, 150, lambda key: station_key(key) in rail)
+            if hit:
+                return hit
+        return self._match(lat, lon, name, MATCH_NAME_M, MATCH_M)
+
+    def _match(self, lat, lon, name, reach, near, allowed=None):
+        words = name_words(name)
+        best, best_d, named, named_score = None, near, None, None
+        gx, gy = int(lat * 100), int(lon * 60)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for key, kw, la, lo, weight in self.grid.get((gx + dx, gy + dy), ()):
+                    if allowed and not allowed(key):
+                        continue
+                    d = math.hypot((la - lat) * 111000, (lo - lon) * 68000)
+                    if d < best_d:
+                        best, best_d = key, d
+                    common = words & kw
+                    if d < reach and common:
+                        score = (-len(common) / len(words | kw), d)
+                        if named_score is None or score < named_score:
+                            named, named_score = key, score
+        return named or best
+
+
+def gtfs_de_product(route_type, agency, name):
+    """Verkehrsmittel im Spiel für eine Linie aus gtfs.de (oder None = nicht ins Spiel)."""
+    bvg, sbahn = agency.startswith(BVG_AGENCY), agency.startswith(SBAHN_AGENCY)
+    if route_type == "2":
+        if sbahn:
+            return "sbahn"
+        # nur Regionalzüge (RE, RB, FEX); FlixTrain, Harz-Berlin-Express, Nachtzüge usw. nicht
+        return "regio" if REGIO_NAME.match(name) else None
+    if route_type == "1":
+        return "ubahn" if bvg else None
+    if route_type == "0":
+        return "tram" if bvg else None
+    if route_type == "3":
+        if sbahn or EV_NAME.match(name) or COACH_AGENCY.search(agency):
+            return None                             # Ersatzverkehr mit Bussen, Fernbusse
+        return "bus" if bvg else "bbus"
+    if route_type == "4":
+        return "faehre"
+    return None
+
+
+def gtfs_seconds(text):
+    h, m, sec = (int(v) for v in text.split(":"))
+    return h * 3600 + m * 60 + sec
+
+
+def load_gtfs_de(nv_path=None, rv_path=None):
+    """Linien aus dem Nah- und Regionalverkehrs-GTFS von gtfs.de, Haltestellen aus dem VBB-Verzeichnis.
+
+    Die Haltestellen in gtfs.de haben eigene Nummern und uneinheitliche Namen. Jeder Bahnsteig bzw. Mast wird
+    deshalb über die Koordinaten dem nächsten Bahnsteig im VBB-Verzeichnis zugeordnet (meist nur wenige Meter
+    entfernt); so bleiben die VBB-Nummern und -Namen erhalten. Halte außerhalb des VBB-Gebiets fallen weg.
+
+    Liefert (Linien, Namen, Koordinaten, Quellenangabe, Fahrzeiten), Fahrzeiten wie ``build_times.collect``."""
+    names, coords, rows, st_label = load_vbb_stations()
+    matcher = StopMatcher(rows)
+    # bekannte Bahnhöfe je Verkehrsmittel aus den letzten Ständen des VBB-Liniendatensatzes (dort fehlte z. B.
+    # zeitweise die U4, deshalb mehrere Stände)
+    versions, meta = npm_versions("vbb-lines")
+    rail_sets = {"sbahn": set(), "regio": set(), "ubahn": set()}
+    uses = {"suburban": ("sbahn", "regio"), "regional": ("regio",), "subway": ("ubahn",)}
+    for version in versions[:4]:
+        (raw,), _ = npm_files("vbb-lines", "data.ndjson", version=version, meta=meta)
+        for row in raw.decode("utf-8").splitlines():
+            if row.strip():
+                line = json.loads(row)
+                for product in uses.get(line["product"], ()):
+                    rail_sets[product].update(station_key(stop) for v in line["variants"] for stop in v["stops"])
+    variants = collections.defaultdict(collections.Counter)   # (Verkehrsmittel, Name, Betreiber) -> Halte -> Fahrten
+    per_line = collections.defaultdict(collections.Counter)
+    any_line = collections.defaultdict(collections.Counter)
+    skipping = collections.defaultdict(collections.Counter)
+    stand = []
+    for kind, path in (("nv", nv_path), ("rv", rv_path)):
+        zpath = gtfs_de_zip(kind, path)
+        stand.append(time.strftime("%d.%m.%Y", time.localtime(zpath.stat().st_mtime)))
+        with zipfile.ZipFile(zpath) as z:
+            def table(name):
+                with z.open(name) as f:
+                    yield from csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
+
+            agencies = {r["agency_id"]: r["agency_name"] for r in table("agency.txt")}
+            routes = {}
+            for r in table("routes.txt"):
+                name = r["route_short_name"].strip()
+                product = gtfs_de_product(r["route_type"], agencies.get(r["agency_id"], ""), name)
+                if product and name:
+                    routes[r["route_id"]] = (product, name, r["agency_id"] if product == "bbus" else "")
+            trip_route = {t["trip_id"]: routes[t["route_id"]] for t in table("trips.txt") if t["route_id"] in routes}
+            stops = {st["stop_id"]: (float(st["stop_lat"]), float(st["stop_lon"]), st["stop_name"])
+                     for st in table("stops.txt") if st["stop_lat"] and st["location_type"] != "1"}
+            matched = {}
+
+            def stop_key(stop, product):
+                """VBB-Bahnsteig zum Halt aus gtfs.de (gemerkt; bei Zügen zuerst unter den passenden Bahnhöfen)."""
+                if (stop, product) not in matched:
+                    lat, lon, name = stops[stop]
+                    matched[(stop, product)] = matcher.match(lat, lon, name, rail_sets.get(product))
+                return matched[(stop, product)]
+            print(f"  {zpath.name}: {len(routes)} Linien, {len(trip_route)} Fahrten", file=sys.stderr)
+
+            def finish(trip_id, seq):
+                info = trip_route.get(trip_id)
+                if not info:
+                    return
+                seq.sort()
+                product, name, operator = info
+                group = product if product in rail_sets else ""
+                pts = [(stop_key(stop, group), arr, dep) for _, stop, arr, dep in seq]
+                pts = [p for p in pts if p[0]]
+                if len(pts) < 2:
+                    return
+                if product == "bbus" and len(pts) < len(seq) / 2:
+                    return                                  # hält meist außerhalb des VBB (z. B. Fernbus)
+                keys = [p[0] for p in pts]
+                # Regionalzüge und Fähren nur, wenn sie in Berlin halten; Busse in Brandenburg nur dort
+                if product in ("regio", "faehre") and not any(k.startswith(BERLIN_PREFIX) for k in keys):
+                    return
+                if product == "bbus" and not any(REGION_ID.search(k) for k in keys):
+                    return
+                variants[info][tuple(keys)] += 1
+                sk = [station_key(k) for k in keys]
+                for i in range(len(sk) - 1):
+                    a, b = sk[i], sk[i + 1]
+                    dep, arr = pts[i][2], pts[i + 1][1]
+                    if a == b or arr < dep or arr - dep > 3 * 3600:
+                        continue
+                    per_line[(name, a, b)][arr - dep] += 1
+                    any_line[(a, b)][arr - dep] += 1
+                    for j in (i + 2, i + 3):        # über Zwischenhalte hinweg, falls die Linie im Spiel seltener hält
+                        if j < len(sk) and sk[j] != a and dep <= pts[j][1] <= dep + 3 * 3600:
+                            skipping[(name, a, sk[j])][pts[j][1] - dep] += 1
+
+            current, seq = None, []
+            for st in table("stop_times.txt"):    # die Zeilen einer Fahrt stehen in gtfs.de beieinander
+                tid = st["trip_id"]
+                if tid != current:
+                    if seq:
+                        finish(current, seq)
+                    current, seq = tid, []
+                if tid in trip_route and st["stop_id"] in stops:
+                    seq.append((int(st["stop_sequence"]), st["stop_id"], gtfs_seconds(st["arrival_time"]),
+                                gtfs_seconds(st["departure_time"])))
+            if seq:
+                finish(current, seq)
+
+    lines = [{"name": name, "product": product, "operator": operator,
+              "variants": [(list(stops), n) for stops, n in counter.items()]}
+             for (product, name, operator), counter in variants.items()]
+    notes = add_kept_lines(lines, versions, meta, include_latest=True)
+    source = (f"Soll-Fahrplan Nah- und Regionalverkehr (DELFI e.V.) über gtfs.de, Stand {' / '.join(sorted(set(stand)))}; "
+              f"Haltestellen: VBB über {st_label}")
+    if notes:
+        source += " (" + ", ".join(notes) + ")"
+    return lines, names, coords, source, (per_line, any_line, skipping)
+
+
+def fill_thin_regions(data, names, coords):
+    """Busse in Brandenburg: Landkreise, die in gtfs.de kaum vorkommen (die Prignitz fehlt dort fast ganz),
+    bekommen die Linien aus dem letzten VBB-Stand (vbb-lines). Gibt die Kennzeichen der Landkreise zurück."""
+    (raw,), label = npm_files("vbb-lines", "data.ndjson")
+    old = build([l for l in parse_npm_lines(raw) if l["product"] == "bbus"], names, coords, "", extras=False)
+    count = collections.Counter(l["region"] for l in data["lines"]["bbus"])
+    old_count = collections.Counter(l["region"] for l in old["lines"]["bbus"])
+    thin = [r for r in old_count if count[r] < old_count[r] / 2]
+    for region in thin:
+        data["lines"]["bbus"] = [l for l in data["lines"]["bbus"] if l["region"] != region] + \
+            [l for l in old["lines"]["bbus"] if l["region"] == region]
+        print(f"  {REGIONS[region][1]}: in gtfs.de nur {count[region]} Buslinien, "
+              f"übernommen {old_count[region]} aus {label}", file=sys.stderr)
+    if thin:
+        data["lines"]["bbus"].sort(key=sort_key)
+        data["stations"].update(old["stations"])
+        data["coords"].update(old["coords"])
+        data["stations"] = dict(sorted(data["stations"].items()))
+        data["coords"] = dict(sorted(data["coords"].items()))
+        data["source"] += f"; Busse {', '.join(REGIONS[r][0] for r in thin)}: {label}"
+    return [REGIONS[r][0] for r in thin]
 
 
 def load_gtfs(path):
@@ -372,7 +632,7 @@ def add_ice_lines(result, stations, coords):
     print(f"  {len(spec['lines'])} ICE-Linien aus {ICE_FILE.name}, Koordinaten aus {label}", file=sys.stderr)
 
 
-def build(lines, raw_names, raw_coords, source):
+def build(lines, raw_names, raw_coords, source, extras=True):
     # Namen je Station (900er-Nummer); Stationseinträge haben Vorrang vor Bahnsteigen
     by_station = {}
     for key, name in raw_names.items():
@@ -459,8 +719,9 @@ def build(lines, raw_names, raw_coords, source):
             entry["region"] = region
         result[product].append(entry)
 
-    extra = add_extra_lines(result, stations)
-    add_ice_lines(result, stations, coords)
+    extra = add_extra_lines(result, stations) if extras else []
+    if extras:
+        add_ice_lines(result, stations, coords)
 
     used = {s for p in result.values() for l in p for d in l["directions"] for s in d}
     for product in result:
@@ -469,7 +730,7 @@ def build(lines, raw_names, raw_coords, source):
     return {
         "source": source + (" + ICE-Linien von Hand (data/ice_lines.json)" if result["ice"] else "")
         + (f" + {', '.join(extra)} von Hand (data/extra_lines.json)" if extra else ""),
-        "license": "Fahrplandaten: VBB Verkehrsverbund Berlin-Brandenburg GmbH, CC BY 4.0",
+        "license": "Fahrplandaten: DELFI e.V. (gtfs.de) und VBB Verkehrsverbund Berlin-Brandenburg GmbH, CC BY 4.0",
         "created": date.today().isoformat(),
         "regions": {k: {"short": v[0], "name": v[1], "color": v[2]} for k, v in REGIONS.items()},
         "stations": {k: v for k, v in sorted(stations.items()) if k in used},
@@ -480,17 +741,32 @@ def build(lines, raw_names, raw_coords, source):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--gtfs", help="Pfad zu einem VBB-GTFS-ZIP statt der npm-Pakete")
+    ap.add_argument("--source", choices=("gtfsde", "npm"), default="gtfsde",
+                    help="gtfsde: Fahrplan von gtfs.de (Standard), npm: ältere VBB-Pakete vbb-lines/vbb-trips")
+    ap.add_argument("--nv", help="vorhandenes Nahverkehrs-ZIP von gtfs.de (sonst wird es geladen)")
+    ap.add_argument("--rv", help="vorhandenes Regionalverkehrs-ZIP von gtfs.de (sonst wird es geladen)")
+    ap.add_argument("--gtfs", help="Pfad zu einem VBB-GTFS-ZIP statt der anderen Quellen")
     ap.add_argument("-o", "--output", default=str(OUT), help="Zieldatei (Standard: %(default)s)")
     args = ap.parse_args()
 
     print("Lese Fahrplandaten ...", file=sys.stderr)
-    lines, names, coords, source = load_gtfs(args.gtfs) if args.gtfs else load_npm()
+    timing = None
+    if args.gtfs:
+        lines, names, coords, source = load_gtfs(args.gtfs)
+    elif args.source == "npm":
+        lines, names, coords, source = load_npm()
+    else:
+        lines, names, coords, source, timing = load_gtfs_de(args.nv, args.rv)
     data = build(lines, names, coords, source)
+    if timing:
+        fill_thin_regions(data, names, coords)
     if not args.gtfs:
-        from build_times import add_ice_times, add_travel_times   # Fahrzeiten zwischen den Stationen
+        from build_times import add_ice_times, add_travel_times, fill_times   # Fahrzeiten zwischen den Stationen
         try:
-            add_travel_times(data)
+            if timing:
+                fill_times(data, *timing)
+                data["times_source"] = "Fahrzeiten: aus demselben Fahrplan (DELFI e.V. über gtfs.de)"
+            add_travel_times(data)          # Lücken (z. B. Saisonlinien) aus älteren VBB-Fahrplänen
             add_ice_times(data)
         except Exception as e:  # noqa: BLE001 – ohne Fahrzeiten läuft das Spiel trotzdem
             print("Fahrzeiten konnten nicht geladen werden:", e, file=sys.stderr)

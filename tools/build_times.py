@@ -142,10 +142,11 @@ def add_travel_times(data, version=None, lookback=4, seasonal_lookback=12):
     if version:
         versions = [version]
     sources = []
+    before = data.get("times_source")          # Fahrzeiten stehen schon (z. B. aus gtfs.de): hier nur Lücken füllen
     for n, ver in enumerate(versions[:1 + lookback]):
         source, per_line, any_line, skipping = collect(ver)
         filled = fill_times(data, per_line, any_line, skipping)
-        if n == 0 or filled:
+        if (n == 0 and not before) or filled:
             sources.append(source)
         missing = sum(v is None for ls in data["lines"].values() for l in ls for r in l.get("times", []) for v in r)
         print(f"  {source}: {filled} Abschnitte, noch ohne Fahrzeit: {missing}", file=sys.stderr)
@@ -168,7 +169,11 @@ def add_travel_times(data, version=None, lookback=4, seasonal_lookback=12):
             found = sum(v is not None for v in vals)
             print(f"  {kind:6s} Fahrzeiten für {found} von {len(vals)} Abschnitten ({100 * found / len(vals):.0f} %)",
                   file=sys.stderr)
-    data["times_source"] = "Fahrzeiten: VBB-Fahrplandaten (GTFS, CC BY 4.0) über " + ", ".join(sources)
+    if before:
+        data["times_source"] = before + (("; Lücken aus älteren VBB-Fahrplandaten (GTFS, CC BY 4.0) über "
+                                          + ", ".join(sources)) if sources else "")
+    else:
+        data["times_source"] = "Fahrzeiten: VBB-Fahrplandaten (GTFS, CC BY 4.0) über " + ", ".join(sources)
     return data
 
 

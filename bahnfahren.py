@@ -820,7 +820,7 @@ class HomeScreen(Screen):
         checkbox(app, c, 24 * s, h - 22 * s, "Zeige ICE-Umstiege", app.show_ice(),
                  lambda: self.toggle("show_ice", app.show_ice()))
 
-        c.create_text(w - 24 * s, h - 22 * s, text="Fahrplandaten: VBB (CC BY 4.0)", anchor="e",
+        c.create_text(w - 24 * s, h - 22 * s, text="Fahrplandaten: DELFI e.V. (gtfs.de), VBB – CC BY 4.0", anchor="e",
                       font=app.font(11), fill=MUTED)
 
     def toggle(self, setting, current):

@@ -5,8 +5,8 @@ dann Station für Station mit den Pfeiltasten durch Berlin fahren.
 
 Enthalten sind alle S-Bahn-, U-Bahn-, Straßenbahn- und Buslinien von BVG und
 S-Bahn Berlin, alle BVG-Fähren sowie alle Regional- und ICE-Züge, die durch
-Berlin fahren (16 S-Bahn-, 9 U-Bahn-, 22 Tram-, 204 Bus-, 22 Regional-,
-8 ICE- und 6 Fährlinien). Als eigene Kategorie kommen 780 Buslinien in ganz
+Berlin fahren (16 S-Bahn-, 9 U-Bahn-, 22 Tram-, 207 Bus-, 24 Regional-,
+8 ICE- und 6 Fährlinien). Als eigene Kategorie kommen 786 Buslinien in ganz
 Brandenburg dazu.
 Dazu kommen 33 Flüge vom Flughafen BER in die ganze Welt und 7 Kreuzfahrten
 ab Hamburg, Kiel und Warnemünde. Das Programm läuft komplett **offline**.
@@ -60,7 +60,7 @@ neben der Strecke, wie viele Minuten die Fahrt laut Fahrplan dauert. Bei
 „< 1 Min.“ sind es weniger als eine Minute. Die Fahrzeit zur nächsten
 Station steht auch auf der Infotafel bei „Nächster Halt“ und im Cockpit in
 der Anzeige oben. Die Zahlen sind die offiziellen Fahrzeiten aus dem
-VBB-Fahrplan (siehe [Woher kommen die Daten?](#woher-kommen-die-daten)).
+aktuellen Soll-Fahrplan (siehe [Woher kommen die Daten?](#woher-kommen-die-daten)).
 
 `Esc` oder der Knopf „Zurück“ führt immer einen Schritt zurück. `F11`
 schaltet auf Vollbild. Auf der Ringbahn (S41/S42) kann man endlos im Kreis
@@ -195,7 +195,7 @@ Ansicht bleibt beim Umsteigen erhalten.
 ## Bus Brandenburg
 
 Eine eigene Kategorie, getrennt von den Berliner Bussen: alle Buslinien in
-Brandenburg (780 Linien). Weil das so viele sind, wählt man zuerst den
+Brandenburg (786 Linien). Weil das so viele sind, wählt man zuerst den
 **Landkreis bzw. die kreisfreie Stadt**, erkennbar am Autokennzeichen
 (z. B. BAR Barnim, MOL Märkisch-Oderland, P Potsdam, CB Cottbus, UM
 Uckermark), und dann die Linie. Tippen geht auch: `U`, `M` springt zur
@@ -236,9 +236,8 @@ München über Nürnberg). Der ICE ist weiß mit rotem Streifen und spitzer Nase
 die Linienschilder sind rot. Beim Türsignal gibt es zuerst den Dreiklang-Gong
 vom Bahnsteig. Der Netzplan zeigt ganz Deutschland.
 
-**Wichtig:** Die VBB-Fahrplandaten enthalten keine Fernzüge, und die offenen
-Fernverkehrsdaten (gtfs.de, DELFI) waren beim Erstellen nicht erreichbar. Die
-Linien sind deshalb **von Hand nach dem DB-Liniennetz zusammengestellt**, in
+**Wichtig:** Die Laufwege der ICE-Linien sind **von Hand nach dem
+DB-Liniennetz zusammengestellt**, in
 `data/ice_lines.json`. Gezeigt wird je Linie der typische Laufweg mit den
 wichtigsten Halten; einzelne Züge fahren anders (Flügelzüge, Sprinter,
 Umleitungen). Die Koordinaten der Bahnhöfe stammen aus dem
@@ -574,82 +573,89 @@ Danach liegt die App in `dist/`.
 
 ## Woher kommen die Daten?
 
-BVG und S-Bahn Berlin haben keine eigene öffentliche Linien-API. Der
-Verkehrsverbund Berlin-Brandenburg (VBB) veröffentlicht aber den kompletten
-Fahrplan als offene Daten im GTFS-Format
-([daten.berlin.de](https://daten.berlin.de/datensaetze/vbb-fahrplandaten-gtfs),
-Lizenz CC BY 4.0).
+BVG und S-Bahn Berlin haben keine eigene öffentliche Linien-API. Es gibt aber
+den kompletten **Soll-Fahrplan für ganz Deutschland** als offene Daten im
+GTFS-Format: DELFI e.V. stellt ihn bereit, [gtfs.de](https://gtfs.de) bietet ihn
+zum Herunterladen an (Lizenz CC BY 4.0). Er wird laufend aktualisiert und
+enthält auch die Daten des Verkehrsverbunds Berlin-Brandenburg (VBB).
+Gebraucht werden zwei Teile:
 
-`tools/build_data.py` erzeugt daraus **einmalig** die Datei
-`data/berlin_lines.json`. Die ist bereits im Repository enthalten, du musst
-also nichts tun. Neu bauen kannst du sie so:
+- **Nahverkehr** (`nv_free`, gut 280 MB): U-Bahn, Straßenbahn, Busse und Fähren,
+- **Regionalverkehr** (`rv_free`, 15 MB): S-Bahn, RE und RB.
+
+Die Haltestellen haben dort eigene Nummern und uneinheitliche Namen (z. B.
+„Alexanderplatz [Bus K.-Liebknecht-Str] (S+U), Berl“). Deshalb ordnet
+`tools/build_data.py` jeden Halt über seine Koordinaten dem
+**VBB-Haltestellenverzeichnis** zu (npm-Paket `vbb-stations`, CC BY 4.0). So
+bleiben die bekannten VBB-Namen wie „S+U Alexanderplatz“ erhalten. Meist liegen
+die beiden Punkte nur wenige Meter auseinander. Bei Bahnhöfen kann es mehr
+sein, weil gtfs.de die Gleise einträgt. Dort muss zusätzlich ein Teil des
+Namens passen, und bei Zügen kommen nur Bahnhöfe infrage, an denen schon
+früher Züge hielten (so wird aus „Berlin Spandau Gl. 4“ „S Spandau“ und nicht
+„S+U Rathaus Spandau“). Halte außerhalb des VBB-Gebiets fallen weg.
+
+`tools/build_data.py` erzeugt daraus die Datei `data/berlin_lines.json`. Die
+ist bereits im Repository enthalten, du musst also nichts tun. Neu bauen
+kannst du sie so:
 
 ```sh
-# aus den aufbereiteten VBB-GTFS-Paketen vbb-lines / vbb-stations (Standard)
+# Standard: lädt die beiden Fahrpläne von gtfs.de (zusammen gut 300 MB, dauert ein paar Minuten)
 python3 tools/build_data.py
 
-# oder direkt aus einem GTFS-ZIP des VBB
+# mit schon geladenen ZIPs von gtfs.de
+python3 tools/build_data.py --nv nv_free.zip --rv rv_free.zip
+
+# ältere Quellen: die npm-Pakete vbb-lines/vbb-trips (Stand März 2026) oder ein GTFS-ZIP des VBB
+python3 tools/build_data.py --source npm
 python3 tools/build_data.py --gtfs GTFS.zip
 ```
 
+Die geladenen ZIPs bleiben einen Tag lang im Ordner `build/` liegen. Der ist
+von Git ausgenommen.
+
 Für jede Linie wählt das Skript die typische Hin- und Rückfahrt aus. Kurze
-Fahrten, Fahrten zum Betriebshof und Ersatzverkehr lässt es weg.
+Fahrten, Fahrten zum Betriebshof und Ersatzverkehr lässt es weg, ebenso
+Fernbusse und FlixTrain. **Weil der Fahrplan immer nur für die nächsten
+Wochen gilt, enthält er auch Bauarbeiten.** Fährt eine Linie gerade
+umgeleitet oder verkürzt, zeigt das Spiel sie so. Wer die Daten später neu
+baut, bekommt den dann gültigen Fahrplan.
 
-Die **Busse in Brandenburg** sind alle Buslinien der übrigen Betreiber im
-VBB (also nicht BVG und S-Bahn), die in Brandenburg halten. Der
-Landkreis steht im Gemeindeschlüssel der Haltestellen-Nummern
-(„de:12064:…“ = Märkisch-Oderland); die Tabelle `REGIONS` in
-`tools/build_data.py` ordnet ihm Kennzeichen, Namen und Farbe zu. Gleiche
-Liniennummern gibt es oft in mehreren Landkreisen, deshalb unterscheidet das
-Skript die Linien dort auch nach dem Betreiber. Fahrzeiten sind für 99 %
-der Abschnitte da.
+Die **Busse in Brandenburg** sind alle Buslinien der übrigen Betreiber (also
+nicht BVG und S-Bahn), die in Brandenburg halten. Der Landkreis steht im
+Gemeindeschlüssel der VBB-Haltestellen-Nummern („de:12064:…“ =
+Märkisch-Oderland); die Tabelle `REGIONS` in `tools/build_data.py` ordnet ihm
+Kennzeichen, Namen und Farbe zu. Gleiche Liniennummern gibt es oft in mehreren
+Landkreisen, deshalb unterscheidet das Skript die Linien dort auch nach dem
+Betreiber. Die **Prignitz** fehlt in gtfs.de fast ganz (Stand November 2026).
+Für einen Landkreis, der dort weniger als halb so viele Linien hat wie im
+letzten VBB-Datensatz, nimmt das Skript deshalb dessen Linien (npm-Paket
+`vbb-lines`, Stand März 2026).
 
-Der aktuelle Datenstand stammt aus dem VBB-Fahrplan vom März 2026. Die
-**U4** fehlt darin seit Februar 2026, vermutlich wegen einer Sperrung, und
-die Saison-Fähre **F24** fährt nur von April bis Oktober. Damit sie trotzdem
-im Spiel sind, übernimmt das Skript Linien aus der Liste `KEEP_LINES` (in
-`tools/build_data.py`) aus der letzten älteren Version, in der sie noch
-vorkommen. Für die U4 ist das der Fahrplan vom Januar 2026, für die F24 der
-vom Oktober 2025. Weitere Linien lassen sich dort einfach eintragen.
+Die Fähren **F21, F23 und F24** fahren nur im Sommer und fehlen im
+Winterfahrplan. Damit sie trotzdem im Spiel sind, übernimmt das Skript Linien
+aus der Liste `KEEP_LINES` (in `tools/build_data.py`) aus dem letzten
+VBB-Datensatz, in dem sie vorkommen. Weitere Linien lassen sich dort einfach
+eintragen. **Neue Linien**, die im Fahrplan noch fehlen, kann man in
+`data/extra_lines.json` von Hand eintragen. Dort steht noch die **S15**. Sie
+ist inzwischen im Fahrplan, deshalb wird der Eintrag nicht mehr gebraucht.
 
-**Neue Linien**, die im VBB-Datensatz noch fehlen, stehen in
-`data/extra_lines.json`. Zurzeit ist das die **S15** (seit 15. Juni 2026,
-Gesundbrunnen – Wedding – Hauptbahnhof) in Pink wie die S1. Sobald
-der VBB-Datensatz die Linie selbst enthält, nimmt das Skript automatisch die
-echten Daten.
+Fahrplandaten: © DELFI e.V. (über gtfs.de) und VBB Verkehrsverbund
+Berlin-Brandenburg GmbH, beide CC BY 4.0.
 
-Fehlt ein Bahnhofsname im neuesten Haltestellenverzeichnis, nimmt das Skript
-ihn aus der Verzeichnisversion, die zum Fahrplanstand passt. Einige Bahnsteige
-haben im Fahrplan eine eigene Nummer, die im Verzeichnis gar nicht vorkommt.
-Sie stehen in der Tabelle `STATION_ALIASES` in `tools/build_data.py` und
-werden der richtigen Station zugeordnet: der Hauptbahnhof der Regional- und
-Fernbahn (sonst fehlte er bei RE3, RE4, RE5, RE8, RE20, RE85, RB10 und FEX)
-und der U2-Bahnsteig von Stadtmitte.
+**Fahrzeiten zwischen den Stationen:** Sie stammen aus denselben Fahrten. Für
+jeden Abschnitt nimmt das Skript die Fahrzeit (Ankunft an der nächsten
+Station minus Abfahrt an der vorigen) aller Fahrten der Linie und davon den
+Mittelwert (Median). So sind für fast alle Abschnitte Zeiten da: S-Bahn,
+U-Bahn, Regionalbahn und Fähre zu 100 %, Tram und Bus zu 99 %. Die wenigen
+Lücken, etwa bei den Sommer-Fähren, füllt `tools/build_times.py` aus älteren
+VBB-Fahrplänen (npm-Paket `vbb-trips`). Der Fahrplan rechnet in ganzen Minuten.
 
-Fahrplandaten: © VBB Verkehrsverbund Berlin-Brandenburg GmbH, CC BY 4.0.
-
-**Fahrzeiten zwischen den Stationen:** Sie stammen aus demselben offiziellen
-VBB-Fahrplan (GTFS) wie die Linien, aufbereitet im npm-Paket `vbb-trips`
-(Stand März 2026). `tools/build_times.py` nimmt für jeden Abschnitt die
-Fahrzeit (Ankunft an der nächsten Station minus Abfahrt an der vorigen) aller
-Fahrten der Linie und davon den Mittelwert (Median). So sind für fast alle
-Abschnitte Zeiten da: S-Bahn, U-Bahn, Regionalbahn und Fähre zu 100 %, Tram
-zu 99 %, Bus zu 98 %. Fehlende Abschnitte, etwa die gesperrte U4, kommen aus
-älteren Fahrplanständen. Die Saison-Fähre F24 fehlt in allen Ständen seit
-November 2024; ihre Fahrzeit kommt aus dem Stand vom Oktober 2024. Der Fahrplan rechnet in ganzen Minuten.
-
-Die **ICE-Linien** stehen nicht im VBB-Fahrplan. Ihre Fahrzeiten kommen aus
-dem Soll-Fahrplan des Fernverkehrs (DELFI e.V., über
-[gtfs.de](https://gtfs.de), Lizenz CC BY 4.0). Die Bahnhöfe werden über ihre
-Koordinaten zugeordnet. Gezählt wird die Zeit zwischen zwei Halten der Linie
-im Spiel, auch wenn der Zug dazwischen noch öfter hält. Dieser Fahrplan gilt
-immer nur für die nächsten Wochen und enthält deshalb auch **Umleitungen
-wegen Bauarbeiten**. Beim Stand vom 14.11. bis 12.12.2026 fahren die ICE
-zwischen Nürnberg und München über Umwege (etwa 1 Std. 50 Min. statt sonst
-gut 1 Stunde), und Berlin Ostbahnhof und Wolfsburg werden nicht angefahren.
-Dort steht deshalb keine Zeit. Wer die Daten später neu baut, bekommt den
-dann gültigen Fahrplan. Das Skript
-läuft am Ende von `tools/build_data.py` automatisch mit, einzeln geht es so:
+Die **ICE-Linien** kommen aus dem Soll-Fahrplan des Fernverkehrs, ebenfalls
+von DELFI über gtfs.de (`fv_free`). Die Bahnhöfe werden über ihre Koordinaten
+zugeordnet. Gezählt wird die Zeit zwischen zwei Halten der Linie im Spiel,
+auch wenn der Zug dazwischen noch öfter hält. Auch hier gilt: Bei Bauarbeiten
+zeigt das Spiel die Fahrzeit der Umleitung. Das Skript läuft am Ende von
+`tools/build_data.py` automatisch mit, einzeln geht es so:
 
 ```sh
 python3 tools/build_times.py

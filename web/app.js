@@ -826,7 +826,7 @@ class HomeScreen extends Screen {
     checkbox(app, c, 24 * s, h - 22 * s, "Zeige ICE-Umstiege", app.showIce(),
       () => this.toggle("show_ice", app.showIce()));
 
-    c.text(w - 24 * s, h - 22 * s, "Fahrplandaten: VBB (CC BY 4.0)", app.font(11), MUTED, "e");
+    c.text(w - 24 * s, h - 22 * s, "Fahrplandaten: DELFI e.V. (gtfs.de), VBB – CC BY 4.0", app.font(11), MUTED, "e");
   }
 
   toggle(setting, current) {
